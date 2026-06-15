@@ -1,0 +1,325 @@
+'use client'
+
+import { useState, useCallback } from 'react'
+import {
+  detectFileType,
+  estimateFacility,
+  parseFileToRows,
+  parseXlsx,
+  parseRateSheet,
+  transformByType,
+} from '@/lib/etl'
+import type { DetectionResult, UploadPayload, UploadResult } from '@/lib/etl'
+import { supabase } from '@/lib/supabase/client'
+
+interface FileEntry {
+  file: File
+  detection: DetectionResult | null
+  facility: string | null
+  status: 'pending' | 'processing' | 'done' | 'error'
+  result?: UploadResult
+  error?: string
+}
+
+export default function UploadPage() {
+  const [files, setFiles] = useState<FileEntry[]>([])
+  const [facilityList, setFacilityList] = useState<
+    { facility: string; name: string; short_name: string | null; rooms_json: unknown }[]
+  >([])
+  const [uploading, setUploading] = useState(false)
+  const [globalFacility, setGlobalFacility] = useState<string>('')
+
+  const loadFacilities = useCallback(async () => {
+    const { data } = await supabase
+      .from('dim_facility')
+      .select('facility, name, short_name, rooms_json')
+      .order('facility')
+    if (data) setFacilityList(data)
+    return data ?? []
+  }, [])
+
+  const handleDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault()
+      let facilities = facilityList
+      if (facilities.length === 0) {
+        facilities = await loadFacilities()
+      }
+
+      const droppedFiles = Array.from(e.dataTransfer.files)
+      const entries: FileEntry[] = droppedFiles.map((file) => {
+        const detection = detectFileType(file.name)
+        const facility = detection
+          ? (estimateFacility(file.name, facilities) ?? globalFacility) || null
+          : null
+        return { file, detection, facility, status: 'pending' as const }
+      })
+
+      setFiles((prev) => [...prev, ...entries])
+    },
+    [facilityList, globalFacility, loadFacilities]
+  )
+
+  const handleFileInput = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files) return
+      let facilities = facilityList
+      if (facilities.length === 0) {
+        facilities = await loadFacilities()
+      }
+
+      const selectedFiles = Array.from(e.target.files)
+      const entries: FileEntry[] = selectedFiles.map((file) => {
+        const detection = detectFileType(file.name)
+        const facility = detection
+          ? (estimateFacility(file.name, facilities) ?? globalFacility) || null
+          : null
+        return { file, detection, facility, status: 'pending' as const }
+      })
+
+      setFiles((prev) => [...prev, ...entries])
+      e.target.value = ''
+    },
+    [facilityList, globalFacility, loadFacilities]
+  )
+
+  const setFileFacility = (index: number, facility: string) => {
+    setFiles((prev) =>
+      prev.map((f, i) => (i === index ? { ...f, facility } : f))
+    )
+  }
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  const executeUpload = async () => {
+    setUploading(true)
+    const payloads: UploadPayload[] = []
+    const fileIndexMap: number[] = []
+
+    // Mark all as processing
+    setFiles((prev) => prev.map((f) => (f.status === 'pending' ? { ...f, status: 'processing' as const } : f)))
+
+    for (let i = 0; i < files.length; i++) {
+      const entry = files[i]
+      if (entry.status !== 'pending' && entry.status !== 'processing') continue
+      if (!entry.detection || !entry.facility) {
+        setFiles((prev) =>
+          prev.map((f, idx) =>
+            idx === i ? { ...f, status: 'error', error: '施設またはファイル種別が未設定' } : f
+          )
+        )
+        continue
+      }
+
+      try {
+        const buffer = await entry.file.arrayBuffer()
+
+        if (entry.detection.type === 'rate_sheet') {
+          const workbook = parseXlsx(buffer)
+          const facilityData = facilityList.find((f) => f.facility === entry.facility)
+          const rooms = Array.isArray(facilityData?.rooms_json)
+            ? (facilityData.rooms_json as { name: string }[])
+            : []
+          const payload = parseRateSheet(workbook, entry.facility, rooms)
+          payloads.push(payload)
+          fileIndexMap.push(i)
+        } else {
+          const rows = parseFileToRows(buffer, entry.file.name)
+          const payload = transformByType(
+            entry.detection.type,
+            rows,
+            entry.facility,
+            entry.file.name
+          )
+          payloads.push(payload)
+          fileIndexMap.push(i)
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        setFiles((prev) =>
+          prev.map((f, idx) => (idx === i ? { ...f, status: 'error', error: message } : f))
+        )
+      }
+    }
+
+    if (payloads.length > 0) {
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payloads }),
+        })
+        const json = await res.json()
+
+        if (json.results) {
+          const results = json.results as UploadResult[]
+          setFiles((prev) =>
+            prev.map((f, idx) => {
+              const payloadIdx = fileIndexMap.indexOf(idx)
+              if (payloadIdx < 0) return f
+              const result = results[payloadIdx]
+              if (!result) return f
+              return {
+                ...f,
+                status: result.error ? 'error' : 'done',
+                result,
+                error: result.error,
+              } as FileEntry
+            })
+          )
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        setFiles((prev) =>
+          prev.map((f) =>
+            f.status === 'processing' ? { ...f, status: 'error', error: message } : f
+          )
+        )
+      }
+    }
+
+    setUploading(false)
+  }
+
+  const pendingCount = files.filter((f) => f.status === 'pending' || f.status === 'processing').length
+  const doneCount = files.filter((f) => f.status === 'done').length
+  const errorCount = files.filter((f) => f.status === 'error').length
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-6">
+      <div className="max-w-4xl mx-auto">
+        <h1 className="text-2xl font-bold text-gray-900 mb-6">データアップロード</h1>
+
+        {/* Facility selector */}
+        <div className="mb-4 flex items-center gap-4">
+          <label className="text-sm font-medium text-gray-700">デフォルト施設:</label>
+          <select
+            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+            value={globalFacility}
+            onChange={(e) => setGlobalFacility(e.target.value)}
+            onFocus={() => { if (facilityList.length === 0) loadFacilities() }}
+          >
+            <option value="">選択してください</option>
+            {facilityList.map((f) => (
+              <option key={f.facility} value={f.facility}>
+                {f.name} ({f.facility})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Drop zone */}
+        <div
+          className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-blue-400 transition-colors"
+          onDragOver={(e) => e.preventDefault()}
+          onDrop={handleDrop}
+        >
+          <div className="text-gray-500 mb-4">
+            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+            </svg>
+          </div>
+          <p className="text-gray-600 mb-2">CSVファイル / Excelファイルをドラッグ＆ドロップ</p>
+          <p className="text-sm text-gray-400 mb-4">PMS 4本 + Lincoln 2本 + レート表 1本</p>
+          <label className="cursor-pointer inline-block px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">
+            ファイルを選択
+            <input type="file" className="hidden" multiple accept=".csv,.xlsx" onChange={handleFileInput} />
+          </label>
+        </div>
+
+        {/* File list */}
+        {files.length > 0 && (
+          <div className="mt-6">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-lg font-semibold text-gray-800">
+                ファイル一覧 ({files.length}件)
+              </h2>
+              <div className="flex gap-3 text-sm">
+                {doneCount > 0 && <span className="text-green-600">{doneCount}件 完了</span>}
+                {errorCount > 0 && <span className="text-red-600">{errorCount}件 エラー</span>}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {files.map((entry, idx) => (
+                <div
+                  key={idx}
+                  className={`border rounded-lg p-3 flex items-center gap-3 ${
+                    entry.status === 'done'
+                      ? 'bg-green-50 border-green-200'
+                      : entry.status === 'error'
+                        ? 'bg-red-50 border-red-200'
+                        : 'bg-white border-gray-200'
+                  }`}
+                >
+                  {/* Status icon */}
+                  <div className="flex-shrink-0 w-6">
+                    {entry.status === 'done' && <span className="text-green-500">&#10003;</span>}
+                    {entry.status === 'error' && <span className="text-red-500">&#10007;</span>}
+                    {entry.status === 'processing' && (
+                      <span className="inline-block w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                    )}
+                  </div>
+
+                  {/* File info */}
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-800 truncate">{entry.file.name}</p>
+                    <div className="flex gap-2 text-xs text-gray-500 mt-0.5">
+                      <span className="px-1.5 py-0.5 bg-gray-100 rounded">
+                        {entry.detection?.type ?? '不明'}
+                      </span>
+                      {entry.result && (
+                        <span>{entry.result.inserted}件 投入</span>
+                      )}
+                      {entry.error && (
+                        <span className="text-red-500 truncate">{entry.error}</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Facility selector per file */}
+                  <select
+                    className="border border-gray-300 rounded px-2 py-1 text-xs w-28"
+                    value={entry.facility ?? ''}
+                    onChange={(e) => setFileFacility(idx, e.target.value)}
+                    disabled={entry.status === 'done' || entry.status === 'processing'}
+                  >
+                    <option value="">施設</option>
+                    {facilityList.map((f) => (
+                      <option key={f.facility} value={f.facility}>
+                        {f.short_name ?? f.facility}
+                      </option>
+                    ))}
+                  </select>
+
+                  {/* Remove button */}
+                  {entry.status === 'pending' && (
+                    <button
+                      className="text-gray-400 hover:text-red-500 text-sm"
+                      onClick={() => removeFile(idx)}
+                    >
+                      &#10005;
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Upload button */}
+            {pendingCount > 0 && (
+              <button
+                className="mt-4 w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
+                onClick={executeUpload}
+                disabled={uploading || pendingCount === 0}
+              >
+                {uploading ? '処理中...' : `${pendingCount}件をアップロード`}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

@@ -1,0 +1,119 @@
+export type FileType =
+  | 'staysee_reservation'
+  | 'staysee_basic'
+  | 'staysee_other'
+  | 'staysee_payment'
+  | 'lincoln'
+  | 'rate_sheet'
+
+export type LincolnSubType = 'lincoln_ci' | 'lincoln_rcv'
+
+export interface DetectionResult {
+  type: FileType
+  fileName: string
+  facility?: string
+}
+
+export interface RawReservation {
+  facility: string
+  pms_id: number
+  booking_no: string | null
+  status: string
+  channel: string | null
+  checkin: string
+  checkout: string | null
+  nights: number
+  guests_total: number
+  adults: number
+  children: number
+  revenue_settled: number
+  room_raw: string | null
+  room_parsed: string | null
+  room_count: number
+  prefecture: string | null
+  plan: string | null
+  booking_date: string | null
+  source_month: string | null
+}
+
+export interface RawBasicProduct {
+  facility: string
+  pms_id: number
+  status: string | null
+  product_name: string | null
+  unit_price: number
+  quantity: number
+  dinner: string | null
+  breakfast: string | null
+  meal_type: string | null
+  source_month: string | null
+}
+
+export interface RawOtherProduct {
+  facility: string
+  pms_id: number
+  status: string | null
+  item_name: string | null
+  unit_price: number
+  quantity: number
+  total: number
+  category: string | null
+  source_month: string | null
+}
+
+export interface RawPayment {
+  facility: string
+  pms_id: number
+  payment_method: string | null
+  amount: number
+  source_month: string | null
+}
+
+export interface RawBookingEvent {
+  facility: string
+  notify_no: number
+  event_type: string
+  booking_no: string | null
+  channel: string | null
+  received_at: string | null
+  checkin: string
+  checkout: string | null
+  nights: number
+  guests_total: number
+  rooms: number
+  amount_gross: number
+  plan: string | null
+  address: string | null
+  meal_condition: string | null
+  source_csv: string | null
+}
+
+export interface RawRateSnapshot {
+  facility: string
+  snapshot_date: string
+  stay_date: string
+  dow: string | null
+  scope: string
+  room: string | null
+  rate_rank: number | null
+  remaining: number | null
+  sold: number | null
+  flag_lastmin: boolean
+  flag_sudomari: boolean
+  flag_breakfast: boolean
+  flag_2mei_cut: boolean
+  flag_card: boolean
+}
+
+export interface UploadPayload {
+  table: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  data: any[]
+  sourceMonth?: string
+}
+
+export interface UploadResult {
+  table: string
+  inserted: number
+  error?: string
+}
