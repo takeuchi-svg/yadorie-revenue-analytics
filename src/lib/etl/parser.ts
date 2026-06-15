@@ -53,10 +53,16 @@ export function parseDate(v: unknown): string | null {
   const s = String(v).trim()
   if (!s) return null
 
-  // YYYY/MM/DD or YYYY-MM-DD
+  // YYYY/MM/DD or YYYY-MM-DD (with optional time)
   const m = s.match(/(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})/)
   if (m) {
     return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
+  }
+
+  // YYYYMMDD (Lincoln format)
+  const m2 = s.match(/^(\d{4})(\d{2})(\d{2})$/)
+  if (m2) {
+    return `${m2[1]}-${m2[2]}-${m2[3]}`
   }
 
   return null

@@ -36,27 +36,27 @@ export function transformReservation(
       const pmsId = parseInt10(findCol(r, '予約ID', '予約No', 'ID'))
       if (!pmsId) return null
 
-      const checkin = parseDate(findCol(r, 'チェックイン日', 'チェックイン', 'CI日', 'CI'))
+      const checkin = parseDate(findCol(r, 'チェックイン日', 'チェックイン', 'CI日', 'CI', '開始日付'))
       if (!checkin) return null
 
       return {
         facility,
         pms_id: pmsId,
         booking_no: findCol(r, '連携番号', '予約番号', 'Lincoln番号') || null,
-        status: findCol(r, 'ステータス', '状態') || 'C/O',
-        channel: findCol(r, '予約経路', 'OTA', 'チャネル', '経路') || null,
+        status: findCol(r, 'ステータス', '状態', '予約状態') || 'C/O',
+        channel: findCol(r, '予約経路', 'OTA', 'チャネル', '経路', '経由') || null,
         checkin,
-        checkout: parseDate(findCol(r, 'チェックアウト日', 'チェックアウト', 'CO日', 'CO')),
+        checkout: parseDate(findCol(r, 'チェックアウト日', 'チェックアウト', 'CO日', 'CO', '終了日付')),
         nights: parseInt10(findCol(r, '泊数', '宿泊数')),
         guests_total: parseInt10(findCol(r, '合計人数', '人数', '利用人数')),
         adults: parseInt10(findCol(r, '大人', '大人人数')),
         children: parseInt10(findCol(r, '子供', '子供人数', '小人')),
-        revenue_settled: parseInt10(findCol(r, '精算額', '売上', '合計金額', '請求額')),
+        revenue_settled: parseInt10(findCol(r, '精算額', '売上', '合計金額', '請求額', '請求金額')),
         room_raw: findCol(r, '客室', '部屋', '部屋名', '客室名') || null,
         room_parsed: parseRoomName(findCol(r, '客室', '部屋', '部屋名', '客室名')),
         room_count: parseInt10(findCol(r, '部屋数', '室数')) || 1,
         prefecture: findCol(r, '都道府県', '発信地', '居住地', '住所') || null,
-        plan: findCol(r, 'プラン', 'プラン名') || null,
+        plan: findCol(r, 'プラン', 'プラン名', '企画名') || null,
         booking_date: parseDate(findCol(r, '予約日', '予約受付日')),
         source_month: sourceMonth,
       }
@@ -228,19 +228,19 @@ export function transformLincoln(
         facility,
         notify_no: notifyNo,
         event_type: findCol(r, '通知種別', '種別', '区分') || '予約',
-        booking_no: findCol(r, '予約番号', '連携番号') || null,
-        channel: findCol(r, '予約経路', 'サイト名', 'サイト', 'OTA', 'チャネル') || null,
-        received_at: parseDate(findCol(r, '受信日', '受信日時', '通知日')),
+        booking_no: findCol(r, '販売先予約番号', '予約番号', '連携番号') || null,
+        channel: findCol(r, '販売先名', '予約経路', 'サイト名', 'サイト', 'OTA', 'チャネル') || null,
+        received_at: parseDate(findCol(r, '予約受信日', '受信日', '受信日時', '通知日')),
         checkin,
         checkout: parseDate(findCol(r, 'チェックアウト日', 'チェックアウト', 'CO日', 'CO')),
         nights: parseInt10(findCol(r, '泊数', '宿泊数')) || 1,
-        guests_total: parseInt10(findCol(r, '人数', '合計人数', '利用人数')),
-        rooms: parseInt10(findCol(r, '室数', '部屋数')) || 1,
-        amount_gross: parseInt10(findCol(r, '金額', '合計金額', '宿泊料金', '総額')),
-        plan: findCol(r, 'プラン', 'プラン名') || null,
-        address: findCol(r, '住所', '都道府県') || null,
-        meal_condition: findCol(r, '食事条件', '食事') || null,
-        source_csv: null, // set after subtype detection
+        guests_total: parseInt10(findCol(r, 'お客様総合計人数', '人数', '合計人数', '利用人数')),
+        rooms: parseInt10(findCol(r, '利用客室合計数', '室数', '部屋数')) || 1,
+        amount_gross: parseInt10(findCol(r, '合計宿泊料金(総額)', '金額', '合計金額', '宿泊料金', '総額')),
+        plan: findCol(r, 'プラン名', 'プラン') || null,
+        address: findCol(r, '団体または代表者住所', '住所', '都道府県') || null,
+        meal_condition: findCol(r, '泊食条件', '食事条件', '食事') || null,
+        source_csv: null,
       }
     })
     .filter((r): r is NonNullable<typeof r> => r !== null)

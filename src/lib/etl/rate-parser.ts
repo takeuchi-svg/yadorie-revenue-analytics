@@ -40,16 +40,15 @@ function parseSheet(
 ): RawRateSnapshot[] {
   const range = XLSX.utils.decode_range(sheet['!ref'] || 'A1')
   const results: RawRateSnapshot[] = []
+  const year = parseInt(snapshotDate.slice(0, 4), 10)
 
-  // Find date columns (row where C column onwards have parseable dates)
-  const dateRow = findDateRow(sheet, range)
+  const dateRow = findDateRow(sheet, range, year)
   if (dateRow < 0) return results
 
-  const dateCols = extractDateColumns(sheet, dateRow, range)
+  const dateCols = extractDateColumns(sheet, dateRow, range, year)
   if (dateCols.length === 0) return results
 
-  // Find anchor rows by searching B column
-  const anchors = findAnchors(sheet, range)
+  const anchors = findAnchors(sheet, range, snapshotDate)
 
   // Parse total-level data
   if (anchors.rateRank >= 0) {
@@ -127,11 +126,12 @@ function parseSheet(
 // Anchor search helpers
 // ============================================================
 
-function findDateRow(sheet: XLSX.WorkSheet, range: XLSX.Range): number {
-  // Search rows 0-10 for a row where column C onwards has dates
-  for (let r = 0; r <= Math.min(10, range.e.r); r++) {
-    const val = getCellValue(sheet, r, 2) // C column
-    if (val !== null && tryParseDate(val) !== null) return r
+function findDateRow(sheet: XLSX.WorkSheet, range: XLSX.Range, year: number): number {
+  for (let r = 0; r <= Math.min(30, range.e.r); r++) {
+    for (let c = 2; c <= Math.min(10, range.e.c); c++) {
+      const val = getCellValue(sheet, r, c)
+      if (val !== null && tryParseDate(val, year) !== null) return r
+    }
   }
   return -1
 }
@@ -139,12 +139,13 @@ function findDateRow(sheet: XLSX.WorkSheet, range: XLSX.Range): number {
 function extractDateColumns(
   sheet: XLSX.WorkSheet,
   row: number,
-  range: XLSX.Range
+  range: XLSX.Range,
+  year: number
 ): { col: number; date: string }[] {
   const cols: { col: number; date: string }[] = []
   for (let c = 2; c <= range.e.c; c++) {
     const val = getCellValue(sheet, row, c)
-    const date = tryParseDate(val)
+    const date = tryParseDate(val, year)
     if (date) {
       cols.push({ col: c, date })
     }
@@ -152,17 +153,41 @@ function extractDateColumns(
   return cols
 }
 
-function findAnchors(sheet: XLSX.WorkSheet, range: XLSX.Range) {
+function findAnchors(sheet: XLSX.WorkSheet, range: XLSX.Range, snapshotDate: string) {
   const result = { rateRank: -1, remaining: -1, sold: -1 }
+  let rateStart = -1, remainStart = -1, soldStart = -1
 
   for (let r = 0; r <= range.e.r; r++) {
-    const val = String(getCellValue(sheet, r, 1) ?? '').trim() // B column
-    if (val.startsWith('料金ランク')) result.rateRank = r
-    else if (val.startsWith('総残室数') || val.startsWith('残室数')) result.remaining = r
-    else if (val.startsWith('総販売数') || val.startsWith('販売数')) result.sold = r
+    const val = String(getCellValue(sheet, r, 1) ?? '').trim()
+    if (val.startsWith('料金ランク')) rateStart = r
+    else if (val.startsWith('総残室数') || val.startsWith('残室数')) remainStart = r
+    else if (val.startsWith('総販売数') || val.startsWith('販売数')) soldStart = r
   }
 
+  result.rateRank = findSnapshotSubRow(sheet, rateStart, snapshotDate)
+  result.remaining = findSnapshotSubRow(sheet, remainStart, snapshotDate)
+  result.sold = findSnapshotSubRow(sheet, soldStart, snapshotDate)
+
   return result
+}
+
+function findSnapshotSubRow(sheet: XLSX.WorkSheet, startRow: number, snapshotDate: string): number {
+  if (startRow < 0) return -1
+  // Each anchor has multiple sub-rows with snapshot dates in column C.
+  // Find the sub-row matching snapshotDate, or use the last one.
+  let lastDataRow = startRow
+  for (let r = startRow; r <= startRow + 10; r++) {
+    const cVal = String(getCellValue(sheet, r, 2) ?? '').trim()
+    if (!cVal) continue
+    // Check if this sub-row's date matches the snapshot
+    const parsed = cVal.match(/(\d{4})[/\-](\d{1,2})[/\-](\d{1,2})/)
+    if (parsed) {
+      const rowDate = `${parsed[1]}-${parsed[2].padStart(2, '0')}-${parsed[3].padStart(2, '0')}`
+      lastDataRow = r
+      if (rowDate === snapshotDate) return r
+    }
+  }
+  return lastDataRow
 }
 
 function findFlagRows(sheet: XLSX.WorkSheet, range: XLSX.Range) {
@@ -199,11 +224,10 @@ function getCellValue(sheet: XLSX.WorkSheet, row: number, col: number): unknown 
   return cell.v ?? null
 }
 
-function tryParseDate(val: unknown): string | null {
+function tryParseDate(val: unknown, year?: number): string | null {
   if (val === null || val === undefined) return null
 
   if (typeof val === 'number') {
-    // Excel serial date
     const d = excelDateToISO(val)
     if (d) return d
   }
@@ -214,13 +238,12 @@ function tryParseDate(val: unknown): string | null {
     return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`
   }
 
-  // M/D format (when year is implied from snapshot date context)
+  // M/D format — use year from sheet name
   const m2 = s.match(/^(\d{1,2})[/](\d{1,2})$/)
-  if (m2) {
-    const now = new Date()
+  if (m2 && year) {
     const month = m2[1].padStart(2, '0')
     const day = m2[2].padStart(2, '0')
-    return `${now.getFullYear()}-${month}-${day}`
+    return `${year}-${month}-${day}`
   }
 
   return null
