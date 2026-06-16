@@ -158,39 +158,61 @@ export default function UploadPage() {
     }
 
     if (payloads.length > 0) {
-      try {
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ payloads }),
-        })
-        const json = await res.json()
-
-        if (json.results) {
-          const results = json.results as UploadResult[]
-          setFiles((prev) =>
-            prev.map((f, idx) => {
-              const payloadIdx = fileIndexMap.indexOf(idx)
-              if (payloadIdx < 0) return f
-              const result = results[payloadIdx]
-              if (!result) return f
-              return {
-                ...f,
-                status: result.error ? 'error' : 'done',
-                result,
-                error: result.error,
-              } as FileEntry
-            })
-          )
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.status === 'processing' ? { ...f, status: 'error', error: message } : f
-          )
-        )
+      const BATCH_SIZE = 500
+      const UPSERT_KEYS: Record<string, string> = {
+        raw_reservation: 'facility,pms_id',
+        raw_booking_event: 'facility,notify_no',
       }
+
+      const results: UploadResult[] = []
+
+      for (const payload of payloads) {
+        const { table, data } = payload
+        if (!data || data.length === 0) {
+          results.push({ table, inserted: 0, error: 'No data' })
+          continue
+        }
+        try {
+          let totalInserted = 0
+          const onConflict = UPSERT_KEYS[table] || ''
+
+          for (let i = 0; i < data.length; i += BATCH_SIZE) {
+            const batch = data.slice(i, i + BATCH_SIZE)
+            if (onConflict) {
+              const { error, count } = await supabase
+                .from(table)
+                .upsert(batch, { onConflict, ignoreDuplicates: false, count: 'exact' })
+              if (error) throw error
+              totalInserted += count ?? batch.length
+            } else {
+              const { error, count } = await supabase
+                .from(table)
+                .insert(batch, { count: 'exact' })
+              if (error) throw error
+              totalInserted += count ?? batch.length
+            }
+          }
+          results.push({ table, inserted: totalInserted })
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          results.push({ table, inserted: 0, error: message })
+        }
+      }
+
+      setFiles((prev) =>
+        prev.map((f, idx) => {
+          const payloadIdx = fileIndexMap.indexOf(idx)
+          if (payloadIdx < 0) return f
+          const result = results[payloadIdx]
+          if (!result) return f
+          return {
+            ...f,
+            status: result.error ? 'error' : 'done',
+            result,
+            error: result.error,
+          } as FileEntry
+        })
+      )
     }
 
     setUploading(false)
