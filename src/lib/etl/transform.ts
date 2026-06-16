@@ -245,16 +245,23 @@ export function transformLincoln(
     })
     .filter((r): r is NonNullable<typeof r> => r !== null)
 
+  // Deduplicate by notify_no (keep last occurrence)
+  const deduped = new Map<number, RawBookingEvent>()
+  for (const d of data) {
+    deduped.set(d.notify_no, d)
+  }
+  const uniqueData = Array.from(deduped.values())
+
   // Detect lincoln subtype: CI-based vs received-date-based
-  const subType = detectLincolnSubType(data)
+  const subType = detectLincolnSubType(uniqueData)
   const csvLabel = subType === 'lincoln_ci'
     ? `lincoln_ci_${sourceMonth ?? 'unknown'}`
     : `lincoln_rcv_${sourceMonth ?? 'unknown'}`
-  for (const d of data) {
+  for (const d of uniqueData) {
     d.source_csv = csvLabel
   }
 
-  return { table: 'raw_booking_event', data: data as RawBookingEvent[], sourceMonth: sourceMonth ?? undefined }
+  return { table: 'raw_booking_event', data: uniqueData as RawBookingEvent[], sourceMonth: sourceMonth ?? undefined }
 }
 
 export function detectLincolnSubType(events: RawBookingEvent[]): LincolnSubType {
