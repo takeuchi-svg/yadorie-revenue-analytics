@@ -24,6 +24,19 @@ const FacilityContext = createContext<FacilityContextType>({
   currentFacility: null,
 })
 
+const COOKIE_KEY = 'currentFacility'
+
+function readFacilityCookie(): string | null {
+  if (typeof document === 'undefined') return null
+  const match = document.cookie.match(/(?:^|;\s*)currentFacility=([^;]+)/)
+  return match ? decodeURIComponent(match[1]) : null
+}
+
+function writeFacilityCookie(code: string) {
+  if (typeof document === 'undefined') return
+  document.cookie = `${COOKIE_KEY}=${encodeURIComponent(code)}; path=/; max-age=31536000; samesite=lax`
+}
+
 export function FacilityProvider({ children }: { children: ReactNode }) {
   const [facilities, setFacilities] = useState<Facility[]>([])
   const [current, setCurrent] = useState<string>('')
@@ -36,7 +49,7 @@ export function FacilityProvider({ children }: { children: ReactNode }) {
       .then(({ data }) => {
         if (data && data.length > 0) {
           setFacilities(data)
-          const saved = localStorage.getItem('currentFacility')
+          const saved = readFacilityCookie()
           const valid = data.find((f) => f.facility === saved)
           setCurrent(valid ? saved! : data[0].facility)
         }
@@ -45,7 +58,7 @@ export function FacilityProvider({ children }: { children: ReactNode }) {
 
   const handleSetCurrent = (code: string) => {
     setCurrent(code)
-    localStorage.setItem('currentFacility', code)
+    writeFacilityCookie(code)
   }
 
   const currentFacility = facilities.find((f) => f.facility === current) ?? null

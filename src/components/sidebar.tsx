@@ -1,16 +1,35 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
 
-const NAV_ITEMS = [
-  { href: '/', label: 'Overview', icon: '📊' },
-  { href: '/revenue', label: 'Revenue', icon: '💰' },
-  { href: '/upload', label: 'Upload', icon: '📤' },
-  { href: '/settings', label: 'Settings', icon: '⚙️' },
+const NAV_GROUPS: { group: string; items: { href: string; label: string }[] }[] = [
+  {
+    group: 'VIEWS',
+    items: [
+      { href: '/', label: 'Overview' },
+      { href: '/revenue', label: 'Revenue' },
+      { href: '/onhand', label: 'On-hand' },
+    ],
+  },
+  {
+    group: 'ANALYSIS',
+    items: [
+      { href: '/rate', label: 'Rate' },
+      { href: '/cancel', label: 'Cancel' },
+      { href: '/fb', label: 'F&B' },
+      { href: '/ota', label: 'OTA' },
+    ],
+  },
+  {
+    group: 'TOOLS',
+    items: [
+      { href: '/upload', label: 'Upload' },
+      { href: '/settings', label: 'Settings' },
+    ],
+  },
 ]
 
 export default function Sidebar() {
@@ -25,36 +44,60 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="w-56 bg-gray-900 text-white flex flex-col min-h-screen">
-      <div className="p-4 border-b border-gray-700">
-        <h1 className="text-lg font-bold">売上分析BI</h1>
+    <aside
+      className="flex flex-col min-h-screen shrink-0"
+      style={{ width: 220, background: 'var(--surface)', borderRight: '1px solid var(--border)' }}
+    >
+      {/* Logo */}
+      <div className="px-5 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div className="text-lg font-bold tracking-wide" style={{ color: 'var(--text)' }}>
+          YADORIE
+        </div>
+        <div className="text-xs" style={{ color: 'var(--text-dim)' }}>
+          Revenue Analytics
+        </div>
       </div>
 
-      <nav className="flex-1 p-3 space-y-1">
-        {NAV_ITEMS.map((item) => {
-          const active = pathname === item.href
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm ${
-                active
-                  ? 'bg-gray-700 text-white'
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-              }`}
+      {/* Nav */}
+      <nav className="flex-1 px-3 py-4 space-y-5 overflow-y-auto">
+        {NAV_GROUPS.map((g) => (
+          <div key={g.group}>
+            <div
+              className="px-2 mb-1 text-[10px] font-semibold tracking-widest"
+              style={{ color: 'var(--text-dim)' }}
             >
-              <span>{item.icon}</span>
-              {item.label}
-            </Link>
-          )
-        })}
+              {g.group}
+            </div>
+            <div className="space-y-0.5">
+              {g.items.map((item) => {
+                const active = pathname === item.href
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors"
+                    style={{
+                      background: active ? 'var(--accent)' : 'transparent',
+                      color: active ? '#fff' : 'var(--text-dim)',
+                    }}
+                  >
+                    {item.label}
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
-      <div className="p-3 border-t border-gray-700 space-y-3">
+      {/* Facility selector + logout */}
+      <div className="p-3 space-y-3" style={{ borderTop: '1px solid var(--border)' }}>
         <div>
-          <label className="block text-xs text-gray-400 mb-1">施設</label>
+          <label className="block text-[10px] mb-1 tracking-wide" style={{ color: 'var(--text-dim)' }}>
+            施設
+          </label>
           <select
-            className="w-full bg-gray-800 border border-gray-600 rounded px-2 py-1.5 text-sm"
+            className="field w-full px-2 py-1.5 text-sm"
             value={current}
             onChange={(e) => setCurrent(e.target.value)}
           >
@@ -68,7 +111,8 @@ export default function Sidebar() {
 
         <button
           onClick={handleLogout}
-          className="w-full text-left text-xs text-gray-400 hover:text-white px-2 py-1"
+          className="w-full text-left text-xs px-2 py-1 hover:opacity-80"
+          style={{ color: 'var(--text-dim)' }}
         >
           ログアウト
         </button>

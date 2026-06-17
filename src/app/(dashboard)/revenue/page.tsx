@@ -63,11 +63,11 @@ export default function RevenuePage() {
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Revenue</h1>
-          <p className="text-sm text-gray-500">{currentFacility?.name ?? current}</p>
+          <h1 className="text-2xl font-bold">Revenue</h1>
+          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current}</p>
         </div>
         <select
-          className="border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+          className="field px-3 py-1.5 text-sm"
           value={selectedMonth}
           onChange={(e) => setSelectedMonth(e.target.value)}
         >
@@ -78,16 +78,16 @@ export default function RevenuePage() {
       </div>
 
       {loading ? (
-        <p className="text-gray-400">読み込み中...</p>
+        <p style={{ color: 'var(--text-dim)' }}>読み込み中...</p>
       ) : channels.length === 0 ? (
-        <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-6 text-center">
-          <p className="text-yellow-700 font-medium">データ未登録</p>
+        <div className="card p-6 text-center" style={{ borderColor: 'var(--yellow)' }}>
+          <p className="font-medium" style={{ color: 'var(--yellow)' }}>データ未登録</p>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-x-auto">
+        <div className="card overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-gray-50 border-b text-left text-gray-600">
+              <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-left">
                 <th className="px-4 py-3">チャネル</th>
                 <th className="px-4 py-3 text-right">売上</th>
                 <th className="px-4 py-3 text-right">構成比</th>
@@ -99,10 +99,10 @@ export default function RevenuePage() {
             </thead>
             <tbody>
               {channels.map((row, i) => (
-                <tr key={i} className="border-b hover:bg-gray-50">
+                <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
                   <td className="px-4 py-2 font-medium">{row.channel ?? '不明'}</td>
                   <td className="px-4 py-2 text-right">{fmt(row.revenue)}</td>
-                  <td className="px-4 py-2 text-right text-gray-400">
+                  <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>
                     {totalRevenue > 0
                       ? ((((row.revenue ?? 0) / totalRevenue) * 100).toFixed(1) + '%')
                       : '-'}

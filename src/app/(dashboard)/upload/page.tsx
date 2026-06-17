@@ -242,15 +242,15 @@ export default function UploadPage() {
   const errorCount = files.filter((f) => f.status === 'error').length
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
+    <div className="min-h-screen p-6" style={{ background: 'var(--bg)' }}>
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-2xl font-bold text-gray-900 mb-6">データアップロード</h1>
+        <h1 className="text-2xl font-bold mb-6">データアップロード</h1>
 
         {/* Facility selector */}
         <div className="mb-4 flex items-center gap-4">
-          <label className="text-sm font-medium text-gray-700">デフォルト施設:</label>
+          <label className="text-sm font-medium" style={{ color: 'var(--text-dim)' }}>デフォルト施設:</label>
           <select
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+            className="field px-3 py-1.5 text-sm"
             value={globalFacility}
             onChange={(e) => setGlobalFacility(e.target.value)}
             onFocus={() => { if (facilityList.length === 0) loadFacilities() }}
@@ -266,18 +266,19 @@ export default function UploadPage() {
 
         {/* Drop zone */}
         <div
-          className="border-2 border-dashed border-gray-300 rounded-lg p-12 text-center hover:border-blue-400 transition-colors"
+          className="border-2 border-dashed rounded-lg p-12 text-center transition-colors card"
+          style={{ borderColor: 'var(--border)' }}
           onDragOver={(e) => e.preventDefault()}
           onDrop={handleDrop}
         >
-          <div className="text-gray-500 mb-4">
-            <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <div className="mb-4" style={{ color: 'var(--text-dim)' }}>
+            <svg className="mx-auto h-12 w-12" style={{ color: 'var(--text-dim)' }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
           </div>
-          <p className="text-gray-600 mb-2">CSVファイル / Excelファイルをドラッグ＆ドロップ</p>
-          <p className="text-sm text-gray-400 mb-4">PMS 4本 + Lincoln 2本 + レート表 1本</p>
-          <label className="cursor-pointer inline-block px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700">
+          <p className="mb-2">CSVファイル / Excelファイルをドラッグ＆ドロップ</p>
+          <p className="text-sm mb-4" style={{ color: 'var(--text-dim)' }}>PMS 5本 + Lincoln 2本 + レート表 1本</p>
+          <label className="cursor-pointer inline-block px-4 py-2 text-white rounded-md text-sm hover:opacity-90" style={{ background: 'var(--accent)' }}>
             ファイルを選択
             <input type="file" className="hidden" multiple accept=".csv,.xlsx" onChange={handleFileInput} />
           </label>
@@ -287,12 +288,12 @@ export default function UploadPage() {
         {files.length > 0 && (
           <div className="mt-6">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-semibold text-gray-800">
+              <h2 className="text-lg font-semibold">
                 ファイル一覧 ({files.length}件)
               </h2>
               <div className="flex gap-3 text-sm">
-                {doneCount > 0 && <span className="text-green-600">{doneCount}件 完了</span>}
-                {errorCount > 0 && <span className="text-red-600">{errorCount}件 エラー</span>}
+                {doneCount > 0 && <span style={{ color: 'var(--green)' }}>{doneCount}件 完了</span>}
+                {errorCount > 0 && <span style={{ color: 'var(--red)' }}>{errorCount}件 エラー</span>}
               </div>
             </div>
 
@@ -302,10 +303,10 @@ export default function UploadPage() {
                   key={idx}
                   className={`border rounded-lg p-3 flex items-center gap-3 ${
                     entry.status === 'done'
-                      ? 'bg-green-50 border-green-200'
+                      ? 'bg-green-500/10 border-green-500/40'
                       : entry.status === 'error'
-                        ? 'bg-red-50 border-red-200'
-                        : 'bg-white border-gray-200'
+                        ? 'bg-red-500/10 border-red-500/40'
+                        : 'bg-[var(--surface)] border-[var(--border)]'
                   }`}
                 >
                   {/* Status icon */}
@@ -319,23 +320,23 @@ export default function UploadPage() {
 
                   {/* File info */}
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-800 truncate">{entry.file.name}</p>
-                    <div className="flex gap-2 text-xs text-gray-500 mt-0.5">
-                      <span className="px-1.5 py-0.5 bg-gray-100 rounded">
+                    <p className="text-sm font-medium truncate">{entry.file.name}</p>
+                    <div className="flex gap-2 text-xs mt-0.5" style={{ color: 'var(--text-dim)' }}>
+                      <span className="px-1.5 py-0.5 rounded" style={{ background: 'var(--surface2)' }}>
                         {entry.detection?.type ?? '不明'}
                       </span>
                       {entry.result && (
                         <span>{entry.result.inserted}件 投入</span>
                       )}
                       {entry.error && (
-                        <span className="text-red-500 truncate">{entry.error}</span>
+                        <span className="truncate" style={{ color: 'var(--red)' }}>{entry.error}</span>
                       )}
                     </div>
                   </div>
 
                   {/* Facility selector per file */}
                   <select
-                    className="border border-gray-300 rounded px-2 py-1 text-xs w-28"
+                    className="field px-2 py-1 text-xs w-28"
                     value={entry.facility ?? ''}
                     onChange={(e) => setFileFacility(idx, e.target.value)}
                     disabled={entry.status === 'done' || entry.status === 'processing'}
@@ -351,7 +352,8 @@ export default function UploadPage() {
                   {/* Remove button */}
                   {entry.status === 'pending' && (
                     <button
-                      className="text-gray-400 hover:text-red-500 text-sm"
+                      className="text-sm hover:opacity-70"
+                      style={{ color: 'var(--text-dim)' }}
                       onClick={() => removeFile(idx)}
                     >
                       &#10005;
@@ -364,7 +366,8 @@ export default function UploadPage() {
             {/* Upload button */}
             {pendingCount > 0 && (
               <button
-                className="mt-4 w-full py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50"
+                className="mt-4 w-full py-3 text-white rounded-lg font-medium hover:opacity-90 disabled:opacity-50"
+                style={{ background: 'var(--accent)' }}
                 onClick={executeUpload}
                 disabled={uploading || pendingCount === 0}
               >

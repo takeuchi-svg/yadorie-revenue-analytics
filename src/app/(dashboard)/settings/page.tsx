@@ -164,17 +164,17 @@ export default function SettingsPage() {
 
   return (
     <div className="p-6 max-w-4xl">
-      <h1 className="text-2xl font-bold text-gray-900 mb-6">Settings</h1>
+      <h1 className="text-2xl font-bold mb-6">Settings</h1>
 
       {/* Facility master */}
-      <section className="bg-white rounded-lg shadow p-6 mb-6">
+      <section className="card p-6 mb-6">
         <h2 className="text-lg font-semibold mb-4">施設マスタ: {currentFacility?.name}</h2>
         <div className="flex items-end gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">総客室数</label>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>総客室数</label>
             <input
               type="number"
-              className="border border-gray-300 rounded-md px-3 py-2 text-sm w-32"
+              className="field px-3 py-2 text-sm w-32"
               value={totalRooms}
               onChange={(e) => setTotalRooms(e.target.value === '' ? '' : Number(e.target.value))}
             />
@@ -182,7 +182,7 @@ export default function SettingsPage() {
           <button
             onClick={saveFacility}
             disabled={saving}
-            className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
+            className="px-4 py-2 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50"
           >
             保存
           </button>
@@ -190,20 +190,20 @@ export default function SettingsPage() {
       </section>
 
       {/* Budget */}
-      <section className="bg-white rounded-lg shadow p-6">
+      <section className="card p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">月別予算</h2>
           <div className="flex gap-2">
             <button
               onClick={addBudgetMonth}
-              className="px-3 py-1.5 border border-gray-300 rounded-md text-sm hover:bg-gray-50"
+              className="px-3 py-1.5 field text-sm hover:opacity-80"
             >
               + 月追加
             </button>
             <button
               onClick={saveBudgets}
               disabled={saving}
-              className="px-4 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
+              className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50"
             >
               予算保存
             </button>
@@ -211,12 +211,12 @@ export default function SettingsPage() {
         </div>
 
         {budgets.length === 0 ? (
-          <p className="text-sm text-gray-400">予算データなし。「+ 月追加」で追加してください。</p>
+          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>予算データなし。「+ 月追加」で追加してください。</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-gray-50 border-b text-left text-gray-600">
+                <tr className="bg-[var(--surface2)] text-left text-[var(--text-dim)]">
                   <th className="px-3 py-2">月</th>
                   <th className="px-3 py-2">営業日数</th>
                   <th className="px-3 py-2">供給室数</th>
@@ -227,13 +227,13 @@ export default function SettingsPage() {
               </thead>
               <tbody>
                 {budgets.map((b, idx) => (
-                  <tr key={b.month} className="border-b">
+                  <tr key={b.month} style={{ borderTop: '1px solid var(--border)' }}>
                     <td className="px-3 py-1.5 font-medium">{b.month}</td>
                     {(['operating_days', 'total_inventory', 'revenue_budget', 'rooms_budget', 'guests_budget'] as const).map((field) => (
                       <td key={field} className="px-3 py-1.5">
                         <input
                           type="number"
-                          className="border border-gray-200 rounded px-2 py-1 text-sm w-24"
+                          className="field px-2 py-1 text-sm w-24"
                           value={b[field] ?? ''}
                           onChange={(e) => updateBudget(idx, field, e.target.value)}
                         />
@@ -248,20 +248,20 @@ export default function SettingsPage() {
       </section>
 
       {/* OTA Marketing */}
-      <section className="bg-white rounded-lg shadow p-6 mt-6">
+      <section className="card p-6 mt-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold">OTAマーケティング費用</h2>
           <div className="flex items-center gap-2">
             <input
               type="month"
-              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm"
+              className="field px-3 py-1.5 text-sm"
               value={otaMonth}
               onChange={(e) => setOtaMonth(e.target.value)}
             />
             <button
               onClick={saveOta}
               disabled={saving}
-              className="px-4 py-1.5 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700 disabled:opacity-50"
+              className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50"
             >
               保存
             </button>
@@ -270,7 +270,7 @@ export default function SettingsPage() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="bg-gray-50 border-b text-left text-gray-600">
+              <tr className="bg-[var(--surface2)] text-left text-[var(--text-dim)]">
                 <th className="px-3 py-2">OTA</th>
                 {OTA_METRICS.map((m) => (
                   <th key={m.key} className="px-3 py-2">{m.label}</th>
@@ -279,7 +279,7 @@ export default function SettingsPage() {
             </thead>
             <tbody>
               {OTA_LIST.map((ota) => (
-                <tr key={ota} className="border-b">
+                <tr key={ota} style={{ borderTop: '1px solid var(--border)' }}>
                   <td className="px-3 py-1.5 font-medium whitespace-nowrap">{ota}</td>
                   {OTA_METRICS.map((m) => {
                     const row = otaData.find((r) => r.ota === ota && r.metric === m.key)
@@ -287,7 +287,7 @@ export default function SettingsPage() {
                       <td key={m.key} className="px-3 py-1.5">
                         <input
                           type="number"
-                          className="border border-gray-200 rounded px-2 py-1 text-sm w-28"
+                          className="field px-2 py-1 text-sm w-28"
                           value={row?.value ?? ''}
                           onChange={(e) => updateOta(ota, m.key, e.target.value)}
                         />
