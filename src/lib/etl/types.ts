@@ -3,6 +3,7 @@ export type FileType =
   | 'staysee_basic'
   | 'staysee_other'
   | 'staysee_payment'
+  | 'staysee_room_sales'
   | 'lincoln'
   | 'rate_sheet'
 
@@ -103,6 +104,15 @@ export interface RawRateSnapshot {
   flag_breakfast: boolean
   flag_2mei_cut: boolean
   flag_card: boolean
+}
+
+export interface RawRoomSales {
+  facility: string
+  stay_date: string
+  scope: string
+  room_type: string | null
+  sold: number
+  source_month: string | null
 }
 
 export interface UploadPayload {

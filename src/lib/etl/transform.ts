@@ -4,6 +4,7 @@ import type {
   RawOtherProduct,
   RawPayment,
   RawBookingEvent,
+  RawRoomSales,
   LincolnSubType,
   UploadPayload,
 } from './types'
@@ -282,6 +283,55 @@ export function detectLincolnSubType(events: RawBookingEvent[]): LincolnSubType 
 }
 
 // ============================================================
+// Staysee 販売数集計表 → raw_room_sales
+// ============================================================
+// Pivot table: rows = room type (+ 合計), columns = day-of-month (1..31),
+// values = rooms sold that day. Unpivot into one row per (stay_date, room_type).
+
+export function transformRoomSales(
+  rows: Record<string, string>[],
+  facility: string,
+  fileName: string
+): UploadPayload {
+  const sourceMonth = extractSourceMonth(fileName) // e.g. '2026-04'
+  if (!sourceMonth) {
+    return { table: 'raw_room_sales', data: [] }
+  }
+
+  const [yearStr, monthStr] = sourceMonth.split('-')
+  const year = parseInt(yearStr, 10)
+  const month = parseInt(monthStr, 10)
+  const daysInMonth = new Date(year, month, 0).getDate()
+
+  const data: RawRoomSales[] = []
+
+  for (const r of rows) {
+    const roomType = findCol(r, '客室タイプ', '部屋タイプ', '部屋タイプ名', 'タイプ')
+    if (!roomType || !roomType.trim()) continue
+
+    const trimmed = roomType.trim()
+    const isTotal = trimmed === '合計' || trimmed === '総計' || trimmed === '計'
+    const scope = isTotal ? 'total' : 'type'
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const raw = r[String(day)]
+      if (raw === undefined || raw === null || String(raw).trim() === '') continue
+      const stayDate = `${yearStr}-${monthStr.padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      data.push({
+        facility,
+        stay_date: stayDate,
+        scope,
+        room_type: isTotal ? null : trimmed,
+        sold: parseInt10(raw),
+        source_month: sourceMonth,
+      })
+    }
+  }
+
+  return { table: 'raw_room_sales', data: data as unknown as Record<string, unknown>[], sourceMonth }
+}
+
+// ============================================================
 // Dispatch by file type
 // ============================================================
 
@@ -300,6 +350,8 @@ export function transformByType(
       return transformOtherProduct(rows, facility, fileName)
     case 'staysee_payment':
       return transformPayment(rows, facility, fileName)
+    case 'staysee_room_sales':
+      return transformRoomSales(rows, facility, fileName)
     case 'lincoln':
       return transformLincoln(rows, facility, fileName)
     default:

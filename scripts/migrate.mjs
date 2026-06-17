@@ -137,6 +137,23 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_rs_unique
 
 CREATE INDEX IF NOT EXISTS idx_rs_facility_staydate ON raw_rate_snapshot(facility, stay_date);
 
+-- 販売数集計表（PMS確定販売室数：日別×客室タイプ）
+CREATE TABLE IF NOT EXISTS raw_room_sales (
+  id BIGSERIAL PRIMARY KEY,
+  facility TEXT NOT NULL,
+  stay_date DATE NOT NULL,
+  scope TEXT NOT NULL,            -- 'type'（客室タイプ別） or 'total'（合計）
+  room_type TEXT,                -- scope='total' のとき NULL
+  sold INTEGER NOT NULL DEFAULT 0,
+  source_month TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_room_sales_unique
+  ON raw_room_sales(facility, stay_date, scope, COALESCE(room_type, ''));
+
+CREATE INDEX IF NOT EXISTS idx_room_sales_facility_date ON raw_room_sales(facility, stay_date);
+
 -- ========================================
 -- 設定テーブル
 -- ========================================
@@ -388,6 +405,46 @@ JOIN raw_reservation r ON op.facility = r.facility AND op.pms_id = r.pms_id
 WHERE op.status = 'C/O'
 GROUP BY op.facility, TO_CHAR(r.checkin, 'YYYY-MM'), op.category;
 
+-- 確定販売室数ベースの稼働率（日別） — 正データ：販売数集計表
+CREATE OR REPLACE VIEW mart_occupancy_daily AS
+SELECT
+  rs.facility,
+  rs.stay_date AS date,
+  TO_CHAR(rs.stay_date, 'Dy') AS dow,
+  rs.sold AS rooms_sold,
+  f.total_rooms,
+  CASE WHEN f.total_rooms > 0
+    THEN ROUND(rs.sold::NUMERIC / f.total_rooms, 4) END AS occ
+FROM raw_room_sales rs
+LEFT JOIN dim_facility f ON rs.facility = f.facility
+WHERE rs.scope = 'total';
+
+-- 確定販売室数ベースの稼働率（月別）
+CREATE OR REPLACE VIEW mart_occupancy_monthly AS
+SELECT
+  rs.facility,
+  rs.source_month AS month,
+  SUM(rs.sold) AS rooms_sold,
+  COUNT(DISTINCT rs.stay_date) AS operating_days,
+  f.total_rooms,
+  CASE WHEN f.total_rooms > 0 AND COUNT(DISTINCT rs.stay_date) > 0
+    THEN ROUND(SUM(rs.sold)::NUMERIC / (f.total_rooms * COUNT(DISTINCT rs.stay_date)), 4) END AS occ
+FROM raw_room_sales rs
+LEFT JOIN dim_facility f ON rs.facility = f.facility
+WHERE rs.scope = 'total'
+GROUP BY rs.facility, rs.source_month, f.total_rooms;
+
+-- 客室タイプ別 販売室数（月別）
+CREATE OR REPLACE VIEW mart_room_sales_type_monthly AS
+SELECT
+  facility,
+  source_month AS month,
+  room_type,
+  SUM(sold) AS rooms_sold
+FROM raw_room_sales
+WHERE scope = 'type'
+GROUP BY facility, source_month, room_type;
+
 -- ========================================
 -- Row Level Security（全開放）
 -- ========================================
@@ -414,6 +471,10 @@ CREATE POLICY "allow_all_authenticated" ON raw_booking_event
 
 ALTER TABLE raw_rate_snapshot ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "allow_all_authenticated" ON raw_rate_snapshot
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+ALTER TABLE raw_room_sales ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "allow_all_authenticated" ON raw_room_sales
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 ALTER TABLE dim_facility ENABLE ROW LEVEL SECURITY;

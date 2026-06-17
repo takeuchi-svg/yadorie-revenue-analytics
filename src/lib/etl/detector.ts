@@ -1,6 +1,7 @@
 import type { FileType, DetectionResult } from './types'
 
 const DETECTION_RULES: { keyword: string; ext: string; type: FileType }[] = [
+  { keyword: '販売数集計表', ext: '.csv', type: 'staysee_room_sales' },
   { keyword: 'その他商品情報', ext: '.csv', type: 'staysee_other' },
   { keyword: '基本商品情報', ext: '.csv', type: 'staysee_basic' },
   { keyword: '予約情報', ext: '.csv', type: 'staysee_reservation' },

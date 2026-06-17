@@ -13,4 +13,5 @@ export type {
   RawPayment,
   RawBookingEvent,
   RawRateSnapshot,
+  RawRoomSales,
 } from './types'

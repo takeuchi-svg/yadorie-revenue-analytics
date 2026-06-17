@@ -177,7 +177,7 @@ export default function UploadPage() {
           const onConflict = UPSERT_KEYS[table] || ''
 
           // Tables without simple unique keys: delete existing data before insert
-          const DELETE_BEFORE_INSERT = ['raw_basic_product', 'raw_other_product', 'raw_payment', 'raw_rate_snapshot']
+          const DELETE_BEFORE_INSERT = ['raw_basic_product', 'raw_other_product', 'raw_payment', 'raw_rate_snapshot', 'raw_room_sales']
           if (DELETE_BEFORE_INSERT.includes(table) && data.length > 0) {
             const facility = (data[0] as Record<string, unknown>).facility as string
             if (table === 'raw_rate_snapshot') {
