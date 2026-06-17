@@ -176,6 +176,16 @@ export default function UploadPage() {
           let totalInserted = 0
           const onConflict = UPSERT_KEYS[table] || ''
 
+          // rate_snapshot uses COALESCE in unique index, so delete-then-insert
+          if (table === 'raw_rate_snapshot' && data.length > 0) {
+            const snapshotDates = [...new Set(data.map((r: Record<string, unknown>) => r.snapshot_date))]
+            for (const sd of snapshotDates) {
+              await supabase.from(table).delete()
+                .eq('facility', data[0].facility)
+                .eq('snapshot_date', sd)
+            }
+          }
+
           for (let i = 0; i < data.length; i += BATCH_SIZE) {
             const batch = data.slice(i, i + BATCH_SIZE)
             if (onConflict) {
