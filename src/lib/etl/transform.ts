@@ -53,8 +53,9 @@ export function transformReservation(
         adults: parseInt10(findCol(r, '大人', '大人人数')),
         children: parseInt10(findCol(r, '子供', '子供人数', '小人')),
         revenue_settled: parseInt10(findCol(r, '精算額', '売上', '合計金額', '請求額', '請求金額')),
-        room_raw: findCol(r, '客室', '部屋', '部屋名', '客室名') || null,
-        room_parsed: parseRoomName(findCol(r, '客室', '部屋', '部屋名', '客室名')),
+        room_raw: findCol(r, '部屋名', '客室', '部屋', '客室名') || null,
+        room_parsed: firstSegment(findCol(r, '部屋名', '客室', '部屋', '客室名')),
+        room_type: firstSegment(findCol(r, '部屋タイプ名', '部屋タイプ', '客室タイプ')),
         room_count: parseInt10(findCol(r, '部屋数', '室数')) || 1,
         prefecture: findCol(r, '都道府県', '発信地', '居住地', '住所') || null,
         plan: findCol(r, 'プラン', 'プラン名', '企画名') || null,
@@ -67,10 +68,11 @@ export function transformReservation(
   return { table: 'raw_reservation', data: data as RawReservation[], sourceMonth: sourceMonth ?? undefined }
 }
 
-function parseRoomName(raw: string | null): string | null {
+// 部屋名・部屋タイプ名はカンマ区切りで複数（客室+ダイニング等）が入るため、最初の区分のみ採用
+function firstSegment(raw: string | null): string | null {
   if (!raw) return null
-  // Remove room number suffixes like "101", keep room type name
-  return raw.replace(/\s*[\d]+$/, '').trim() || raw.trim()
+  const first = raw.split(/[,，]/)[0].trim()
+  return first || null
 }
 
 // ============================================================
@@ -91,17 +93,18 @@ export function transformBasicProduct(
 
       const dinner = findCol(r, '夕食', '夕食内容') || null
       const breakfast = findCol(r, '朝食', '朝食内容') || null
+      const productName = findCol(r, '基本商品', '商品名', '基本商品名', 'プラン名') || null
 
       return {
         facility,
         pms_id: pmsId,
-        status: findCol(r, 'ステータス', '状態') || null,
-        product_name: findCol(r, '商品名', '基本商品名', 'プラン名') || null,
+        status: findCol(r, '予約状態', 'ステータス', '状態') || null,
+        product_name: productName,
         unit_price: parseInt10(findCol(r, '単価', '金額')),
-        quantity: parseInt10(findCol(r, '数量', '人数')) || 1,
+        quantity: parseInt10(findCol(r, '人数', '数量')) || 1,
         dinner,
         breakfast,
-        meal_type: classifyMealType(dinner, breakfast),
+        meal_type: classifyMealFromProduct(productName),
         source_month: sourceMonth,
       }
     })
@@ -110,14 +113,14 @@ export function transformBasicProduct(
   return { table: 'raw_basic_product', data: data as RawBasicProduct[], sourceMonth: sourceMonth ?? undefined }
 }
 
-function classifyMealType(dinner: string | null, breakfast: string | null): string {
-  const hasDinner = dinner !== null && dinner !== '' && dinner !== 'なし' && dinner !== '-'
-  const hasBreakfast = breakfast !== null && breakfast !== '' && breakfast !== 'なし' && breakfast !== '-'
-
-  if (hasDinner && hasBreakfast) return '2食付'
-  if (!hasDinner && hasBreakfast) return '朝食付'
-  if (hasDinner && !hasBreakfast) return '夕食のみ'
-  return '素泊り'
+// 喫食タイプは基本商品名から判定（例: 1泊2食（大人）→2食付, 1泊朝食→朝食付, 素泊→素泊り）
+function classifyMealFromProduct(name: string | null): string {
+  if (!name) return 'その他'
+  if (/[2２二]食/.test(name)) return '2食付'
+  if (/朝食/.test(name)) return '朝食付'
+  if (/夕食のみ|夕のみ/.test(name)) return '夕食のみ'
+  if (/素泊/.test(name)) return '素泊り'
+  return 'その他'
 }
 
 // ============================================================

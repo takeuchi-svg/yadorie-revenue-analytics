@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS raw_reservation (
   revenue_settled INTEGER DEFAULT 0,
   room_raw TEXT,
   room_parsed TEXT,
+  room_type TEXT,
   room_count INTEGER DEFAULT 1,
   prefecture TEXT,
   plan TEXT,
@@ -380,18 +381,32 @@ FROM raw_booking_event
 WHERE event_type = '予約'
 GROUP BY facility, TO_CHAR(checkin, 'YYYY-MM'), group_size;
 
+-- 喫食月次（予約単位）: 各予約の代表喫食タイプを優先順位で決定して集計
 CREATE OR REPLACE VIEW mart_meal_monthly AS
-SELECT
-  bp.facility,
-  TO_CHAR(r.checkin, 'YYYY-MM') AS month,
-  bp.meal_type,
-  SUM(bp.quantity) AS guests,
-  CASE WHEN SUM(bp.quantity) > 0
-    THEN ROUND(SUM(bp.unit_price * bp.quantity)::NUMERIC / SUM(bp.quantity)) END AS guest_unit
-FROM raw_basic_product bp
-JOIN raw_reservation r ON bp.facility = r.facility AND bp.pms_id = r.pms_id
-WHERE bp.status = 'C/O'
-GROUP BY bp.facility, TO_CHAR(r.checkin, 'YYYY-MM'), bp.meal_type;
+WITH res_meal AS (
+  SELECT bp.facility, bp.pms_id, TO_CHAR(r.checkin,'YYYY-MM') AS month,
+    MIN(CASE bp.meal_type
+      WHEN '2食付' THEN 1 WHEN '朝食付' THEN 2 WHEN '夕食のみ' THEN 3 WHEN '素泊り' THEN 4 ELSE 5 END) AS rk,
+    MAX(r.revenue_settled) AS revenue, MAX(r.nights) AS nights, MAX(r.guests_total) AS guests
+  FROM raw_basic_product bp
+  JOIN raw_reservation r ON bp.facility = r.facility AND bp.pms_id = r.pms_id
+  WHERE r.status = 'C/O' AND r.nights > 0
+  GROUP BY bp.facility, bp.pms_id, TO_CHAR(r.checkin,'YYYY-MM')
+)
+SELECT facility, month,
+  CASE rk WHEN 1 THEN '2食付' WHEN 2 THEN '朝食付' WHEN 3 THEN '夕食のみ' WHEN 4 THEN '素泊り' ELSE 'その他' END AS meal_type,
+  COUNT(*) AS reservations, SUM(revenue) AS revenue, SUM(nights) AS rooms, SUM(guests) AS guests
+FROM res_meal
+GROUP BY facility, month, rk;
+
+-- 部屋タイプ月次（部屋タイプ名の先頭区分で集計）
+CREATE OR REPLACE VIEW mart_room_type_monthly AS
+SELECT facility, TO_CHAR(checkin,'YYYY-MM') AS month, room_type,
+  SUM(revenue_settled) AS revenue, SUM(nights) AS rooms_sold, SUM(guests_total) AS guests,
+  CASE WHEN SUM(nights) > 0 THEN ROUND(SUM(revenue_settled)::NUMERIC / SUM(nights)) END AS adr
+FROM raw_reservation
+WHERE status = 'C/O' AND nights > 0 AND room_type IS NOT NULL
+GROUP BY facility, TO_CHAR(checkin,'YYYY-MM'), room_type;
 
 CREATE OR REPLACE VIEW mart_fb_category AS
 SELECT

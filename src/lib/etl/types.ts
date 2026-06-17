@@ -30,6 +30,7 @@ export interface RawReservation {
   revenue_settled: number
   room_raw: string | null
   room_parsed: string | null
+  room_type: string | null
   room_count: number
   prefecture: string | null
   plan: string | null

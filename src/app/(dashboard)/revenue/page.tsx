@@ -12,15 +12,21 @@ import { Loading, Empty } from '@/components/page-bits'
 
 const TABS = ['チャネル', '客室', 'プラン', '曜日', '喫食', 'GS', 'ADR帯'] as const
 type Tab = (typeof TABS)[number]
-const LINCOLN_TABS: Tab[] = ['プラン', '曜日', 'GS', 'ADR帯'] // 予約/CI日トグル対象
+const LINCOLN_TABS: Tab[] = ['プラン', '曜日', 'GS', 'ADR帯']
 
 const DOW_JP: Record<string, string> = { Mon: '月', Tue: '火', Wed: '水', Thu: '木', Fri: '金', Sat: '土', Sun: '日' }
+const DOW_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const GS_ORDER = ['1名', '2名', '3名', '4名', '5名以上']
-const BAND_ORDER = ['〜¥30K', '¥30-50K', '¥50-70K', '¥70-100K', '¥100K〜']
+const BAND_ORDER = ['〜¥30,000', '¥30,000–50,000', '¥50,000–70,000', '¥70,000–100,000', '¥100,000〜']
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-
 interface Ev { checkin: string | null; received_at: string | null; plan: string | null; rooms: number | null; guests_total: number | null; amount_gross: number | null }
+interface Row { name: string; revenue: number; rooms: number; guests: number; count?: number }
+
+const gsLabel = (g: number) => (g <= 1 ? '1名' : g >= 5 ? '5名以上' : `${g}名`)
+const bandLabel = (adr: number) =>
+  adr < 30000 ? '〜¥30,000' : adr < 50000 ? '¥30,000–50,000' : adr < 70000 ? '¥50,000–70,000' : adr < 100000 ? '¥70,000–100,000' : '¥100,000〜'
+const yenAxis = (v: any) => Number(v).toLocaleString()
 
 export default function RevenuePage() {
   const { current, currentFacility } = useFacility()
@@ -37,11 +43,12 @@ export default function RevenuePage() {
     Promise.all([
       supabase.from('mart_channel_monthly').select('*').eq('facility', current),
       supabase.from('mart_room_monthly').select('*').eq('facility', current),
+      supabase.from('mart_room_type_monthly').select('*').eq('facility', current),
       supabase.from('mart_meal_monthly').select('*').eq('facility', current),
       supabase.from('raw_booking_event').select('checkin, received_at, plan, rooms, guests_total, amount_gross')
         .eq('facility', current).eq('event_type', '予約').limit(20000),
-    ]).then(([ch, room, meal, ev]) => {
-      setData({ channel: ch.data ?? [], room: room.data ?? [], meal: meal.data ?? [] })
+    ]).then(([ch, room, rtype, meal, ev]) => {
+      setData({ channel: ch.data ?? [], room: room.data ?? [], rtype: rtype.data ?? [], meal: meal.data ?? [] })
       setEvents((ev.data as Ev[]) ?? [])
       setLoading(false)
     })
@@ -50,7 +57,6 @@ export default function RevenuePage() {
   const isLincoln = LINCOLN_TABS.includes(tab)
   const dateField: keyof Ev = basis === 'ci' ? 'checkin' : 'received_at'
 
-  // 月リスト（タブと基準で変わる）
   const months = useMemo(() => {
     let ms: string[]
     if (isLincoln) {
@@ -62,10 +68,7 @@ export default function RevenuePage() {
     return [...new Set(ms)].sort().reverse()
   }, [isLincoln, dateField, events, tab, data])
 
-  // 月が現在リストに無ければ最新へ
-  useEffect(() => {
-    if (months.length > 0 && !months.includes(month)) setMonth(months[0])
-  }, [months, month])
+  useEffect(() => { if (months.length > 0 && !months.includes(month)) setMonth(months[0]) }, [months, month])
 
   const monthEvents = useMemo(
     () => events.filter((e) => (e[dateField] as string | null)?.slice(0, 7) === month),
@@ -80,11 +83,9 @@ export default function RevenuePage() {
           <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current}</p>
         </div>
         <div className="flex items-center gap-3">
-          {/* CI/予約日 トグル */}
           <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)', opacity: isLincoln ? 1 : 0.4 }}>
             {(['ci', 'booking'] as const).map((b) => (
-              <button key={b} disabled={!isLincoln} onClick={() => setBasis(b)}
-                className="px-3 py-1.5 text-xs"
+              <button key={b} disabled={!isLincoln} onClick={() => setBasis(b)} className="px-3 py-1.5 text-xs"
                 style={{ background: basis === b ? 'var(--accent)' : 'var(--surface)', color: basis === b ? '#fff' : 'var(--text-dim)', cursor: isLincoln ? 'pointer' : 'not-allowed' }}>
                 {b === 'ci' ? 'CI日ベース' : '予約日ベース'}
               </button>
@@ -98,7 +99,6 @@ export default function RevenuePage() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex gap-1 mb-2 flex-wrap">
         {TABS.map((t) => (
           <button key={t} onClick={() => setTab(t)} className="px-3 py-1.5 rounded-md text-sm"
@@ -115,11 +115,11 @@ export default function RevenuePage() {
 
       {loading ? <Loading /> : (
         <>
-          {tab === 'チャネル' && <ChannelTab rows={(data.channel ?? []).filter((r) => r.month === month)} />}
-          {tab === '客室' && <RoomTab rows={(data.room ?? []).filter((r) => r.month === month)} />}
-          {tab === '喫食' && <MealTab rows={(data.meal ?? []).filter((r) => r.month === month)} />}
+          {tab === 'チャネル' && <ChannelTab rows={pmsRows(data.channel, month, 'channel')} />}
+          {tab === '客室' && <RoomTab rooms={pmsRows(data.room, month, 'room')} types={pmsRows(data.rtype, month, 'room_type')} />}
           {tab === 'プラン' && <PlanTab events={monthEvents} />}
           {tab === '曜日' && <DowTab events={monthEvents} dateField={dateField} />}
+          {tab === '喫食' && <MealTab rows={(data.meal ?? []).filter((r) => r.month === month)} />}
           {tab === 'GS' && <GsTab events={monthEvents} />}
           {tab === 'ADR帯' && <AdrBandTab events={monthEvents} />}
         </>
@@ -128,11 +128,33 @@ export default function RevenuePage() {
   )
 }
 
-/* ---- 共通 ---- */
+/* mart rows → 統一Row */
+function pmsRows(src: any[] | undefined, month: string, kind: 'channel' | 'room' | 'room_type'): Row[] {
+  return (src ?? []).filter((r) => r.month === month).map((r) => ({
+    name: (kind === 'channel' ? r.channel : kind === 'room' ? r.room : r.room_type) || '不明',
+    revenue: r.revenue || 0,
+    rooms: (kind === 'channel' ? r.rooms : r.rooms_sold) || 0,
+    guests: r.guests || 0,
+  }))
+}
+function aggEvents(events: Ev[], keyFn: (e: Ev) => string | null): Row[] {
+  const m = new Map<string, Row>()
+  for (const e of events) {
+    const k = keyFn(e); if (k == null) continue
+    const g = m.get(k) ?? { name: k, revenue: 0, rooms: 0, guests: 0, count: 0 }
+    g.revenue += e.amount_gross || 0; g.rooms += e.rooms || 0; g.guests += e.guests_total || 0; g.count! += 1
+    m.set(k, g)
+  }
+  return [...m.values()]
+}
+
+/* 共通 */
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <div className="card p-4 mb-4"><h2 className="text-sm font-semibold mb-3">{title}</h2>{children}</div>
 }
-function TableShell({ headers, children }: { headers: string[]; children: React.ReactNode }) {
+function KpiTable({ dim, rows, countLabel }: { dim: string; rows: Row[]; countLabel?: string }) {
+  const total = rows.reduce((s, r) => s + (r.revenue || 0), 0)
+  const headers = [dim, ...(countLabel ? [countLabel] : []), '売上', '構成比', '室数', '客数', 'ADR', '客単価', 'GS']
   return (
     <div className="card overflow-x-auto">
       <table className="w-full text-sm">
@@ -141,115 +163,98 @@ function TableShell({ headers, children }: { headers: string[]; children: React.
             {headers.map((h, i) => <th key={i} className={`px-4 py-3 ${i > 0 ? 'text-right' : ''}`}>{h}</th>)}
           </tr>
         </thead>
-        <tbody>{children}</tbody>
+        <tbody>
+          {rows.map((r, i) => {
+            const adr = r.rooms > 0 ? r.revenue / r.rooms : 0
+            const gu = r.guests > 0 ? r.revenue / r.guests : 0
+            const gs = r.rooms > 0 ? r.guests / r.rooms : 0
+            return (
+              <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                <td className="px-4 py-2 font-medium">{r.name}</td>
+                {countLabel && <td className="px-4 py-2 text-right">{fmtNum(r.count)}</td>}
+                <td className="px-4 py-2 text-right">{fmtNum(r.revenue)}</td>
+                <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{total > 0 ? pct(r.revenue / total) : '-'}</td>
+                <td className="px-4 py-2 text-right">{fmtNum(r.rooms)}</td>
+                <td className="px-4 py-2 text-right">{fmtNum(r.guests)}</td>
+                <td className="px-4 py-2 text-right">{fmtNum(adr)}</td>
+                <td className="px-4 py-2 text-right">{fmtNum(gu)}</td>
+                <td className="px-4 py-2 text-right">{gs > 0 ? gs.toFixed(2) : '-'}</td>
+              </tr>
+            )
+          })}
+        </tbody>
       </table>
     </div>
   )
 }
-const gsLabel = (g: number) => (g <= 1 ? '1名' : g >= 5 ? '5名以上' : `${g}名`)
-const bandLabel = (adr: number) =>
-  adr < 30000 ? '〜¥30K' : adr < 50000 ? '¥30-50K' : adr < 70000 ? '¥50-70K' : adr < 100000 ? '¥70-100K' : '¥100K〜'
 
-/* ---- チャネル（PMS, CI固定）---- */
-function ChannelTab({ rows }: { rows: any[] }) {
+/* ---- チャネル（横軸1円単位）---- */
+function ChannelTab({ rows }: { rows: Row[] }) {
   if (rows.length === 0) return <Empty message="この月のデータがありません" />
-  const total = rows.reduce((s, r) => s + (r.revenue || 0), 0)
-  const sorted = [...rows].sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
-  const chart = sorted.map((r) => ({ name: r.channel || 'その他', revenue: r.revenue || 0 }))
+  const sorted = [...rows].sort((a, b) => b.revenue - a.revenue)
   return (
     <>
       <Section title="チャネル別売上">
-        <ResponsiveContainer width="100%" height={260}>
-          <BarChart data={chart} layout="vertical" margin={{ left: 20 }}>
-            <XAxis type="number" {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1e6)}M`} />
+        <ResponsiveContainer width="100%" height={280}>
+          <BarChart data={sorted} layout="vertical" margin={{ left: 20, right: 30 }}>
+            <XAxis type="number" {...CHART_AXIS} tickFormatter={yenAxis} />
             <YAxis type="category" dataKey="name" {...CHART_AXIS} width={90} />
             <Tooltip {...chartTooltip} formatter={(v) => fmtYen(Number(v))} />
             <Bar dataKey="revenue" radius={[0, 4, 4, 0]}>
-              {chart.map((d, i) => <Cell key={i} fill={channelColor(d.name, i)} />)}
+              {sorted.map((d, i) => <Cell key={i} fill={channelColor(d.name, i)} />)}
             </Bar>
           </BarChart>
         </ResponsiveContainer>
       </Section>
-      <TableShell headers={['チャネル', '売上', '構成比', '室数', '客数', 'ADR', '客単価']}>
-        {sorted.map((r, i) => (
-          <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
-            <td className="px-4 py-2 font-medium">{r.channel || '不明'}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.revenue)}</td>
-            <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{total > 0 ? pct((r.revenue || 0) / total) : '-'}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.rooms)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.guests)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.adr)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.guest_unit)}</td>
-          </tr>
-        ))}
-      </TableShell>
+      <KpiTable dim="チャネル" rows={sorted} />
     </>
   )
 }
 
-/* ---- 客室（PMS, CI固定）---- */
-function RoomTab({ rows }: { rows: any[] }) {
-  if (rows.length === 0) return <Empty message="この月のデータがありません" />
-  const sorted = [...rows].sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
-  const chart = sorted.map((r) => ({ name: r.room || '不明', revenue: r.revenue || 0 }))
+/* ---- 客室（部屋名 + 部屋タイプ）---- */
+function RoomTab({ rooms, types }: { rooms: Row[]; types: Row[] }) {
+  if (rooms.length === 0 && types.length === 0) return <Empty message="この月のデータがありません" />
+  const r = [...rooms].sort((a, b) => b.revenue - a.revenue)
+  const t = [...types].sort((a, b) => b.revenue - a.revenue)
   return (
     <>
-      <Section title="客室別売上">
-        <ResponsiveContainer width="100%" height={Math.max(220, chart.length * 32)}>
-          <BarChart data={chart} layout="vertical" margin={{ left: 30 }}>
-            <XAxis type="number" {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1e6)}M`} />
-            <YAxis type="category" dataKey="name" {...CHART_AXIS} width={110} />
-            <Tooltip {...chartTooltip} formatter={(v) => fmtYen(Number(v))} />
-            <Bar dataKey="revenue" fill="var(--accent)" radius={[0, 4, 4, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </Section>
-      <TableShell headers={['客室', '売上', '室数', '客数', 'ADR', '同伴']}>
-        {sorted.map((r, i) => (
-          <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
-            <td className="px-4 py-2 font-medium">{r.room || '不明'}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.revenue)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.rooms_sold)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.guests)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.adr)}</td>
-            <td className="px-4 py-2 text-right">{r.companion?.toFixed(2) ?? '-'}</td>
-          </tr>
-        ))}
-      </TableShell>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <div className="card p-4">
+          <h2 className="text-sm font-semibold mb-3">客室別売上</h2>
+          <ResponsiveContainer width="100%" height={Math.max(220, r.length * 30)}>
+            <BarChart data={r} layout="vertical" margin={{ left: 30 }}>
+              <XAxis type="number" {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1e6)}M`} />
+              <YAxis type="category" dataKey="name" {...CHART_AXIS} width={100} />
+              <Tooltip {...chartTooltip} formatter={(v) => fmtYen(Number(v))} />
+              <Bar dataKey="revenue" fill="var(--accent)" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="card p-4">
+          <h2 className="text-sm font-semibold mb-3">部屋タイプ別売上</h2>
+          <ResponsiveContainer width="100%" height={Math.max(220, t.length * 30)}>
+            <BarChart data={t} layout="vertical" margin={{ left: 30 }}>
+              <XAxis type="number" {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1e6)}M`} />
+              <YAxis type="category" dataKey="name" {...CHART_AXIS} width={120} tick={{ fill: '#8b8fa3', fontSize: 10 }} />
+              <Tooltip {...chartTooltip} formatter={(v) => fmtYen(Number(v))} />
+              <Bar dataKey="revenue" fill="#22c55e" radius={[0, 4, 4, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+      <h3 className="text-sm font-semibold mb-2">客室別</h3>
+      <div className="mb-4"><KpiTable dim="客室" rows={r} /></div>
+      <h3 className="text-sm font-semibold mb-2">部屋タイプ別</h3>
+      <KpiTable dim="部屋タイプ" rows={t} />
     </>
   )
 }
 
-/* ---- 喫食（PMS, CI固定）---- */
-function MealTab({ rows }: { rows: any[] }) {
-  if (rows.length === 0) return <Empty message="この月のデータがありません" />
-  const sorted = [...rows].sort((a, b) => (b.guests || 0) - (a.guests || 0))
-  return (
-    <TableShell headers={['喫食タイプ', '人数', '客単価']}>
-      {sorted.map((r, i) => (
-        <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
-          <td className="px-4 py-2 font-medium">{r.meal_type || '不明'}</td>
-          <td className="px-4 py-2 text-right">{fmtNum(r.guests)}</td>
-          <td className="px-4 py-2 text-right">{fmtNum(r.guest_unit)}</td>
-        </tr>
-      ))}
-    </TableShell>
-  )
-}
-
-/* ---- プラン（Lincoln, トグル対象）---- */
+/* ---- プラン ---- */
 function PlanTab({ events }: { events: Ev[] }) {
   if (events.length === 0) return <Empty message="この月のデータがありません" />
-  const map = new Map<string, { revenue: number; rooms: number; guests: number; bookings: number }>()
-  for (const e of events) {
-    const k = e.plan || '不明'
-    const g = map.get(k) ?? { revenue: 0, rooms: 0, guests: 0, bookings: 0 }
-    g.revenue += e.amount_gross || 0; g.rooms += e.rooms || 0; g.guests += e.guests_total || 0; g.bookings += 1
-    map.set(k, g)
-  }
-  const rows = [...map.entries()].map(([plan, v]) => ({ plan, ...v, adr: v.rooms > 0 ? Math.round(v.revenue / v.rooms) : 0 }))
-    .sort((a, b) => b.revenue - a.revenue).slice(0, 15)
-  const chart = rows.map((r) => ({ name: r.plan.slice(0, 18), revenue: r.revenue }))
+  const rows = aggEvents(events, (e) => e.plan || '不明').sort((a, b) => b.revenue - a.revenue).slice(0, 15)
+  const chart = rows.map((r) => ({ name: r.name.slice(0, 18), revenue: r.revenue }))
   return (
     <>
       <Section title="プラン別売上 TOP15">
@@ -262,71 +267,71 @@ function PlanTab({ events }: { events: Ev[] }) {
           </BarChart>
         </ResponsiveContainer>
       </Section>
-      <TableShell headers={['プラン', '予約数', '売上', '室数', 'ADR']}>
-        {rows.map((r, i) => (
-          <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
-            <td className="px-4 py-2">{r.plan}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.bookings)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.revenue)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.rooms)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.adr)}</td>
-          </tr>
-        ))}
-      </TableShell>
+      <KpiTable dim="プラン" rows={rows} countLabel="予約数" />
     </>
   )
 }
 
-/* ---- 曜日（Lincoln, トグル対象）---- */
+/* ---- 曜日（表追加）---- */
 function DowTab({ events, dateField }: { events: Ev[]; dateField: keyof Ev }) {
   if (events.length === 0) return <Empty message="この月のデータがありません" />
-  const order = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  const acc: Record<string, { revenue: number; rooms: number }> = {}
-  for (const e of events) {
-    const ds = e[dateField] as string | null
-    if (!ds) continue
-    const d = new Date(ds + 'T00:00:00')
-    const key = order[(d.getDay() + 6) % 7] // Mon=0
-    const g = acc[key] ?? { revenue: 0, rooms: 0 }
-    g.revenue += e.amount_gross || 0; g.rooms += e.rooms || 0
-    acc[key] = g
+  const dowOf = (e: Ev) => {
+    const ds = e[dateField] as string | null; if (!ds) return null
+    return DOW_ORDER[(new Date(ds + 'T00:00:00').getDay() + 6) % 7]
   }
-  const agg = order.map((dow) => {
-    const g = acc[dow] ?? { revenue: 0, rooms: 0 }
-    return { name: DOW_JP[dow], revenue: g.revenue, adr: g.rooms > 0 ? Math.round(g.revenue / g.rooms) : 0 }
-  })
+  const byDow = aggEvents(events, dowOf)
+  const rows: Row[] = DOW_ORDER.map((d) => byDow.find((x) => x.name === d) ?? { name: d, revenue: 0, rooms: 0, guests: 0, count: 0 })
+    .map((x) => ({ ...x, name: DOW_JP[x.name] ?? x.name }))
+  const chart = rows.map((x) => ({ name: x.name, revenue: x.revenue, adr: x.rooms > 0 ? Math.round(x.revenue / x.rooms) : 0 }))
   return (
-    <Section title="曜日別 売上 + ADR">
-      <ResponsiveContainer width="100%" height={300}>
-        <ComposedChart data={agg}>
-          <XAxis dataKey="name" {...CHART_AXIS} />
-          <YAxis yAxisId="l" {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1e6)}M`} />
-          <YAxis yAxisId="r" orientation="right" {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
-          <Tooltip {...chartTooltip} formatter={(v) => fmtYen(Number(v))} />
-          <Legend wrapperStyle={{ fontSize: 11 }} />
-          <Bar yAxisId="l" dataKey="revenue" name="売上" fill="var(--accent)" radius={[4, 4, 0, 0]} />
-          <Line yAxisId="r" dataKey="adr" name="ADR" stroke="var(--yellow)" strokeWidth={2} dot={{ r: 3 }} />
-        </ComposedChart>
-      </ResponsiveContainer>
-    </Section>
+    <>
+      <Section title="曜日別 売上 + ADR">
+        <ResponsiveContainer width="100%" height={300}>
+          <ComposedChart data={chart}>
+            <XAxis dataKey="name" {...CHART_AXIS} />
+            <YAxis yAxisId="l" {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1e6)}M`} />
+            <YAxis yAxisId="r" orientation="right" {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+            <Tooltip {...chartTooltip} formatter={(v) => fmtYen(Number(v))} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Bar yAxisId="l" dataKey="revenue" name="売上" fill="var(--accent)" radius={[4, 4, 0, 0]} />
+            <Line yAxisId="r" dataKey="adr" name="ADR" stroke="var(--yellow)" strokeWidth={2} dot={{ r: 3 }} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </Section>
+      <KpiTable dim="曜日" rows={rows} countLabel="予約数" />
+    </>
   )
 }
 
-/* ---- GS（Lincoln, トグル対象）---- */
+/* ---- 喫食（予約単位）---- */
+function MealTab({ rows }: { rows: any[] }) {
+  if (rows.length === 0) return <Empty message="この月のデータがありません" />
+  const unified: Row[] = rows.map((r) => ({ name: r.meal_type || '不明', revenue: r.revenue || 0, rooms: r.rooms || 0, guests: r.guests || 0, count: r.reservations || 0 }))
+    .sort((a, b) => (b.count || 0) - (a.count || 0))
+  const chart = unified.map((r) => ({ name: r.name, count: r.count || 0 }))
+  return (
+    <>
+      <Section title="喫食タイプ別 予約数（予約単位）">
+        <ResponsiveContainer width="100%" height={240}>
+          <BarChart data={chart}>
+            <XAxis dataKey="name" {...CHART_AXIS} />
+            <YAxis {...CHART_AXIS} allowDecimals={false} />
+            <Tooltip {...chartTooltip} />
+            <Bar dataKey="count" name="予約数" fill="var(--accent)" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Section>
+      <KpiTable dim="喫食タイプ" rows={unified} countLabel="予約数" />
+    </>
+  )
+}
+
+/* ---- GS ---- */
 function GsTab({ events }: { events: Ev[] }) {
   if (events.length === 0) return <Empty message="この月のデータがありません" />
-  const map = new Map<string, { revenue: number; rooms: number; bookings: number }>()
-  for (const e of events) {
-    const gs = gsLabel(Math.round((e.guests_total || 0) / Math.max(e.rooms || 1, 1)))
-    const g = map.get(gs) ?? { revenue: 0, rooms: 0, bookings: 0 }
-    g.revenue += e.amount_gross || 0; g.rooms += e.rooms || 0; g.bookings += 1
-    map.set(gs, g)
-  }
-  const rows = GS_ORDER.map((gs) => {
-    const v = map.get(gs); if (!v) return null
-    return { group_size: gs, ...v, adr: v.rooms > 0 ? Math.round(v.revenue / v.rooms) : 0 }
-  }).filter(Boolean) as any[]
-  const chart = rows.map((r) => ({ name: r.group_size, revenue: r.revenue }))
+  const by = aggEvents(events, (e) => gsLabel(Math.round((e.guests_total || 0) / Math.max(e.rooms || 1, 1))))
+  const rows: Row[] = GS_ORDER.map((g) => by.find((x) => x.name === g)).filter(Boolean) as Row[]
+  const chart = rows.map((r) => ({ name: r.name, revenue: r.revenue }))
   return (
     <>
       <Section title="グループサイズ別売上">
@@ -339,63 +344,33 @@ function GsTab({ events }: { events: Ev[] }) {
           </BarChart>
         </ResponsiveContainer>
       </Section>
-      <TableShell headers={['グループサイズ', '予約数', '売上', '室数', 'ADR']}>
-        {rows.map((r, i) => (
-          <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
-            <td className="px-4 py-2 font-medium">{r.group_size}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.bookings)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.revenue)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.rooms)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.adr)}</td>
-          </tr>
-        ))}
-      </TableShell>
+      <KpiTable dim="グループサイズ" rows={rows} countLabel="予約数" />
     </>
   )
 }
 
-/* ---- ADR帯（Lincoln, トグル対象）---- */
+/* ---- ADR帯（1円単位）---- */
 function AdrBandTab({ events }: { events: Ev[] }) {
   if (events.length === 0) return <Empty message="この月のデータがありません" />
-  const map = new Map<string, { revenue: number; rooms: number; bookings: number }>()
-  for (const e of events) {
-    if (!e.rooms || e.rooms <= 0) continue
-    const band = bandLabel((e.amount_gross || 0) / e.rooms)
-    const g = map.get(band) ?? { revenue: 0, rooms: 0, bookings: 0 }
-    g.revenue += e.amount_gross || 0; g.rooms += e.rooms || 0; g.bookings += 1
-    map.set(band, g)
-  }
-  const rows = BAND_ORDER.map((band) => {
-    const v = map.get(band); if (!v) return null
-    return { band, ...v, adr: v.rooms > 0 ? Math.round(v.revenue / v.rooms) : 0 }
-  }).filter(Boolean) as any[]
-  const chart = rows.map((r) => ({ name: r.band, bookings: r.bookings, adr: r.adr }))
+  const by = aggEvents(events.filter((e) => (e.rooms || 0) > 0), (e) => bandLabel((e.amount_gross || 0) / (e.rooms || 1)))
+  const rows: Row[] = BAND_ORDER.map((b) => by.find((x) => x.name === b)).filter(Boolean) as Row[]
+  const chart = rows.map((r) => ({ name: r.name, count: r.count || 0, adr: r.rooms > 0 ? Math.round(r.revenue / r.rooms) : 0 }))
   return (
     <>
       <Section title="ADR帯 分布">
-        <ResponsiveContainer width="100%" height={260}>
-          <ComposedChart data={chart}>
-            <XAxis dataKey="name" {...CHART_AXIS} />
+        <ResponsiveContainer width="100%" height={300}>
+          <ComposedChart data={chart} margin={{ bottom: 20 }}>
+            <XAxis dataKey="name" {...CHART_AXIS} interval={0} angle={-15} textAnchor="end" height={60} tick={{ fill: '#8b8fa3', fontSize: 10 }} />
             <YAxis yAxisId="l" {...CHART_AXIS} allowDecimals={false} />
-            <YAxis yAxisId="r" orientation="right" {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
-            <Tooltip {...chartTooltip} />
+            <YAxis yAxisId="r" orientation="right" {...CHART_AXIS} tickFormatter={yenAxis} width={70} />
+            <Tooltip {...chartTooltip} formatter={(v) => fmtYen(Number(v))} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
-            <Bar yAxisId="l" dataKey="bookings" name="予約数" fill="var(--accent)" radius={[4, 4, 0, 0]} />
+            <Bar yAxisId="l" dataKey="count" name="予約数" fill="var(--accent)" radius={[4, 4, 0, 0]} />
             <Line yAxisId="r" dataKey="adr" name="ADR" stroke="var(--yellow)" strokeWidth={2} dot={{ r: 3 }} />
           </ComposedChart>
         </ResponsiveContainer>
       </Section>
-      <TableShell headers={['ADR帯', '予約数', '売上', '室数', 'ADR']}>
-        {rows.map((r, i) => (
-          <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
-            <td className="px-4 py-2 font-medium">{r.band}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.bookings)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.revenue)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.rooms)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.adr)}</td>
-          </tr>
-        ))}
-      </TableShell>
+      <KpiTable dim="ADR帯" rows={rows} countLabel="予約数" />
     </>
   )
 }
