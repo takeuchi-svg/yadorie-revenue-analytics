@@ -29,7 +29,16 @@ export function parseRateSheet(
     allSnapshots.push(...snapshots)
   }
 
-  return { table: 'raw_rate_snapshot', data: allSnapshots as unknown as Record<string, unknown>[] }
+  // Dedup by unique key (facility, snapshot_date, stay_date, scope, room) as a
+  // safety net against malformed sheets producing duplicate rows.
+  const seen = new Map<string, RawRateSnapshot>()
+  for (const s of allSnapshots) {
+    const key = `${s.snapshot_date}|${s.stay_date}|${s.scope}|${s.room ?? ''}`
+    seen.set(key, s)
+  }
+  const deduped = Array.from(seen.values())
+
+  return { table: 'raw_rate_snapshot', data: deduped as unknown as Record<string, unknown>[] }
 }
 
 function parseSheet(
@@ -127,13 +136,23 @@ function parseSheet(
 // ============================================================
 
 function findDateRow(sheet: XLSX.WorkSheet, range: XLSX.Range, year: number): number {
+  // The stay-date header has hundreds of date cells. Other rows (e.g. 料金ランク)
+  // only have a single date in the snapshot column. Pick the row with the most
+  // date cells, scanning all columns (headers may start far to the right).
+  let bestRow = -1
+  let bestCount = 0
   for (let r = 0; r <= Math.min(30, range.e.r); r++) {
-    for (let c = 2; c <= Math.min(10, range.e.c); c++) {
+    let count = 0
+    for (let c = 2; c <= range.e.c; c++) {
       const val = getCellValue(sheet, r, c)
-      if (val !== null && tryParseDate(val, year) !== null) return r
+      if (val !== null && tryParseDate(val, year) !== null) count++
+    }
+    if (count > bestCount) {
+      bestCount = count
+      bestRow = r
     }
   }
-  return -1
+  return bestCount >= 10 ? bestRow : -1
 }
 
 function extractDateColumns(
@@ -250,7 +269,9 @@ function tryParseDate(val: unknown, year?: number): string | null {
 }
 
 function excelDateToISO(serial: number): string | null {
-  if (serial < 1 || serial > 100000) return null
+  // Reject small integers (rate ranks, counts) that aren't real dates.
+  // Real stay dates here are 2024+ (serial >= 45292). 40000 ~ year 2009.
+  if (serial < 40000 || serial > 100000) return null
   // Excel epoch: Jan 0, 1900 (with Lotus 1-2-3 leap year bug)
   const utcDays = serial - 25569
   const d = new Date(utcDays * 86400 * 1000)
