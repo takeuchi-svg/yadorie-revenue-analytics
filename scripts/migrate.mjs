@@ -445,6 +445,36 @@ FROM raw_room_sales
 WHERE scope = 'type'
 GROUP BY facility, source_month, room_type;
 
+-- プラン月次（Lincoln予約由来）
+CREATE OR REPLACE VIEW mart_plan_monthly AS
+SELECT facility, TO_CHAR(checkin,'YYYY-MM') AS month, plan,
+  COUNT(*) AS bookings,
+  SUM(amount_gross) AS revenue,
+  SUM(rooms) AS rooms_total,
+  SUM(guests_total) AS guests,
+  CASE WHEN SUM(rooms) > 0 THEN ROUND(SUM(amount_gross)::NUMERIC / SUM(rooms)) END AS adr
+FROM raw_booking_event
+WHERE event_type = '予約' AND plan IS NOT NULL AND plan <> ''
+GROUP BY facility, TO_CHAR(checkin,'YYYY-MM'), plan;
+
+-- ADR帯月次（Lincoln予約由来）
+CREATE OR REPLACE VIEW mart_adr_band_monthly AS
+SELECT facility, TO_CHAR(checkin,'YYYY-MM') AS month,
+  CASE
+    WHEN amount_gross::NUMERIC / GREATEST(rooms,1) < 30000 THEN '〜¥30K'
+    WHEN amount_gross::NUMERIC / GREATEST(rooms,1) < 50000 THEN '¥30-50K'
+    WHEN amount_gross::NUMERIC / GREATEST(rooms,1) < 70000 THEN '¥50-70K'
+    WHEN amount_gross::NUMERIC / GREATEST(rooms,1) < 100000 THEN '¥70-100K'
+    ELSE '¥100K〜'
+  END AS band,
+  COUNT(*) AS bookings,
+  SUM(amount_gross) AS revenue,
+  SUM(rooms) AS rooms_total,
+  CASE WHEN SUM(rooms) > 0 THEN ROUND(SUM(amount_gross)::NUMERIC / SUM(rooms)) END AS adr
+FROM raw_booking_event
+WHERE event_type = '予約' AND rooms > 0
+GROUP BY facility, TO_CHAR(checkin,'YYYY-MM'), band;
+
 -- ========================================
 -- Row Level Security（全開放）
 -- ========================================
