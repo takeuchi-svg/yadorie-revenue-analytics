@@ -176,13 +176,20 @@ export default function UploadPage() {
           let totalInserted = 0
           const onConflict = UPSERT_KEYS[table] || ''
 
-          // rate_snapshot uses COALESCE in unique index, so delete-then-insert
-          if (table === 'raw_rate_snapshot' && data.length > 0) {
-            const snapshotDates = [...new Set(data.map((r: Record<string, unknown>) => r.snapshot_date))]
-            for (const sd of snapshotDates) {
-              await supabase.from(table).delete()
-                .eq('facility', data[0].facility)
-                .eq('snapshot_date', sd)
+          // Tables without simple unique keys: delete existing data before insert
+          const DELETE_BEFORE_INSERT = ['raw_basic_product', 'raw_other_product', 'raw_payment', 'raw_rate_snapshot']
+          if (DELETE_BEFORE_INSERT.includes(table) && data.length > 0) {
+            const facility = (data[0] as Record<string, unknown>).facility as string
+            if (table === 'raw_rate_snapshot') {
+              const snapshotDates = [...new Set(data.map((r: Record<string, unknown>) => r.snapshot_date))]
+              for (const sd of snapshotDates) {
+                await supabase.from(table).delete().eq('facility', facility).eq('snapshot_date', sd)
+              }
+            } else {
+              const sourceMonth = (data[0] as Record<string, unknown>).source_month as string
+              if (sourceMonth) {
+                await supabase.from(table).delete().eq('facility', facility).eq('source_month', sourceMonth)
+              }
             }
           }
 
