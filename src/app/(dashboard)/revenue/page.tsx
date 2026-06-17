@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import {
@@ -12,19 +12,24 @@ import { Loading, Empty } from '@/components/page-bits'
 
 const TABS = ['チャネル', '客室', 'プラン', '曜日', '喫食', 'GS', 'ADR帯'] as const
 type Tab = (typeof TABS)[number]
+const LINCOLN_TABS: Tab[] = ['プラン', '曜日', 'GS', 'ADR帯'] // 予約/CI日トグル対象
 
 const DOW_JP: Record<string, string> = { Mon: '月', Tue: '火', Wed: '水', Thu: '木', Fri: '金', Sat: '土', Sun: '日' }
-const DOW_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const GS_ORDER = ['1名', '2名', '3名', '4名', '5名以上']
 const BAND_ORDER = ['〜¥30K', '¥30-50K', '¥50-70K', '¥70-100K', '¥100K〜']
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+interface Ev { checkin: string | null; received_at: string | null; plan: string | null; rooms: number | null; guests_total: number | null; amount_gross: number | null }
+
 export default function RevenuePage() {
   const { current, currentFacility } = useFacility()
   const [tab, setTab] = useState<Tab>('チャネル')
+  const [basis, setBasis] = useState<'ci' | 'booking'>('ci')
   const [month, setMonth] = useState('')
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<Record<string, any[]>>({})
+  const [events, setEvents] = useState<Ev[]>([])
 
   useEffect(() => {
     if (!current) return
@@ -32,43 +37,69 @@ export default function RevenuePage() {
     Promise.all([
       supabase.from('mart_channel_monthly').select('*').eq('facility', current),
       supabase.from('mart_room_monthly').select('*').eq('facility', current),
-      supabase.from('mart_plan_monthly').select('*').eq('facility', current),
-      supabase.from('mart_daily').select('*').eq('facility', current),
       supabase.from('mart_meal_monthly').select('*').eq('facility', current),
-      supabase.from('mart_gs_monthly').select('*').eq('facility', current),
-      supabase.from('mart_adr_band_monthly').select('*').eq('facility', current),
-    ]).then(([ch, room, plan, daily, meal, gs, adr]) => {
-      setData({
-        channel: ch.data ?? [], room: room.data ?? [], plan: plan.data ?? [],
-        daily: daily.data ?? [], meal: meal.data ?? [], gs: gs.data ?? [], adr: adr.data ?? [],
-      })
-      const months = [...new Set([...(ch.data ?? []), ...(daily.data ?? [])].map((r: any) => r.month ?? (r.date ? String(r.date).slice(0, 7) : null)).filter(Boolean))].sort().reverse()
-      setMonth((m) => m || months[0] || '')
+      supabase.from('raw_booking_event').select('checkin, received_at, plan, rooms, guests_total, amount_gross')
+        .eq('facility', current).eq('event_type', '予約').limit(20000),
+    ]).then(([ch, room, meal, ev]) => {
+      setData({ channel: ch.data ?? [], room: room.data ?? [], meal: meal.data ?? [] })
+      setEvents((ev.data as Ev[]) ?? [])
       setLoading(false)
     })
   }, [current])
 
-  const allMonths = [...new Set([
-    ...(data.channel ?? []).map((r) => r.month),
-    ...(data.daily ?? []).map((r: any) => String(r.date).slice(0, 7)),
-  ].filter(Boolean))].sort().reverse()
+  const isLincoln = LINCOLN_TABS.includes(tab)
+  const dateField: keyof Ev = basis === 'ci' ? 'checkin' : 'received_at'
+
+  // 月リスト（タブと基準で変わる）
+  const months = useMemo(() => {
+    let ms: string[]
+    if (isLincoln) {
+      ms = events.map((e) => (e[dateField] as string | null)?.slice(0, 7)).filter(Boolean) as string[]
+    } else {
+      const src = tab === 'チャネル' ? data.channel : tab === '客室' ? data.room : data.meal
+      ms = (src ?? []).map((r: any) => r.month).filter(Boolean)
+    }
+    return [...new Set(ms)].sort().reverse()
+  }, [isLincoln, dateField, events, tab, data])
+
+  // 月が現在リストに無ければ最新へ
+  useEffect(() => {
+    if (months.length > 0 && !months.includes(month)) setMonth(months[0])
+  }, [months, month])
+
+  const monthEvents = useMemo(
+    () => events.filter((e) => (e[dateField] as string | null)?.slice(0, 7) === month),
+    [events, dateField, month]
+  )
 
   return (
     <div className="p-6">
-      <div className="flex items-end justify-between mb-4">
+      <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold mb-1">Revenue</h1>
           <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current}</p>
         </div>
-        {allMonths.length > 0 && (
-          <select className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)}>
-            {allMonths.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-        )}
+        <div className="flex items-center gap-3">
+          {/* CI/予約日 トグル */}
+          <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)', opacity: isLincoln ? 1 : 0.4 }}>
+            {(['ci', 'booking'] as const).map((b) => (
+              <button key={b} disabled={!isLincoln} onClick={() => setBasis(b)}
+                className="px-3 py-1.5 text-xs"
+                style={{ background: basis === b ? 'var(--accent)' : 'var(--surface)', color: basis === b ? '#fff' : 'var(--text-dim)', cursor: isLincoln ? 'pointer' : 'not-allowed' }}>
+                {b === 'ci' ? 'CI日ベース' : '予約日ベース'}
+              </button>
+            ))}
+          </div>
+          {months.length > 0 && (
+            <select className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)}>
+              {months.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          )}
+        </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-5 flex-wrap">
+      <div className="flex gap-1 mb-2 flex-wrap">
         {TABS.map((t) => (
           <button key={t} onClick={() => setTab(t)} className="px-3 py-1.5 rounded-md text-sm"
             style={{ background: tab === t ? 'var(--accent)' : 'var(--surface)', color: tab === t ? '#fff' : 'var(--text-dim)', border: '1px solid var(--border)' }}>
@@ -76,31 +107,31 @@ export default function RevenuePage() {
           </button>
         ))}
       </div>
+      <p className="text-xs mb-4" style={{ color: 'var(--text-dim)' }}>
+        {isLincoln
+          ? `${basis === 'ci' ? 'CI日（チェックイン月）' : '予約日（受信月）'}ベース・Lincoln予約データ`
+          : 'CI日（チェックイン月）ベース・PMS予約データ（このタブは日付基準の切替なし）'}
+      </p>
 
       {loading ? <Loading /> : (
         <>
           {tab === 'チャネル' && <ChannelTab rows={(data.channel ?? []).filter((r) => r.month === month)} />}
           {tab === '客室' && <RoomTab rows={(data.room ?? []).filter((r) => r.month === month)} />}
-          {tab === 'プラン' && <PlanTab rows={(data.plan ?? []).filter((r) => r.month === month)} />}
-          {tab === '曜日' && <DowTab rows={(data.daily ?? []).filter((r: any) => String(r.date).slice(0, 7) === month)} />}
           {tab === '喫食' && <MealTab rows={(data.meal ?? []).filter((r) => r.month === month)} />}
-          {tab === 'GS' && <GsTab rows={(data.gs ?? []).filter((r) => r.month === month)} />}
-          {tab === 'ADR帯' && <AdrBandTab rows={(data.adr ?? []).filter((r) => r.month === month)} />}
+          {tab === 'プラン' && <PlanTab events={monthEvents} />}
+          {tab === '曜日' && <DowTab events={monthEvents} dateField={dateField} />}
+          {tab === 'GS' && <GsTab events={monthEvents} />}
+          {tab === 'ADR帯' && <AdrBandTab events={monthEvents} />}
         </>
       )}
     </div>
   )
 }
 
+/* ---- 共通 ---- */
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="card p-4 mb-4">
-      <h2 className="text-sm font-semibold mb-3">{title}</h2>
-      {children}
-    </div>
-  )
+  return <div className="card p-4 mb-4"><h2 className="text-sm font-semibold mb-3">{title}</h2>{children}</div>
 }
-
 function TableShell({ headers, children }: { headers: string[]; children: React.ReactNode }) {
   return (
     <div className="card overflow-x-auto">
@@ -115,8 +146,11 @@ function TableShell({ headers, children }: { headers: string[]; children: React.
     </div>
   )
 }
+const gsLabel = (g: number) => (g <= 1 ? '1名' : g >= 5 ? '5名以上' : `${g}名`)
+const bandLabel = (adr: number) =>
+  adr < 30000 ? '〜¥30K' : adr < 50000 ? '¥30-50K' : adr < 70000 ? '¥50-70K' : adr < 100000 ? '¥70-100K' : '¥100K〜'
 
-/* ---- チャネル ---- */
+/* ---- チャネル（PMS, CI固定）---- */
 function ChannelTab({ rows }: { rows: any[] }) {
   if (rows.length === 0) return <Empty message="この月のデータがありません" />
   const total = rows.reduce((s, r) => s + (r.revenue || 0), 0)
@@ -153,7 +187,7 @@ function ChannelTab({ rows }: { rows: any[] }) {
   )
 }
 
-/* ---- 客室 ---- */
+/* ---- 客室（PMS, CI固定）---- */
 function RoomTab({ rows }: { rows: any[] }) {
   if (rows.length === 0) return <Empty message="この月のデータがありません" />
   const sorted = [...rows].sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
@@ -186,11 +220,36 @@ function RoomTab({ rows }: { rows: any[] }) {
   )
 }
 
-/* ---- プラン ---- */
-function PlanTab({ rows }: { rows: any[] }) {
-  if (rows.length === 0) return <Empty message="この月のデータがありません（プランはLincoln予約由来）" />
-  const sorted = [...rows].sort((a, b) => (b.revenue || 0) - (a.revenue || 0)).slice(0, 15)
-  const chart = sorted.map((r) => ({ name: (r.plan || '不明').slice(0, 18), revenue: r.revenue || 0 }))
+/* ---- 喫食（PMS, CI固定）---- */
+function MealTab({ rows }: { rows: any[] }) {
+  if (rows.length === 0) return <Empty message="この月のデータがありません" />
+  const sorted = [...rows].sort((a, b) => (b.guests || 0) - (a.guests || 0))
+  return (
+    <TableShell headers={['喫食タイプ', '人数', '客単価']}>
+      {sorted.map((r, i) => (
+        <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+          <td className="px-4 py-2 font-medium">{r.meal_type || '不明'}</td>
+          <td className="px-4 py-2 text-right">{fmtNum(r.guests)}</td>
+          <td className="px-4 py-2 text-right">{fmtNum(r.guest_unit)}</td>
+        </tr>
+      ))}
+    </TableShell>
+  )
+}
+
+/* ---- プラン（Lincoln, トグル対象）---- */
+function PlanTab({ events }: { events: Ev[] }) {
+  if (events.length === 0) return <Empty message="この月のデータがありません" />
+  const map = new Map<string, { revenue: number; rooms: number; guests: number; bookings: number }>()
+  for (const e of events) {
+    const k = e.plan || '不明'
+    const g = map.get(k) ?? { revenue: 0, rooms: 0, guests: 0, bookings: 0 }
+    g.revenue += e.amount_gross || 0; g.rooms += e.rooms || 0; g.guests += e.guests_total || 0; g.bookings += 1
+    map.set(k, g)
+  }
+  const rows = [...map.entries()].map(([plan, v]) => ({ plan, ...v, adr: v.rooms > 0 ? Math.round(v.revenue / v.rooms) : 0 }))
+    .sort((a, b) => b.revenue - a.revenue).slice(0, 15)
+  const chart = rows.map((r) => ({ name: r.plan.slice(0, 18), revenue: r.revenue }))
   return (
     <>
       <Section title="プラン別売上 TOP15">
@@ -204,12 +263,12 @@ function PlanTab({ rows }: { rows: any[] }) {
         </ResponsiveContainer>
       </Section>
       <TableShell headers={['プラン', '予約数', '売上', '室数', 'ADR']}>
-        {sorted.map((r, i) => (
+        {rows.map((r, i) => (
           <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
-            <td className="px-4 py-2">{r.plan || '不明'}</td>
+            <td className="px-4 py-2">{r.plan}</td>
             <td className="px-4 py-2 text-right">{fmtNum(r.bookings)}</td>
             <td className="px-4 py-2 text-right">{fmtNum(r.revenue)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.rooms_total)}</td>
+            <td className="px-4 py-2 text-right">{fmtNum(r.rooms)}</td>
             <td className="px-4 py-2 text-right">{fmtNum(r.adr)}</td>
           </tr>
         ))}
@@ -218,14 +277,23 @@ function PlanTab({ rows }: { rows: any[] }) {
   )
 }
 
-/* ---- 曜日 ---- */
-function DowTab({ rows }: { rows: any[] }) {
-  if (rows.length === 0) return <Empty message="この月のデータがありません" />
-  const agg = DOW_ORDER.map((dow) => {
-    const days = rows.filter((r) => r.dow === dow)
-    const revenue = days.reduce((s, r) => s + (r.revenue || 0), 0)
-    const rooms = days.reduce((s, r) => s + (r.rooms_sold || 0), 0)
-    return { name: DOW_JP[dow] ?? dow, revenue, adr: rooms > 0 ? Math.round(revenue / rooms) : 0 }
+/* ---- 曜日（Lincoln, トグル対象）---- */
+function DowTab({ events, dateField }: { events: Ev[]; dateField: keyof Ev }) {
+  if (events.length === 0) return <Empty message="この月のデータがありません" />
+  const order = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+  const acc: Record<string, { revenue: number; rooms: number }> = {}
+  for (const e of events) {
+    const ds = e[dateField] as string | null
+    if (!ds) continue
+    const d = new Date(ds + 'T00:00:00')
+    const key = order[(d.getDay() + 6) % 7] // Mon=0
+    const g = acc[key] ?? { revenue: 0, rooms: 0 }
+    g.revenue += e.amount_gross || 0; g.rooms += e.rooms || 0
+    acc[key] = g
+  }
+  const agg = order.map((dow) => {
+    const g = acc[dow] ?? { revenue: 0, rooms: 0 }
+    return { name: DOW_JP[dow], revenue: g.revenue, adr: g.rooms > 0 ? Math.round(g.revenue / g.rooms) : 0 }
   })
   return (
     <Section title="曜日別 売上 + ADR">
@@ -244,28 +312,21 @@ function DowTab({ rows }: { rows: any[] }) {
   )
 }
 
-/* ---- 喫食 ---- */
-function MealTab({ rows }: { rows: any[] }) {
-  if (rows.length === 0) return <Empty message="この月のデータがありません" />
-  const sorted = [...rows].sort((a, b) => (b.guests || 0) - (a.guests || 0))
-  return (
-    <TableShell headers={['喫食タイプ', '人数', '客単価']}>
-      {sorted.map((r, i) => (
-        <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
-          <td className="px-4 py-2 font-medium">{r.meal_type || '不明'}</td>
-          <td className="px-4 py-2 text-right">{fmtNum(r.guests)}</td>
-          <td className="px-4 py-2 text-right">{fmtNum(r.guest_unit)}</td>
-        </tr>
-      ))}
-    </TableShell>
-  )
-}
-
-/* ---- GS ---- */
-function GsTab({ rows }: { rows: any[] }) {
-  if (rows.length === 0) return <Empty message="この月のデータがありません" />
-  const ordered = GS_ORDER.map((g) => rows.find((r) => r.group_size === g)).filter(Boolean) as any[]
-  const chart = ordered.map((r) => ({ name: r.group_size, revenue: r.revenue || 0 }))
+/* ---- GS（Lincoln, トグル対象）---- */
+function GsTab({ events }: { events: Ev[] }) {
+  if (events.length === 0) return <Empty message="この月のデータがありません" />
+  const map = new Map<string, { revenue: number; rooms: number; bookings: number }>()
+  for (const e of events) {
+    const gs = gsLabel(Math.round((e.guests_total || 0) / Math.max(e.rooms || 1, 1)))
+    const g = map.get(gs) ?? { revenue: 0, rooms: 0, bookings: 0 }
+    g.revenue += e.amount_gross || 0; g.rooms += e.rooms || 0; g.bookings += 1
+    map.set(gs, g)
+  }
+  const rows = GS_ORDER.map((gs) => {
+    const v = map.get(gs); if (!v) return null
+    return { group_size: gs, ...v, adr: v.rooms > 0 ? Math.round(v.revenue / v.rooms) : 0 }
+  }).filter(Boolean) as any[]
+  const chart = rows.map((r) => ({ name: r.group_size, revenue: r.revenue }))
   return (
     <>
       <Section title="グループサイズ別売上">
@@ -279,12 +340,12 @@ function GsTab({ rows }: { rows: any[] }) {
         </ResponsiveContainer>
       </Section>
       <TableShell headers={['グループサイズ', '予約数', '売上', '室数', 'ADR']}>
-        {ordered.map((r, i) => (
+        {rows.map((r, i) => (
           <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
             <td className="px-4 py-2 font-medium">{r.group_size}</td>
             <td className="px-4 py-2 text-right">{fmtNum(r.bookings)}</td>
             <td className="px-4 py-2 text-right">{fmtNum(r.revenue)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.rooms_total)}</td>
+            <td className="px-4 py-2 text-right">{fmtNum(r.rooms)}</td>
             <td className="px-4 py-2 text-right">{fmtNum(r.adr)}</td>
           </tr>
         ))}
@@ -293,11 +354,22 @@ function GsTab({ rows }: { rows: any[] }) {
   )
 }
 
-/* ---- ADR帯 ---- */
-function AdrBandTab({ rows }: { rows: any[] }) {
-  if (rows.length === 0) return <Empty message="この月のデータがありません" />
-  const ordered = BAND_ORDER.map((b) => rows.find((r) => r.band === b)).filter(Boolean) as any[]
-  const chart = ordered.map((r) => ({ name: r.band, bookings: r.bookings || 0, adr: r.adr || 0 }))
+/* ---- ADR帯（Lincoln, トグル対象）---- */
+function AdrBandTab({ events }: { events: Ev[] }) {
+  if (events.length === 0) return <Empty message="この月のデータがありません" />
+  const map = new Map<string, { revenue: number; rooms: number; bookings: number }>()
+  for (const e of events) {
+    if (!e.rooms || e.rooms <= 0) continue
+    const band = bandLabel((e.amount_gross || 0) / e.rooms)
+    const g = map.get(band) ?? { revenue: 0, rooms: 0, bookings: 0 }
+    g.revenue += e.amount_gross || 0; g.rooms += e.rooms || 0; g.bookings += 1
+    map.set(band, g)
+  }
+  const rows = BAND_ORDER.map((band) => {
+    const v = map.get(band); if (!v) return null
+    return { band, ...v, adr: v.rooms > 0 ? Math.round(v.revenue / v.rooms) : 0 }
+  }).filter(Boolean) as any[]
+  const chart = rows.map((r) => ({ name: r.band, bookings: r.bookings, adr: r.adr }))
   return (
     <>
       <Section title="ADR帯 分布">
@@ -314,12 +386,12 @@ function AdrBandTab({ rows }: { rows: any[] }) {
         </ResponsiveContainer>
       </Section>
       <TableShell headers={['ADR帯', '予約数', '売上', '室数', 'ADR']}>
-        {ordered.map((r, i) => (
+        {rows.map((r, i) => (
           <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
             <td className="px-4 py-2 font-medium">{r.band}</td>
             <td className="px-4 py-2 text-right">{fmtNum(r.bookings)}</td>
             <td className="px-4 py-2 text-right">{fmtNum(r.revenue)}</td>
-            <td className="px-4 py-2 text-right">{fmtNum(r.rooms_total)}</td>
+            <td className="px-4 py-2 text-right">{fmtNum(r.rooms)}</td>
             <td className="px-4 py-2 text-right">{fmtNum(r.adr)}</td>
           </tr>
         ))}
