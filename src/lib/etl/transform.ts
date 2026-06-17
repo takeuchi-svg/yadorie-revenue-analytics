@@ -45,7 +45,7 @@ export function transformReservation(
         pms_id: pmsId,
         booking_no: findCol(r, '連携番号', '予約番号', 'Lincoln番号') || null,
         status: findCol(r, 'ステータス', '状態', '予約状態') || 'C/O',
-        channel: findCol(r, '予約経路', 'OTA', 'チャネル', '経路', '経由') || null,
+        channel: findCol(r, '扱先', '予約経路', 'OTA', 'チャネル', '経路', '経由') || null,
         checkin,
         checkout: parseDate(findCol(r, 'チェックアウト日', 'チェックアウト', 'CO日', 'CO', '終了日付')),
         nights: parseInt10(findCol(r, '泊数', '宿泊数')),

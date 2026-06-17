@@ -7,7 +7,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from 'recharts'
-import { fmtYen, fmtYenM, pct, fmtNum, channelColor, CHART_AXIS, chartTooltip } from '@/lib/ui'
+import { fmtYen, pct, fmtNum, channelColor, CHART_AXIS, chartTooltip } from '@/lib/ui'
 
 interface MonthlyKpi {
   facility: string
@@ -107,7 +107,7 @@ export default function OverviewPage() {
         <>
           {/* KPI Cards (6, per UI spec) */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-            <KpiCard label="売上" value={fmtYenM(latest?.revenue)} />
+            <KpiCard label="売上" value={fmtYen(latest?.revenue)} />
             <KpiCard label="OCC（稼働率）" value={pct(latestOcc)} accent />
             <KpiCard label="REVPAR" value={fmtYen(latestRevpar)} />
             <KpiCard label="客単価" value={fmtYen(latest?.guest_unit)} />
