@@ -24,13 +24,14 @@ interface MonthlyKpi {
   total_inventory: number | null
 }
 
-interface OccRow { month: string; occ: number | null; rooms_sold: number | null }
+interface OccRow { month: string; occ: number | null; rooms_sold: number | null; operating_days: number | null; total_rooms: number | null }
 interface ChannelRow { channel: string | null; revenue: number | null }
 
 export default function OverviewPage() {
   const { current, currentFacility } = useFacility()
   const [kpi, setKpi] = useState<MonthlyKpi[]>([])
   const [occByMonth, setOccByMonth] = useState<Record<string, number | null>>({})
+  const [capByMonth, setCapByMonth] = useState<Record<string, number | null>>({})
   const [channels, setChannels] = useState<ChannelRow[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -40,13 +41,18 @@ export default function OverviewPage() {
     Promise.all([
       supabase.from('mart_monthly_kpi').select('*').eq('facility', current)
         .order('month', { ascending: false }).limit(12),
-      supabase.from('mart_occupancy_monthly').select('month, occ, rooms_sold').eq('facility', current),
+      supabase.from('mart_occupancy_monthly').select('month, occ, rooms_sold, operating_days, total_rooms').eq('facility', current),
     ]).then(([kpiRes, occRes]) => {
       const kpiData = (kpiRes.data as MonthlyKpi[]) ?? []
       setKpi(kpiData)
       const occMap: Record<string, number | null> = {}
-      ;((occRes.data as OccRow[]) ?? []).forEach((o) => { occMap[o.month] = o.occ })
+      const capMap: Record<string, number | null> = {}
+      ;((occRes.data as OccRow[]) ?? []).forEach((o) => {
+        occMap[o.month] = o.occ
+        capMap[o.month] = (o.total_rooms && o.operating_days) ? o.total_rooms * o.operating_days : null
+      })
       setOccByMonth(occMap)
+      setCapByMonth(capMap)
 
       const latestMonth = kpiData[0]?.month
       if (latestMonth) {
@@ -65,6 +71,9 @@ export default function OverviewPage() {
 
   const latest = kpi[0]
   const latestOcc = latest ? occByMonth[latest.month] ?? null : null
+  const latestCap = latest ? capByMonth[latest.month] ?? null : null
+  // REVPAR = 売上 ÷ 利用可能室数（総室数×営業日数）。予算入力なしで自動算出。
+  const latestRevpar = latest && latest.revenue && latestCap ? latest.revenue / latestCap : latest?.revpar ?? null
   const budgetRate = latest && latest.revenue && latest.revenue_budget
     ? latest.revenue / latest.revenue_budget : null
 
@@ -100,7 +109,7 @@ export default function OverviewPage() {
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
             <KpiCard label="売上" value={fmtYenM(latest?.revenue)} />
             <KpiCard label="OCC（稼働率）" value={pct(latestOcc)} accent />
-            <KpiCard label="REVPAR" value={fmtYen(latest?.revpar)} />
+            <KpiCard label="REVPAR" value={fmtYen(latestRevpar)} />
             <KpiCard label="客単価" value={fmtYen(latest?.guest_unit)} />
             <KpiCard label="予算達成率" value={pct(budgetRate)} />
             <KpiCard label="同伴係数" value={latest?.companion?.toFixed(2) ?? '-'} />

@@ -123,7 +123,8 @@ export default function SettingsPage() {
         facility: b.facility,
         month: b.month,
         operating_days: b.operating_days,
-        total_inventory: b.total_inventory,
+        // 総在庫数は自動算出: 営業日数 × 総室数
+        total_inventory: b.operating_days && totalRooms ? Number(b.operating_days) * Number(totalRooms) : null,
         revenue_budget: b.revenue_budget,
         rooms_budget: b.rooms_budget,
         guests_budget: b.guests_budget,
@@ -219,28 +220,34 @@ export default function SettingsPage() {
                 <tr className="bg-[var(--surface2)] text-left text-[var(--text-dim)]">
                   <th className="px-3 py-2">月</th>
                   <th className="px-3 py-2">営業日数</th>
-                  <th className="px-3 py-2">供給室数</th>
+                  <th className="px-3 py-2">総在庫数（自動）</th>
                   <th className="px-3 py-2">売上予算</th>
                   <th className="px-3 py-2">室数予算</th>
                   <th className="px-3 py-2">客数予算</th>
                 </tr>
               </thead>
               <tbody>
-                {budgets.map((b, idx) => (
-                  <tr key={b.month} style={{ borderTop: '1px solid var(--border)' }}>
-                    <td className="px-3 py-1.5 font-medium">{b.month}</td>
-                    {(['operating_days', 'total_inventory', 'revenue_budget', 'rooms_budget', 'guests_budget'] as const).map((field) => (
-                      <td key={field} className="px-3 py-1.5">
-                        <input
-                          type="number"
-                          className="field px-2 py-1 text-sm w-24"
-                          value={b[field] ?? ''}
-                          onChange={(e) => updateBudget(idx, field, e.target.value)}
-                        />
+                {budgets.map((b, idx) => {
+                  const inv = b.operating_days && totalRooms ? Number(b.operating_days) * Number(totalRooms) : null
+                  return (
+                    <tr key={b.month} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td className="px-3 py-1.5 font-medium">{b.month}</td>
+                      <td className="px-3 py-1.5">
+                        <input type="number" className="field px-2 py-1 text-sm w-24"
+                          value={b.operating_days ?? ''} onChange={(e) => updateBudget(idx, 'operating_days', e.target.value)} />
                       </td>
-                    ))}
-                  </tr>
-                ))}
+                      <td className="px-3 py-1.5" style={{ color: 'var(--text-dim)' }}>
+                        {inv ?? '-'}
+                      </td>
+                      {(['revenue_budget', 'rooms_budget', 'guests_budget'] as const).map((field) => (
+                        <td key={field} className="px-3 py-1.5">
+                          <input type="number" className="field px-2 py-1 text-sm w-24"
+                            value={b[field] ?? ''} onChange={(e) => updateBudget(idx, field, e.target.value)} />
+                        </td>
+                      ))}
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
