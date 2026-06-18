@@ -7,28 +7,28 @@ import { supabase } from '@/lib/supabase/client'
 
 const NAV_GROUPS: { group: string; items: { href: string; label: string }[] }[] = [
   {
-    group: 'VIEWS',
+    group: 'ビュー',
     items: [
-      { href: '/', label: 'Overview' },
-      { href: '/revenue', label: 'Revenue' },
+      { href: '/', label: '概要' },
+      { href: '/revenue', label: '売上分析' },
       { href: '/daily', label: '日別売上' },
     ],
   },
   {
-    group: 'ANALYSIS',
+    group: '分析',
     items: [
-      { href: '/rate', label: 'Rate' },
-      { href: '/cancel', label: 'Cancel' },
-      { href: '/fb', label: 'F&B' },
-      { href: '/ota', label: 'OTA' },
-      { href: '/yojitsu', label: '予実管理' },
+      { href: '/rate', label: 'レートコントロール' },
+      { href: '/cancel', label: 'キャンセル分析' },
+      { href: '/fb', label: '料飲分析' },
+      { href: '/ota', label: 'OTA分析' },
+      { href: '/yojitsu', label: '予実管理（PL）' },
     ],
   },
   {
-    group: 'TOOLS',
+    group: 'ツール',
     items: [
-      { href: '/upload', label: 'Upload' },
-      { href: '/settings', label: 'Settings' },
+      { href: '/upload', label: 'アップロード' },
+      { href: '/settings', label: '設定' },
     ],
   },
 ]

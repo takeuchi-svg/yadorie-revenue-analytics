@@ -159,18 +159,18 @@ export function transformOtherProduct(
       const pmsId = parseInt10(findCol(r, '予約ID', '予約No', 'ID'))
       if (!pmsId) return null
 
-      const itemName = findCol(r, '商品名', 'その他商品名', '品名') || null
+      const itemName = findCol(r, '商品', '商品名', 'その他商品名', '品名', '明細表記') || null
       const unitPrice = parseInt10(findCol(r, '単価', '金額'))
-      const quantity = parseInt10(findCol(r, '数量')) || 1
+      const quantity = parseInt10(findCol(r, '個数', '数量')) || 1
 
       return {
         facility,
         pms_id: pmsId,
-        status: findCol(r, 'ステータス', '状態') || null,
+        status: findCol(r, '予約状態', 'ステータス', '状態') || null,
         item_name: itemName,
         unit_price: unitPrice,
         quantity,
-        total: parseInt10(findCol(r, '合計', '小計')) || unitPrice * quantity,
+        total: parseInt10(findCol(r, '商品合計', '合計', '小計')) || unitPrice * quantity,
         category: classifyFbCategory(itemName),
         source_month: sourceMonth,
       }
@@ -199,8 +199,8 @@ export function transformPayment(
       return {
         facility,
         pms_id: pmsId,
-        payment_method: findCol(r, '入金方法', '支払方法', '決済方法') || null,
-        amount: parseInt10(findCol(r, '金額', '入金額', '支払額')),
+        payment_method: findCol(r, '支払い方法', '入金方法', '支払方法', '決済方法', '金種') || null,
+        amount: parseInt10(findCol(r, '入金金額', '金額', '入金額', '支払額')),
         source_month: sourceMonth,
       }
     })

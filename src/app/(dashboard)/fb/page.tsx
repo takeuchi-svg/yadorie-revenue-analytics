@@ -1,79 +1,103 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from 'recharts'
-import { fmtYen, fmtNum, CHART_AXIS, chartTooltip, channelColor } from '@/lib/ui'
+import { fmtYen, fmtNum, pct, CHART_AXIS, chartTooltip, channelColor } from '@/lib/ui'
 import { PageHeader, Kpi, Loading, Empty } from '@/components/page-bits'
 
-interface FbRow { month: string; category: string | null; revenue: number | null; count: number | null }
-interface PayRow { payment_method: string | null; amount: number | null }
+/* eslint-disable @typescript-eslint/no-explicit-any */
+interface OP { item_name: string | null; category: string | null; total: number | null; quantity: number | null; source_month: string | null; status: string | null }
+interface Pay { payment_method: string | null; amount: number | null; source_month: string | null }
+
+async function fetchAll(build: () => any): Promise<any[]> {
+  const size = 1000; let frm = 0; let all: any[] = []
+  for (let i = 0; i < 50; i++) {
+    const { data, error } = await build().range(frm, frm + size - 1)
+    if (error || !data || data.length === 0) break
+    all = all.concat(data); if (data.length < size) break; frm += size
+  }
+  return all
+}
 
 export default function FbPage() {
   const { current, currentFacility } = useFacility()
-  const [rows, setRows] = useState<FbRow[]>([])
-  const [pay, setPay] = useState<PayRow[]>([])
+  const [op, setOp] = useState<OP[]>([])
+  const [pay, setPay] = useState<Pay[]>([])
   const [month, setMonth] = useState('')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!current) return
     setLoading(true)
-    supabase.from('mart_fb_category').select('*').eq('facility', current).then(({ data }) => {
-      const r = (data as FbRow[]) ?? []
-      setRows(r)
-      const months = [...new Set(r.map((x) => x.month))].sort().reverse()
-      setMonth((m) => m || months[0] || '')
-      supabase.from('raw_payment').select('payment_method, amount').eq('facility', current).limit(5000)
-        .then(({ data: p }) => { setPay((p as PayRow[]) ?? []); setLoading(false) })
+    Promise.all([
+      fetchAll(() => supabase.from('raw_other_product').select('item_name, category, total, quantity, source_month, status').eq('facility', current).order('id')),
+      fetchAll(() => supabase.from('raw_payment').select('payment_method, amount, source_month').eq('facility', current).order('id')),
+    ]).then(([o, p]) => {
+      setOp((o as OP[]) ?? [])
+      setPay((p as Pay[]) ?? [])
+      setLoading(false)
     })
   }, [current])
 
-  const months = [...new Set(rows.map((r) => r.month))].sort().reverse()
-  const monthRows = rows.filter((r) => r.month === month)
-  const totalRev = monthRows.reduce((s, r) => s + (r.revenue || 0), 0)
-  const totalCount = monthRows.reduce((s, r) => s + (r.count || 0), 0)
-  const avgUnit = totalCount > 0 ? totalRev / totalCount : null
+  const months = useMemo(() => [...new Set(op.map((r) => r.source_month).filter(Boolean))].sort().reverse() as string[], [op])
+  useEffect(() => { if (months.length && !months.includes(month)) setMonth(months[0]) }, [months, month])
 
-  const catData = [...monthRows].sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
-    .map((r) => ({ name: r.category || 'その他', revenue: r.revenue || 0 }))
+  const rows = useMemo(() => op.filter((r) => r.source_month === month && (r.status == null || r.status === 'C/O')), [op, month])
+  const total = rows.reduce((s, r) => s + (r.total || 0), 0)
+  const qty = rows.reduce((s, r) => s + (r.quantity || 0), 0)
 
-  const payMap: Record<string, number> = {}
-  pay.forEach((p) => { const k = p.payment_method || '不明'; payMap[k] = (payMap[k] || 0) + (p.amount || 0) })
-  const payData = Object.entries(payMap).filter(([, v]) => v > 0).map(([name, value]) => ({ name, value }))
+  const byCat = useMemo(() => {
+    const m = new Map<string, number>()
+    rows.forEach((r) => { const k = r.category || 'その他'; m.set(k, (m.get(k) || 0) + (r.total || 0)) })
+    return [...m.entries()].map(([name, total]) => ({ name, total })).sort((a, b) => b.total - a.total)
+  }, [rows])
+
+  const topItems = useMemo(() => {
+    const m = new Map<string, { total: number; qty: number }>()
+    rows.forEach((r) => { const k = r.item_name || '(不明)'; const g = m.get(k) ?? { total: 0, qty: 0 }; g.total += r.total || 0; g.qty += r.quantity || 0; m.set(k, g) })
+    return [...m.entries()].map(([name, v]) => ({ name, ...v })).sort((a, b) => b.total - a.total).slice(0, 15)
+  }, [rows])
+
+  const payData = useMemo(() => {
+    const m = new Map<string, number>()
+    pay.filter((p) => p.source_month === month).forEach((p) => { const k = p.payment_method || '不明'; m.set(k, (m.get(k) || 0) + (p.amount || 0)) })
+    return [...m.entries()].filter(([, v]) => v > 0).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value)
+  }, [pay, month])
 
   return (
     <div className="p-6">
-      <PageHeader title="F&B / Upsell" subtitle={currentFacility?.name ?? current} month={month} months={months} onMonth={setMonth} />
-      {loading ? <Loading /> : rows.length === 0 ? <Empty /> : (
+      <PageHeader title="料飲分析" subtitle={currentFacility?.name ?? current} month={month} months={months} onMonth={setMonth} />
+      {loading ? <Loading /> : op.length === 0 ? (
+        <Empty message="その他商品情報を /upload からアップロードしてください" />
+      ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-            <Kpi label="F&B総売上" value={fmtYen(totalRev)} accent />
-            <Kpi label="提供数" value={fmtNum(totalCount)} />
-            <Kpi label="平均単価" value={fmtYen(avgUnit)} />
+            <Kpi label="料飲・物販売上" value={fmtYen(total)} accent />
+            <Kpi label="提供点数" value={fmtNum(qty)} />
+            <Kpi label="平均単価" value={fmtYen(qty > 0 ? total / qty : null)} />
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
             <div className="card p-4">
               <h2 className="text-sm font-semibold mb-3">カテゴリ別売上</h2>
-              {catData.length === 0 ? <p className="text-sm py-12 text-center" style={{ color: 'var(--text-dim)' }}>データなし</p> : (
+              {byCat.length === 0 ? <p className="text-sm py-12 text-center" style={{ color: 'var(--text-dim)' }}>データなし</p> : (
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={catData} layout="vertical" margin={{ left: 20 }}>
+                  <BarChart data={byCat} layout="vertical" margin={{ left: 20 }}>
                     <XAxis type="number" {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
                     <YAxis type="category" dataKey="name" {...CHART_AXIS} width={80} />
                     <Tooltip {...chartTooltip} formatter={(v) => fmtYen(Number(v))} />
-                    <Bar dataKey="revenue" fill="var(--accent)" radius={[0, 4, 4, 0]} />
+                    <Bar dataKey="total" fill="var(--accent)" radius={[0, 4, 4, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
             </div>
-
             <div className="card p-4">
-              <h2 className="text-sm font-semibold mb-3">決済方法構成（全期間）</h2>
+              <h2 className="text-sm font-semibold mb-3">決済方法構成</h2>
               {payData.length === 0 ? <p className="text-sm py-12 text-center" style={{ color: 'var(--text-dim)' }}>データなし</p> : (
                 <ResponsiveContainer width="100%" height={280}>
                   <PieChart>
@@ -86,6 +110,35 @@ export default function FbPage() {
                 </ResponsiveContainer>
               )}
             </div>
+          </div>
+
+          {/* 売れ筋 TOP15 */}
+          <div className="card overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-left">
+                  <th className="px-4 py-3">売れ筋 TOP15（{month}）</th>
+                  <th className="px-4 py-3">カテゴリ</th>
+                  <th className="px-4 py-3 text-right">数量</th>
+                  <th className="px-4 py-3 text-right">売上</th>
+                  <th className="px-4 py-3 text-right">構成比</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topItems.map((it, i) => {
+                  const cat = rows.find((r) => (r.item_name || '(不明)') === it.name)?.category || 'その他'
+                  return (
+                    <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                      <td className="px-4 py-2 font-medium">{i + 1}. {it.name}</td>
+                      <td className="px-4 py-2" style={{ color: 'var(--text-dim)' }}>{cat}</td>
+                      <td className="px-4 py-2 text-right">{fmtNum(it.qty)}</td>
+                      <td className="px-4 py-2 text-right">{fmtNum(it.total)}</td>
+                      <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{total > 0 ? pct(it.total / total) : '-'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
           </div>
         </>
       )}

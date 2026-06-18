@@ -18,6 +18,7 @@ export default function YojitsuPage() {
   const [actual, setActual] = useState<ARow[]>([])
   const [fy, setFy] = useState('')
   const [month, setMonth] = useState('')
+  const [view, setView] = useState<'month' | 'year'>('month')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -52,6 +53,14 @@ export default function YojitsuPage() {
   const bMap = useMemo(() => { const m: Record<string, number | null> = {}; budget.forEach((b) => { if (b.fiscal_year === fy && b.month === month) m[b.item_code] = b.amount }); return m }, [budget, fy, month])
   const aMap = useMemo(() => { const m: Record<string, ARow> = {}; actual.forEach((a) => { if (a.fiscal_year === fy && a.month === month) m[a.item_code] = a }); return m }, [actual, fy, month])
 
+  // 年度ビュー用: item_code → month → {budget, actual}
+  const yearMap = useMemo(() => {
+    const m: Record<string, Record<string, { b: number | null; a: number | null }>> = {}
+    budget.forEach((x) => { if (x.fiscal_year === fy) { (m[x.item_code] ??= {})[x.month] = { b: x.amount, a: (m[x.item_code]?.[x.month]?.a) ?? null } } })
+    actual.forEach((x) => { if (x.fiscal_year === fy) { (m[x.item_code] ??= {})[x.month] = { b: (m[x.item_code]?.[x.month]?.b) ?? null, a: x.actual } } })
+    return m
+  }, [budget, actual, fy])
+
   const hasActual = actual.some((a) => a.fiscal_year === fy)
 
   return (
@@ -62,12 +71,20 @@ export default function YojitsuPage() {
           <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current}</p>
         </div>
         <div className="flex items-center gap-2">
+          <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+            {(['month', 'year'] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)} className="px-3 py-1.5 text-xs"
+                style={{ background: view === v ? 'var(--accent)' : 'var(--surface)', color: view === v ? '#fff' : 'var(--text-dim)' }}>
+                {v === 'month' ? '単月' : '年度'}
+              </button>
+            ))}
+          </div>
           {fys.length > 0 && (
             <select className="field px-3 py-1.5 text-sm" value={fy} onChange={(e) => setFy(e.target.value)}>
               {fys.map((y) => <option key={y} value={y}>{y}年度</option>)}
             </select>
           )}
-          {months.length > 0 && (
+          {view === 'month' && months.length > 0 && (
             <select className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)}>
               {months.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
@@ -84,6 +101,7 @@ export default function YojitsuPage() {
               この年度の実績データ（actual_monthly）が未取込です。予算のみ表示します。
             </div>
           )}
+          {view === 'month' ? (
           <div className="card overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -124,8 +142,61 @@ export default function YojitsuPage() {
               </tbody>
             </table>
           </div>
+          ) : (
+          /* 年度ビュー: 項目固定 + 12ヶ月横スクロール（各セル 実績/達成率） */
+          <div className="card overflow-hidden">
+            <div className="flex">
+              <table className="text-sm shrink-0" style={{ borderRight: '2px solid var(--border)' }}>
+                <thead>
+                  <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-left">
+                    <th className="px-4 h-12 whitespace-nowrap">項目</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {items.map((it) => {
+                    const isCat = CATS.includes(it.name.trim())
+                    return (
+                      <tr key={it.code} style={{ borderTop: '1px solid var(--border)', background: isCat ? 'var(--surface2)' : undefined }}>
+                        <td className={`px-4 h-12 whitespace-nowrap ${isCat ? 'font-semibold' : ''}`}>{it.name}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              <div className="overflow-x-auto flex-1">
+                <table className="text-sm">
+                  <thead>
+                    <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-center">
+                      {months.map((m) => <th key={m} className="px-3 h-12 text-right whitespace-nowrap" style={{ minWidth: 96 }}>{m.slice(5)}月</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((it) => {
+                      const isCat = CATS.includes(it.name.trim())
+                      return (
+                        <tr key={it.code} style={{ borderTop: '1px solid var(--border)', background: isCat ? 'var(--surface2)' : undefined }}>
+                          {months.map((m) => {
+                            const cell = yearMap[it.code]?.[m]
+                            const a = cell?.a ?? null, b = cell?.b ?? null
+                            const rate = a != null && b ? a / b : null
+                            return (
+                              <td key={m} className="px-3 h-12 text-right whitespace-nowrap" style={{ minWidth: 96 }}>
+                                <div>{fmtNum(a)}</div>
+                                <div className="text-[10px]" style={{ color: rate == null ? 'var(--text-dim)' : rate >= 1 ? 'var(--green)' : 'var(--red)' }}>{rate == null ? '' : pct(rate)}</div>
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+          )}
           <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
-            予算=月次計画、実績・昨年=予実管理シート由来。達成率=実績÷予算、前年比=実績÷昨年。
+            予算=月次計画、実績・昨年=実績アップロード由来。{view === 'year' ? '各セル上=実績、下=達成率（実績÷予算）。' : '達成率=実績÷予算、前年比=実績÷昨年。'}
           </p>
         </>
       )}
