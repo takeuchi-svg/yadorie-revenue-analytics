@@ -535,6 +535,40 @@ CREATE POLICY "allow_all_authenticated" ON dim_ota_marketing
   FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
 -- ========================================
+-- 予算（スプレッドシート連携）
+-- ========================================
+CREATE TABLE IF NOT EXISTS budget_daily (
+  id BIGSERIAL PRIMARY KEY,
+  facility TEXT NOT NULL, fiscal_year TEXT NOT NULL, date DATE NOT NULL,
+  event_note TEXT, inventory INTEGER, rooms_sold NUMERIC, occ NUMERIC, companion NUMERIC,
+  guests NUMERIC, guest_unit NUMERIC, room_unit NUMERIC, room_revenue NUMERIC,
+  shop_revenue NUMERIC, beverage_revenue NUMERIC, extra_food_revenue NUMERIC,
+  daytrip_revenue NUMERIC, other_revenue NUMERIC, ancillary_revenue NUMERIC, total_revenue NUMERIC,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(facility, date)
+);
+CREATE INDEX IF NOT EXISTS idx_budget_daily_fac_date ON budget_daily(facility, date);
+
+CREATE TABLE IF NOT EXISTS budget_monthly (
+  id BIGSERIAL PRIMARY KEY,
+  facility TEXT NOT NULL, fiscal_year TEXT NOT NULL, month TEXT NOT NULL,
+  category TEXT, item_code TEXT NOT NULL, item_name TEXT NOT NULL,
+  amount NUMERIC, ratio NUMERIC, sort_order INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(facility, fiscal_year, month, item_code)
+);
+CREATE INDEX IF NOT EXISTS idx_budget_monthly_fac_month ON budget_monthly(facility, month);
+
+CREATE OR REPLACE VIEW mart_budget_revenue_monthly AS
+SELECT facility, month, amount AS revenue_budget
+FROM budget_monthly WHERE item_code = 'sales_total';
+
+ALTER TABLE budget_daily ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "allow_all_authenticated" ON budget_daily FOR ALL TO authenticated USING (true) WITH CHECK (true);
+ALTER TABLE budget_monthly ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "allow_all_authenticated" ON budget_monthly FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+-- ========================================
 -- FRY初期データ
 -- ========================================
 
