@@ -21,6 +21,7 @@ const NAV_GROUPS: { group: string; items: { href: string; label: string }[] }[] 
       { href: '/cancel', label: 'Cancel' },
       { href: '/fb', label: 'F&B' },
       { href: '/ota', label: 'OTA' },
+      { href: '/yojitsu', label: '予実管理' },
     ],
   },
   {

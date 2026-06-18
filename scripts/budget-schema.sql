@@ -56,6 +56,26 @@ ALTER TABLE budget_monthly ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "allow_all_authenticated" ON budget_monthly;
 CREATE POLICY "allow_all_authenticated" ON budget_monthly FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+-- 実績（⑦予実管理由来）
+CREATE TABLE IF NOT EXISTS actual_monthly (
+  id BIGSERIAL PRIMARY KEY,
+  facility TEXT NOT NULL,
+  fiscal_year TEXT NOT NULL,
+  month TEXT NOT NULL,
+  category TEXT,
+  item_code TEXT NOT NULL,
+  item_name TEXT NOT NULL,
+  actual NUMERIC,
+  prior_amount NUMERIC,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(facility, fiscal_year, month, item_code)
+);
+CREATE INDEX IF NOT EXISTS idx_actual_monthly_fac_month ON actual_monthly(facility, month);
+
+ALTER TABLE actual_monthly ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "allow_all_authenticated" ON actual_monthly;
+CREATE POLICY "allow_all_authenticated" ON actual_monthly FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- 月次売上予算ビュー（Overviewの予算達成率などで利用）
 CREATE OR REPLACE VIEW mart_budget_revenue_monthly AS
 SELECT facility, month, amount AS revenue_budget

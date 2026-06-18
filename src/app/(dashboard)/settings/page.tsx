@@ -4,21 +4,6 @@ import { useEffect, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 
-interface BudgetPL {
-  month: string
-  item_code: string
-  item_name: string
-  amount: number | null
-}
-const PL_SUMMARY = [
-  { code: 'sales_total', label: '売上予算' },
-  { code: 'cogs_total', label: '原価' },
-  { code: 'labor_total', label: '人件費' },
-  { code: 'sga_total', label: '販管費' },
-  { code: 'gop', label: 'GOP' },
-  { code: 'operating_income', label: '営業損益' },
-]
-
 interface OtaRow {
   id?: number
   facility: string
@@ -38,7 +23,6 @@ const OTA_METRICS = [
 export default function SettingsPage() {
   const { current, currentFacility } = useFacility()
   const [totalRooms, setTotalRooms] = useState<number | ''>('')
-  const [budgetPL, setBudgetPL] = useState<BudgetPL[]>([])
   const [otaData, setOtaData] = useState<OtaRow[]>([])
   const [otaMonth, setOtaMonth] = useState(() => {
     const now = new Date()
@@ -50,12 +34,6 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!current) return
     setTotalRooms(currentFacility?.total_rooms ?? '')
-    supabase
-      .from('budget_monthly')
-      .select('month, item_code, item_name, amount')
-      .eq('facility', current)
-      .order('month')
-      .then(({ data }) => setBudgetPL((data as BudgetPL[]) ?? []))
   }, [current, currentFacility])
 
   useEffect(() => {
@@ -88,11 +66,6 @@ export default function SettingsPage() {
     setMessage(error ? `Error: ${error.message}` : '保存しました')
     setSaving(false)
   }
-
-  // 月別予算はスプレッドシート取込（budget_monthly）が正。月→item_code→金額のピボット
-  const budgetMonths = [...new Set(budgetPL.map((b) => b.month))].sort()
-  const budgetAmount = (month: string, code: string) =>
-    budgetPL.find((b) => b.month === month && b.item_code === code)?.amount ?? null
 
   const updateOta = (ota: string, metric: string, value: string) => {
     setOtaData(otaData.map((r) =>
@@ -149,41 +122,6 @@ export default function SettingsPage() {
             保存
           </button>
         </div>
-      </section>
-
-      {/* Budget（スプレッドシート取込・読取専用） */}
-      <section className="card p-6">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="text-lg font-semibold">月別予算（P&L）</h2>
-          <span className="text-xs" style={{ color: 'var(--text-dim)' }}>計画スプレッドシート取込・読取専用</span>
-        </div>
-        {budgetMonths.length === 0 ? (
-          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>
-            予算データが未取込です。計画スプレッドシートから取り込んでください。
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="text-sm">
-              <thead>
-                <tr className="bg-[var(--surface2)] text-left text-[var(--text-dim)]">
-                  <th className="px-3 py-2 whitespace-nowrap">項目</th>
-                  {budgetMonths.map((m) => <th key={m} className="px-3 py-2 text-right whitespace-nowrap">{m}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {PL_SUMMARY.map((row) => (
-                  <tr key={row.code} style={{ borderTop: '1px solid var(--border)' }}>
-                    <td className="px-3 py-1.5 font-medium whitespace-nowrap">{row.label}</td>
-                    {budgetMonths.map((m) => {
-                      const v = budgetAmount(m, row.code)
-                      return <td key={m} className="px-3 py-1.5 text-right whitespace-nowrap">{v == null ? '-' : Math.round(v).toLocaleString()}</td>
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
       </section>
 
       {/* OTA Marketing */}

@@ -559,10 +559,22 @@ CREATE TABLE IF NOT EXISTS budget_monthly (
 );
 CREATE INDEX IF NOT EXISTS idx_budget_monthly_fac_month ON budget_monthly(facility, month);
 
+CREATE TABLE IF NOT EXISTS actual_monthly (
+  id BIGSERIAL PRIMARY KEY,
+  facility TEXT NOT NULL, fiscal_year TEXT NOT NULL, month TEXT NOT NULL,
+  category TEXT, item_code TEXT NOT NULL, item_name TEXT NOT NULL,
+  actual NUMERIC, prior_amount NUMERIC,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(facility, fiscal_year, month, item_code)
+);
+CREATE INDEX IF NOT EXISTS idx_actual_monthly_fac_month ON actual_monthly(facility, month);
+
 CREATE OR REPLACE VIEW mart_budget_revenue_monthly AS
 SELECT facility, month, amount AS revenue_budget
 FROM budget_monthly WHERE item_code = 'sales_total';
 
+ALTER TABLE actual_monthly ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "allow_all_authenticated" ON actual_monthly FOR ALL TO authenticated USING (true) WITH CHECK (true);
 ALTER TABLE budget_daily ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "allow_all_authenticated" ON budget_daily FOR ALL TO authenticated USING (true) WITH CHECK (true);
 ALTER TABLE budget_monthly ENABLE ROW LEVEL SECURITY;
