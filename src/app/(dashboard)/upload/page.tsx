@@ -8,9 +8,13 @@ import {
   parseXlsx,
   parseRateSheet,
   transformByType,
+  decodeCp932,
 } from '@/lib/etl'
 import type { DetectionResult, UploadPayload, UploadResult } from '@/lib/etl'
+import { parsePlCsv } from '@/lib/etl/pl-parser'
 import { supabase } from '@/lib/supabase/client'
+
+interface PlEntry { name: string; fy: string; rows: number; status: 'processing' | 'done' | 'error'; error?: string }
 
 interface FileEntry {
   file: File
@@ -28,6 +32,38 @@ export default function UploadPage() {
   >([])
   const [uploading, setUploading] = useState(false)
   const [globalFacility, setGlobalFacility] = useState<string>('')
+  const [tab, setTab] = useState<'sales' | 'pl'>('sales')
+  const [plFiles, setPlFiles] = useState<PlEntry[]>([])
+  const [plUploading, setPlUploading] = useState(false)
+
+  const handlePlFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return
+    if (facilityList.length === 0) await loadFacilities()
+    const facility = globalFacility
+    if (!facility) { alert('上部の「デフォルト施設」を選択してください'); return }
+    setPlUploading(true)
+    for (const file of Array.from(fileList)) {
+      const entry: PlEntry = { name: file.name, fy: '', rows: 0, status: 'processing' }
+      setPlFiles((prev) => [...prev, entry])
+      const upd = (patch: Partial<PlEntry>) => setPlFiles((prev) => prev.map((p) => (p === entry ? { ...p, ...patch } : p)))
+      try {
+        const text = decodeCp932(await file.arrayBuffer())
+        const { fiscalYear, rows } = parsePlCsv(text)
+        if (!fiscalYear || rows.length === 0) throw new Error('PLを解析できませんでした（フォーマット要確認）')
+        const payload = rows.map((r) => ({ ...r, facility }))
+        // 上書き: 同一 施設×年度 を削除してから投入
+        await supabase.from('actual_monthly').delete().eq('facility', facility).eq('fiscal_year', fiscalYear)
+        for (let i = 0; i < payload.length; i += 500) {
+          const { error } = await supabase.from('actual_monthly').insert(payload.slice(i, i + 500))
+          if (error) throw error
+        }
+        upd({ fy: fiscalYear, rows: payload.length, status: 'done' })
+      } catch (err) {
+        upd({ status: 'error', error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    setPlUploading(false)
+  }
 
   const loadFacilities = useCallback(async () => {
     const { data } = await supabase
@@ -244,7 +280,17 @@ export default function UploadPage() {
   return (
     <div className="min-h-screen p-6" style={{ background: 'var(--bg)' }}>
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-2xl font-bold mb-6">データアップロード</h1>
+        <h1 className="text-2xl font-bold mb-4">データアップロード</h1>
+
+        {/* Tabs */}
+        <div className="flex gap-1 mb-5">
+          {([['sales', '売上データ'], ['pl', 'PL実績']] as const).map(([k, label]) => (
+            <button key={k} onClick={() => setTab(k)} className="px-4 py-1.5 rounded-md text-sm"
+              style={{ background: tab === k ? 'var(--accent)' : 'var(--surface)', color: tab === k ? '#fff' : 'var(--text-dim)', border: '1px solid var(--border)' }}>
+              {label}
+            </button>
+          ))}
+        </div>
 
         {/* Facility selector */}
         <div className="mb-4 flex items-center gap-4">
@@ -264,6 +310,7 @@ export default function UploadPage() {
           </select>
         </div>
 
+        {tab === 'sales' && (<>
         {/* Drop zone */}
         <div
           className="border-2 border-dashed rounded-lg p-12 text-center transition-colors card"
@@ -375,6 +422,47 @@ export default function UploadPage() {
               </button>
             )}
           </div>
+        )}
+        </>)}
+
+        {tab === 'pl' && (
+          <>
+            <p className="text-sm mb-3" style={{ color: 'var(--text-dim)' }}>
+              月次推移：損益計算書のCSVをアップロードします（会計の実績）。年度はファイル内の期間から自動判定し、
+              <strong>同一施設×年度を上書き</strong>します。実績が入っている月のみ取り込みます（進行期の未来月はスキップ）。
+            </p>
+            <label
+              className="border-2 border-dashed rounded-lg p-12 text-center transition-colors card block cursor-pointer"
+              style={{ borderColor: 'var(--border)' }}
+            >
+              <p className="mb-2">損益計算書CSVをドロップ / クリックして選択</p>
+              <p className="text-sm" style={{ color: 'var(--text-dim)' }}>例: 月次推移：損益計算書_…（2025年04月～2026年03月）.csv</p>
+              <input type="file" className="hidden" multiple accept=".csv" onChange={(e) => { handlePlFiles(e.target.files); e.target.value = '' }} />
+            </label>
+
+            {plFiles.length > 0 && (
+              <div className="mt-6 space-y-2">
+                {plFiles.map((p, i) => (
+                  <div key={i} className={`border rounded-lg p-3 flex items-center gap-3 ${p.status === 'done' ? 'bg-green-500/10 border-green-500/40' : p.status === 'error' ? 'bg-red-500/10 border-red-500/40' : 'bg-[var(--surface)] border-[var(--border)]'}`}>
+                    <div className="w-6 flex-shrink-0">
+                      {p.status === 'done' && <span className="text-green-500">&#10003;</span>}
+                      {p.status === 'error' && <span className="text-red-500">&#10007;</span>}
+                      {p.status === 'processing' && <span className="inline-block w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{p.name}</p>
+                      <div className="text-xs mt-0.5" style={{ color: 'var(--text-dim)' }}>
+                        {p.status === 'done' && `${p.fy}年度 ・ ${p.rows}行 投入（上書き）`}
+                        {p.status === 'error' && <span style={{ color: 'var(--red)' }}>{p.error}</span>}
+                        {p.status === 'processing' && '処理中...'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {plUploading && <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>アップロード中...</p>}
+          </>
         )}
       </div>
     </div>
