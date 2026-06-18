@@ -10,9 +10,10 @@ import {
 import { fmtYen, fmtNum, pct, CHART_AXIS, chartTooltip, channelColor } from '@/lib/ui'
 import { Loading, Empty } from '@/components/page-bits'
 
-const TABS = ['チャネル', '客室', 'プラン', '曜日', '喫食', 'GS', 'ADR帯'] as const
+const TABS = ['チャネル', '客室', '居住地', 'プラン', '曜日', '喫食', 'GS', 'ADR帯'] as const
 type Tab = (typeof TABS)[number]
 const LINCOLN_TABS: Tab[] = ['プラン', '曜日', 'GS', 'ADR帯']
+const MEAL_ORDER = ['2食付', '朝食付', '夕食のみ', '素泊り', 'その他']
 
 const DOW_JP: Record<string, string> = { Mon: '月', Tue: '火', Wed: '水', Thu: '木', Fri: '金', Sat: '土', Sun: '日' }
 const DOW_ORDER = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -21,7 +22,18 @@ const BAND_ORDER = ['〜¥30,000', '¥30,000–50,000', '¥50,000–70,000', '¥
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface Ev { checkin: string | null; received_at: string | null; plan: string | null; rooms: number | null; guests_total: number | null; amount_gross: number | null }
+interface Resv { checkin: string | null; prefecture: string | null; revenue_settled: number | null; nights: number | null; guests_total: number | null }
 interface Row { name: string; revenue: number; rooms: number; guests: number; count?: number }
+
+async function fetchAll(build: () => any): Promise<any[]> {
+  const size = 1000; let frm = 0; let all: any[] = []
+  for (let i = 0; i < 50; i++) {
+    const { data, error } = await build().range(frm, frm + size - 1)
+    if (error || !data || data.length === 0) break
+    all = all.concat(data); if (data.length < size) break; frm += size
+  }
+  return all
+}
 
 const gsLabel = (g: number) => (g <= 1 ? '1名' : g >= 5 ? '5名以上' : `${g}名`)
 const bandLabel = (adr: number) =>
@@ -36,6 +48,7 @@ export default function RevenuePage() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<Record<string, any[]>>({})
   const [events, setEvents] = useState<Ev[]>([])
+  const [resv, setResv] = useState<Resv[]>([])
 
   useEffect(() => {
     if (!current) return
@@ -45,11 +58,14 @@ export default function RevenuePage() {
       supabase.from('mart_room_monthly').select('*').eq('facility', current),
       supabase.from('mart_room_type_monthly').select('*').eq('facility', current),
       supabase.from('mart_meal_monthly').select('*').eq('facility', current),
-      supabase.from('raw_booking_event').select('checkin, received_at, plan, rooms, guests_total, amount_gross')
-        .eq('facility', current).eq('event_type', '予約').limit(20000),
-    ]).then(([ch, room, rtype, meal, ev]) => {
+      fetchAll(() => supabase.from('raw_booking_event').select('checkin, received_at, plan, rooms, guests_total, amount_gross')
+        .eq('facility', current).eq('event_type', '予約').order('id')),
+      fetchAll(() => supabase.from('raw_reservation').select('checkin, prefecture, revenue_settled, nights, guests_total')
+        .eq('facility', current).eq('status', 'C/O').order('id')),
+    ]).then(([ch, room, rtype, meal, ev, rv]) => {
       setData({ channel: ch.data ?? [], room: room.data ?? [], rtype: rtype.data ?? [], meal: meal.data ?? [] })
-      setEvents((ev.data as Ev[]) ?? [])
+      setEvents((ev as Ev[]) ?? [])
+      setResv((rv as Resv[]) ?? [])
       setLoading(false)
     })
   }, [current])
@@ -62,11 +78,14 @@ export default function RevenuePage() {
     if (isLincoln) {
       ms = events.map((e) => (e[dateField] as string | null)?.slice(0, 7)).filter(Boolean) as string[]
     } else {
-      const src = tab === 'チャネル' ? data.channel : tab === '客室' ? data.room : data.meal
-      ms = (src ?? []).map((r: any) => r.month).filter(Boolean)
+      // PMS系タブは全ソースの月を統合
+      ms = [
+        ...(data.channel ?? []), ...(data.room ?? []), ...(data.meal ?? []),
+      ].map((r: any) => r.month).filter(Boolean)
+      ms = ms.concat(resv.map((r) => r.checkin?.slice(0, 7)).filter(Boolean) as string[])
     }
     return [...new Set(ms)].sort().reverse()
-  }, [isLincoln, dateField, events, tab, data])
+  }, [isLincoln, dateField, events, data, resv])
 
   useEffect(() => { if (months.length > 0 && !months.includes(month)) setMonth(months[0]) }, [months, month])
 
@@ -74,6 +93,17 @@ export default function RevenuePage() {
     () => events.filter((e) => (e[dateField] as string | null)?.slice(0, 7) === month),
     [events, dateField, month]
   )
+  const residenceRows = useMemo(() => {
+    const m = new Map<string, Row>()
+    for (const r of resv) {
+      if (r.checkin?.slice(0, 7) !== month) continue
+      const k = r.prefecture || '不明'
+      const g = m.get(k) ?? { name: k, revenue: 0, rooms: 0, guests: 0 }
+      g.revenue += r.revenue_settled || 0; g.rooms += r.nights || 0; g.guests += r.guests_total || 0
+      m.set(k, g)
+    }
+    return [...m.values()].sort((a, b) => b.revenue - a.revenue)
+  }, [resv, month])
 
   return (
     <div className="p-6">
@@ -117,9 +147,10 @@ export default function RevenuePage() {
         <>
           {tab === 'チャネル' && <ChannelTab rows={pmsRows(data.channel, month, 'channel')} />}
           {tab === '客室' && <RoomTab rooms={pmsRows(data.room, month, 'room')} types={pmsRows(data.rtype, month, 'room_type')} />}
+          {tab === '居住地' && <ResidenceTab rows={residenceRows} />}
           {tab === 'プラン' && <PlanTab events={monthEvents} />}
           {tab === '曜日' && <DowTab events={monthEvents} dateField={dateField} />}
-          {tab === '喫食' && <MealTab rows={(data.meal ?? []).filter((r) => r.month === month)} />}
+          {tab === '喫食' && <MealTab rows={(data.meal ?? []).filter((r) => r.month === month)} allMeal={data.meal ?? []} />}
           {tab === 'GS' && <GsTab events={monthEvents} />}
           {tab === 'ADR帯' && <AdrBandTab events={monthEvents} />}
         </>
@@ -250,6 +281,27 @@ function RoomTab({ rooms, types }: { rooms: Row[]; types: Row[] }) {
   )
 }
 
+/* ---- 居住地（都道府県・外国は国単位）---- */
+function ResidenceTab({ rows }: { rows: Row[] }) {
+  if (rows.length === 0) return <Empty message="この月のデータがありません" />
+  const chart = rows.slice(0, 15).map((r) => ({ name: r.name, revenue: r.revenue }))
+  return (
+    <>
+      <Section title="居住地別売上 TOP15（都道府県／外国は国単位）">
+        <ResponsiveContainer width="100%" height={Math.max(240, chart.length * 28)}>
+          <BarChart data={chart} layout="vertical" margin={{ left: 20 }}>
+            <XAxis type="number" {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1e6)}M`} />
+            <YAxis type="category" dataKey="name" {...CHART_AXIS} width={80} />
+            <Tooltip {...chartTooltip} formatter={(v) => fmtYen(Number(v))} />
+            <Bar dataKey="revenue" fill="var(--accent)" radius={[0, 4, 4, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Section>
+      <KpiTable dim="居住地" rows={rows} />
+    </>
+  )
+}
+
 /* ---- プラン ---- */
 function PlanTab({ events }: { events: Ev[] }) {
   if (events.length === 0) return <Empty message="この月のデータがありません" />
@@ -304,24 +356,66 @@ function DowTab({ events, dateField }: { events: Ev[]; dateField: keyof Ev }) {
 }
 
 /* ---- 喫食（予約単位）---- */
-function MealTab({ rows }: { rows: any[] }) {
-  if (rows.length === 0) return <Empty message="この月のデータがありません" />
+function MealTab({ rows, allMeal }: { rows: any[]; allMeal: any[] }) {
   const unified: Row[] = rows.map((r) => ({ name: r.meal_type || '不明', revenue: r.revenue || 0, rooms: r.rooms || 0, guests: r.guests || 0, count: r.reservations || 0 }))
     .sort((a, b) => (b.count || 0) - (a.count || 0))
   const chart = unified.map((r) => ({ name: r.name, count: r.count || 0 }))
+
+  // 月次構成比（予約数ベース）: 行=月, 列=喫食タイプ
+  const monthsAll = [...new Set((allMeal ?? []).map((r) => r.month))].sort().reverse()
+  const compRows = monthsAll.map((mo) => {
+    const mrows = (allMeal ?? []).filter((r) => r.month === mo)
+    const total = mrows.reduce((s, r) => s + (r.reservations || 0), 0)
+    const byType: Record<string, number> = {}
+    mrows.forEach((r) => { byType[r.meal_type] = (byType[r.meal_type] || 0) + (r.reservations || 0) })
+    return { month: mo, total, byType }
+  })
+
   return (
     <>
-      <Section title="喫食タイプ別 予約数（予約単位）">
-        <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={chart}>
-            <XAxis dataKey="name" {...CHART_AXIS} />
-            <YAxis {...CHART_AXIS} allowDecimals={false} />
-            <Tooltip {...chartTooltip} />
-            <Bar dataKey="count" name="予約数" fill="var(--accent)" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </Section>
-      <KpiTable dim="喫食タイプ" rows={unified} countLabel="予約数" />
+      {rows.length > 0 && (
+        <>
+          <Section title="喫食タイプ別 予約数（予約単位）">
+            <ResponsiveContainer width="100%" height={240}>
+              <BarChart data={chart}>
+                <XAxis dataKey="name" {...CHART_AXIS} />
+                <YAxis {...CHART_AXIS} allowDecimals={false} />
+                <Tooltip {...chartTooltip} />
+                <Bar dataKey="count" name="予約数" fill="var(--accent)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </Section>
+          <div className="mb-6"><KpiTable dim="喫食タイプ" rows={unified} countLabel="予約数" /></div>
+        </>
+      )}
+
+      <h3 className="text-sm font-semibold mb-2">月次 喫食構成比（予約数ベース）</h3>
+      {compRows.length === 0 ? <Empty /> : (
+        <div className="card overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-left">
+                <th className="px-4 py-3">月</th>
+                {MEAL_ORDER.map((m) => <th key={m} className="px-4 py-3 text-right">{m}</th>)}
+                <th className="px-4 py-3 text-right">予約数</th>
+              </tr>
+            </thead>
+            <tbody>
+              {compRows.map((r) => (
+                <tr key={r.month} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td className="px-4 py-2 font-medium">{r.month}</td>
+                  {MEAL_ORDER.map((m) => (
+                    <td key={m} className="px-4 py-2 text-right">
+                      {r.total > 0 && r.byType[m] ? pct(r.byType[m] / r.total) : '-'}
+                    </td>
+                  ))}
+                  <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{fmtNum(r.total)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </>
   )
 }
