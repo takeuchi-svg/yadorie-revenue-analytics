@@ -1,136 +1,189 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts'
 import { fmtNum, fmtYen, pct, CHART_AXIS, chartTooltip } from '@/lib/ui'
+import { Loading, Empty } from '@/components/page-bits'
 
-interface CxlRow { month: string; channel: string | null; bookings: number; cancels: number; cancel_revenue: number | null; cxl_rate: number | null }
-interface LtRow { month: string; bucket: string; count: number }
+/* eslint-disable @typescript-eslint/no-explicit-any */
+interface Ev { event_type: string; checkin: string | null; received_at: string | null; amount_gross: number | null; rooms: number | null; guests_total: number | null }
 
-const LT_ORDER = ['当日','1-3日前','4-6日前','7-13日前','14-20日前','21-27日前','28-55日前','56-83日前','84-111日前','112日以上前']
+async function fetchAll(build: () => any): Promise<any[]> {
+  const size = 1000; let frm = 0; let all: any[] = []
+  for (let i = 0; i < 50; i++) {
+    const { data, error } = await build().range(frm, frm + size - 1)
+    if (error || !data || data.length === 0) break
+    all = all.concat(data); if (data.length < size) break; frm += size
+  }
+  return all
+}
+
+const lt = (e: Ev) => {
+  if (!e.checkin || !e.received_at) return null
+  const d = Math.floor((new Date(e.checkin + 'T00:00:00Z').getTime() - new Date(e.received_at + 'T00:00:00Z').getTime()) / 86400000)
+  return d < 0 ? 0 : d
+}
+const BUCKETS: { label: string; lo: number; hi: number }[] = [
+  { label: 'A) 0-6日前', lo: 0, hi: 6 }, { label: 'B) 7-13日前', lo: 7, hi: 13 },
+  { label: 'C) 14-20日前', lo: 14, hi: 20 }, { label: 'D) 21-27日前', lo: 21, hi: 27 },
+  { label: 'E) 28-34日前', lo: 28, hi: 34 }, { label: 'F) 35-55日前', lo: 35, hi: 55 },
+  { label: 'G) 56-83日前', lo: 56, hi: 83 }, { label: 'H) 84-111日前', lo: 84, hi: 111 },
+  { label: 'I) 112日以上前', lo: 112, hi: Infinity },
+]
+const bucketOf = (d: number) => BUCKETS.find((b) => d >= b.lo && d <= b.hi)?.label ?? BUCKETS[0].label
 
 export default function CancelPage() {
   const { current, currentFacility } = useFacility()
-  const [rows, setRows] = useState<CxlRow[]>([])
-  const [lt, setLt] = useState<LtRow[]>([])
-  const [month, setMonth] = useState<string>('')
+  const [events, setEvents] = useState<Ev[]>([])
+  const [month, setMonth] = useState('all')
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     if (!current) return
     setLoading(true)
-    Promise.all([
-      supabase.from('mart_cxl_summary').select('*').eq('facility', current),
-      supabase.from('mart_cxl_lt').select('*').eq('facility', current),
-    ]).then(([sRes, ltRes]) => {
-      const s = (sRes.data as CxlRow[]) ?? []
-      setRows(s)
-      setLt((ltRes.data as LtRow[]) ?? [])
-      const months = [...new Set(s.map((r) => r.month))].sort().reverse()
-      setMonth((m) => m || months[0] || '')
-      setLoading(false)
-    })
+    fetchAll(() => supabase.from('raw_booking_event').select('event_type, checkin, received_at, amount_gross, rooms, guests_total').eq('facility', current).order('id'))
+      .then((d) => { setEvents(d as Ev[]); setLoading(false) })
   }, [current])
 
-  const months = [...new Set(rows.map((r) => r.month))].sort().reverse()
-  const monthRows = rows.filter((r) => r.month === month)
-  const bookings = monthRows.reduce((s, r) => s + (r.bookings || 0), 0)
-  const cancels = monthRows.reduce((s, r) => s + (r.cancels || 0), 0)
-  const cancelRev = monthRows.reduce((s, r) => s + (r.cancel_revenue || 0), 0)
-  const cxlRate = bookings + cancels > 0 ? cancels / (bookings + cancels) : null
-  const netBookings = bookings - cancels
+  const months = useMemo(() => [...new Set(events.map((e) => e.checkin?.slice(0, 7)).filter(Boolean))].sort().reverse() as string[], [events])
 
-  const ltData = LT_ORDER.map((b) => ({
-    bucket: b,
-    count: lt.filter((r) => r.month === month && r.bucket === b).reduce((s, r) => s + r.count, 0),
-  }))
+  const scope = useMemo(() => events.filter((e) => month === 'all' || e.checkin?.slice(0, 7) === month), [events, month])
+  const bookings = scope.filter((e) => e.event_type === '予約')
+  const cancels = scope.filter((e) => e.event_type === '取消')
+
+  const bk = bookings.length, cx = cancels.length
+  const cxlRate = bk + cx > 0 ? cx / (bk + cx) : null
+  const cxlAmount = cancels.reduce((s, e) => s + (e.amount_gross || 0), 0)
+  const netBookings = bk - cx
+
+  // LT分析テーブル（予約ベース） + 取消
+  const totalRooms = bookings.reduce((s, e) => s + (e.rooms || 0), 0)
+  const ltTable = BUCKETS.map((b) => {
+    const bb = bookings.filter((e) => { const d = lt(e); return d != null && d >= b.lo && d <= b.hi })
+    const cc = cancels.filter((e) => { const d = lt(e); return d != null && d >= b.lo && d <= b.hi })
+    const revenue = bb.reduce((s, e) => s + (e.amount_gross || 0), 0)
+    const rooms = bb.reduce((s, e) => s + (e.rooms || 0), 0)
+    const guests = bb.reduce((s, e) => s + (e.guests_total || 0), 0)
+    return {
+      label: b.label, bookings: bb.length, revenue, rooms, guests,
+      roomShare: totalRooms > 0 ? rooms / totalRooms : null,
+      adr: rooms > 0 ? Math.round(revenue / rooms) : null,
+      guestUnit: guests > 0 ? Math.round(revenue / guests) : null,
+      companion: rooms > 0 ? guests / rooms : null,
+      cancels: cc.length,
+      cxlRate: bb.length + cc.length > 0 ? cc.length / (bb.length + cc.length) : null,
+    }
+  })
+
+  // LT分布チャート（日別: 予約 vs 取消）
+  const dist = useMemo(() => {
+    const maxLt = 120
+    const arr = Array.from({ length: maxLt + 1 }, (_, d) => ({ lt: d, 予約: 0, 取消: 0 }))
+    let bkOver = 0, cxOver = 0
+    scope.forEach((e) => {
+      const d = lt(e); if (d == null) return
+      const key = e.event_type === '取消' ? '取消' : e.event_type === '予約' ? '予約' : null
+      if (!key) return
+      if (d <= maxLt) (arr[d] as any)[key]++
+      else { if (key === '予約') bkOver++; else cxOver++ }
+    })
+    arr.push({ lt: 999, 予約: bkOver, 取消: cxOver } as any)
+    return arr
+  }, [scope])
 
   return (
     <div className="p-6">
-      <Header title="Cancel" subtitle={currentFacility?.name ?? current} month={month} months={months} onMonth={setMonth} />
-      {loading ? <Loading /> : rows.length === 0 ? <Empty /> : (
+      <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold mb-1">CXL ＆ LT分析</h1>
+          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current}・チェックイン{month === 'all' ? '全期間' : month}</p>
+        </div>
+        <select className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)}>
+          <option value="all">全期間</option>
+          {months.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
+      </div>
+
+      {loading ? <Loading /> : events.length === 0 ? (
+        <Empty message="Lincoln予約検索CSVを /upload からアップロードしてください" />
+      ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <Kpi label="CXL率" value={pct(cxlRate)} accent />
-            <Kpi label="取消件数" value={fmtNum(cancels)} />
-            <Kpi label="取消金額" value={fmtYen(cancelRev)} />
+            <Kpi label="取消件数" value={fmtNum(cx)} />
+            <Kpi label="取消金額" value={fmtYen(cxlAmount)} />
             <Kpi label="ネット予約" value={fmtNum(netBookings)} />
           </div>
 
+          {/* LT分布 */}
           <div className="card p-4 mb-6">
-            <h2 className="text-sm font-semibold mb-3">キャンセル リードタイム分布</h2>
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={ltData}>
-                <XAxis dataKey="bucket" {...CHART_AXIS} interval={0} angle={-30} textAnchor="end" height={70} />
+            <h2 className="text-sm font-semibold mb-3">リードタイム分布（予約=青 / 取消=橙、横軸=チェックインまでの日数）</h2>
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={dist} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
+                <CartesianGrid stroke="#2e3347" vertical={false} />
+                <XAxis dataKey="lt" {...CHART_AXIS} interval={9} tickFormatter={(v) => (v === 999 ? '120+' : v)} />
                 <YAxis {...CHART_AXIS} allowDecimals={false} />
-                <Tooltip {...chartTooltip} />
-                <Bar dataKey="count" fill="var(--red)" radius={[4, 4, 0, 0]} />
+                <Tooltip {...chartTooltip} labelFormatter={(v) => (v === 999 ? '120日以上前' : `${v}日前`)} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar dataKey="予約" fill="#378ADD" />
+                <Bar dataKey="取消" fill="#D85A30" />
               </BarChart>
             </ResponsiveContainer>
           </div>
 
+          {/* LT分析テーブル */}
           <div className="card overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-sm whitespace-nowrap">
               <thead>
                 <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-left">
-                  <th className="px-4 py-3">チャネル</th>
-                  <th className="px-4 py-3 text-right">予約</th>
-                  <th className="px-4 py-3 text-right">取消</th>
-                  <th className="px-4 py-3 text-right">取消金額</th>
-                  <th className="px-4 py-3 text-right">CXL率</th>
+                  <th className="px-3 py-3">リードタイム</th>
+                  <th className="px-3 py-3 text-right">予約数</th>
+                  <th className="px-3 py-3 text-right">売上</th>
+                  <th className="px-3 py-3 text-right">室数</th>
+                  <th className="px-3 py-3 text-right">室数シェア</th>
+                  <th className="px-3 py-3 text-right">室単価</th>
+                  <th className="px-3 py-3 text-right">人泊数</th>
+                  <th className="px-3 py-3 text-right">客単価</th>
+                  <th className="px-3 py-3 text-right">同伴比率</th>
+                  <th className="px-3 py-3 text-right">取消数</th>
+                  <th className="px-3 py-3 text-right">取消率</th>
                 </tr>
               </thead>
               <tbody>
-                {monthRows.sort((a, b) => (b.cancels || 0) - (a.cancels || 0)).map((r) => (
-                  <tr key={r.channel} style={{ borderTop: '1px solid var(--border)' }}>
-                    <td className="px-4 py-2">{r.channel || '不明'}</td>
-                    <td className="px-4 py-2 text-right">{fmtNum(r.bookings)}</td>
-                    <td className="px-4 py-2 text-right">{fmtNum(r.cancels)}</td>
-                    <td className="px-4 py-2 text-right">{fmtNum(r.cancel_revenue)}</td>
-                    <td className="px-4 py-2 text-right">{pct(r.cxl_rate)}</td>
+                {ltTable.map((r) => (
+                  <tr key={r.label} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td className="px-3 py-2 font-medium">{r.label}</td>
+                    <td className="px-3 py-2 text-right">{fmtNum(r.bookings)}</td>
+                    <td className="px-3 py-2 text-right">{fmtNum(r.revenue)}</td>
+                    <td className="px-3 py-2 text-right">{fmtNum(r.rooms)}</td>
+                    <td className="px-3 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{pct(r.roomShare)}</td>
+                    <td className="px-3 py-2 text-right">{fmtNum(r.adr)}</td>
+                    <td className="px-3 py-2 text-right">{fmtNum(r.guests)}</td>
+                    <td className="px-3 py-2 text-right">{fmtNum(r.guestUnit)}</td>
+                    <td className="px-3 py-2 text-right">{r.companion?.toFixed(2) ?? '-'}</td>
+                    <td className="px-3 py-2 text-right">{fmtNum(r.cancels)}</td>
+                    <td className="px-3 py-2 text-right" style={{ color: r.cxlRate && r.cxlRate >= 0.3 ? 'var(--red)' : undefined }}>{pct(r.cxlRate)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
+            リードタイム=チェックイン日−予約受信日。予約・取消はLincoln通知ベース。
+          </p>
         </>
       )}
     </div>
   )
 }
 
-/* shared small components */
-function Header({ title, subtitle, month, months, onMonth }: { title: string; subtitle: string; month: string; months: string[]; onMonth: (m: string) => void }) {
-  return (
-    <div className="flex items-end justify-between mb-6">
-      <div>
-        <h1 className="text-2xl font-bold mb-1">{title}</h1>
-        <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{subtitle}</p>
-      </div>
-      {months.length > 0 && (
-        <select className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => onMonth(e.target.value)}>
-          {months.map((m) => <option key={m} value={m}>{m}</option>)}
-        </select>
-      )}
-    </div>
-  )
-}
 function Kpi({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
   return (
     <div className="card p-4">
       <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>{label}</p>
       <p className="text-xl font-bold" style={{ color: accent ? 'var(--accent)' : 'var(--text)' }}>{value}</p>
-    </div>
-  )
-}
-function Loading() { return <p style={{ color: 'var(--text-dim)' }}>読み込み中...</p> }
-function Empty() {
-  return (
-    <div className="card p-6 text-center" style={{ borderColor: 'var(--yellow)' }}>
-      <p className="font-medium" style={{ color: 'var(--yellow)' }}>データ未登録</p>
-      <p className="text-sm mt-1" style={{ color: 'var(--text-dim)' }}>/upload からファイルをアップロードしてください</p>
     </div>
   )
 }

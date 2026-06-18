@@ -18,7 +18,7 @@ const NAV_GROUPS: { group: string; items: { href: string; label: string }[] }[] 
     group: '分析',
     items: [
       { href: '/rate', label: 'レートコントロール' },
-      { href: '/cancel', label: 'キャンセル分析' },
+      { href: '/cancel', label: 'CXL＆LT分析' },
       { href: '/fb', label: '料飲分析' },
       { href: '/ota', label: 'OTA分析' },
       { href: '/yojitsu', label: '予実管理（PL）' },

@@ -49,6 +49,7 @@ export default function RevenuePage() {
   const [data, setData] = useState<Record<string, any[]>>({})
   const [events, setEvents] = useState<Ev[]>([])
   const [resv, setResv] = useState<Resv[]>([])
+  const [capByType, setCapByType] = useState<Record<string, number>>({})
 
   useEffect(() => {
     if (!current) return
@@ -62,10 +63,15 @@ export default function RevenuePage() {
         .eq('facility', current).eq('event_type', '予約').order('id')),
       fetchAll(() => supabase.from('raw_reservation').select('checkin, prefecture, revenue_settled, nights, guests_total')
         .eq('facility', current).eq('status', 'C/O').order('id')),
-    ]).then(([ch, room, rtype, meal, ev, rv]) => {
+      fetchAll(() => supabase.from('raw_room_sales').select('room_type, sold, stay_date').eq('facility', current).eq('scope', 'type').order('id')),
+    ]).then(([ch, room, rtype, meal, ev, rv, rsType]) => {
       setData({ channel: ch.data ?? [], room: room.data ?? [], rtype: rtype.data ?? [], meal: meal.data ?? [] })
       setEvents((ev as Ev[]) ?? [])
       setResv((rv as Resv[]) ?? [])
+      // 部屋タイプ別 室数（=日次最大販売室数の推定）
+      const cap: Record<string, number> = {}
+      ;(rsType as any[]).forEach((r) => { cap[r.room_type] = Math.max(cap[r.room_type] || 0, Number(r.sold) || 0) })
+      setCapByType(cap)
       setLoading(false)
     })
   }, [current])
@@ -146,7 +152,7 @@ export default function RevenuePage() {
       {loading ? <Loading /> : (
         <>
           {tab === 'チャネル' && <ChannelTab rows={pmsRows(data.channel, month, 'channel')} />}
-          {tab === '客室' && <RoomTab rooms={pmsRows(data.room, month, 'room')} types={pmsRows(data.rtype, month, 'room_type')} />}
+          {tab === '客室' && <RoomTab rooms={pmsRows(data.room, month, 'room')} types={pmsRows(data.rtype, month, 'room_type')} typeMonthly={data.rtype ?? []} capByType={capByType} />}
           {tab === '居住地' && <ResidenceTab rows={residenceRows} />}
           {tab === 'プラン' && <PlanTab events={monthEvents} />}
           {tab === '曜日' && <DowTab events={monthEvents} dateField={dateField} />}
@@ -243,12 +249,69 @@ function ChannelTab({ rows }: { rows: Row[] }) {
 }
 
 /* ---- 客室（部屋名 + 部屋タイプ）---- */
-function RoomTab({ rooms, types }: { rooms: Row[]; types: Row[] }) {
-  if (rooms.length === 0 && types.length === 0) return <Empty message="この月のデータがありません" />
+const TYPE_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7']
+const daysInMonth = (ym: string) => { const [y, m] = ym.split('-').map(Number); return new Date(y, m, 0).getDate() }
+
+function RoomTab({ rooms, types, typeMonthly, capByType }: { rooms: Row[]; types: Row[]; typeMonthly: any[]; capByType: Record<string, number> }) {
   const r = [...rooms].sort((a, b) => b.revenue - a.revenue)
   const t = [...types].sort((a, b) => b.revenue - a.revenue)
+
+  // 部屋タイプ別 月次トレンド（直近12ヶ月）: 稼働率 と ADR
+  const typeNames = [...new Set(typeMonthly.map((x) => x.room_type).filter(Boolean))]
+  const allMonths = [...new Set(typeMonthly.map((x) => x.month).filter(Boolean))].sort().slice(-12)
+  const lookup: Record<string, any> = {}
+  typeMonthly.forEach((x) => { lookup[x.month + '|' + x.room_type] = x })
+  const occData = allMonths.map((m) => {
+    const o: any = { month: m.slice(2) }
+    typeNames.forEach((tp) => {
+      const row = lookup[m + '|' + tp]
+      const cap = capByType[tp]
+      o[tp] = row && cap ? Math.round((Number(row.rooms_sold) / (cap * daysInMonth(m))) * 1000) / 10 : null
+    })
+    return o
+  })
+  const adrData = allMonths.map((m) => {
+    const o: any = { month: m.slice(2) }
+    typeNames.forEach((tp) => { const row = lookup[m + '|' + tp]; o[tp] = row ? Number(row.adr) : null })
+    return o
+  })
+
   return (
     <>
+      {typeNames.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+          <div className="card p-4">
+            <h2 className="text-sm font-semibold mb-3">部屋タイプ別 稼働率（月次・直近12ヶ月）</h2>
+            <ResponsiveContainer width="100%" height={260}>
+              <ComposedChart data={occData}>
+                <XAxis dataKey="month" {...CHART_AXIS} />
+                <YAxis {...CHART_AXIS} tickFormatter={(v) => `${v}%`} />
+                <Tooltip {...chartTooltip} formatter={(v) => (v == null ? '-' : `${v}%`)} />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
+                {typeNames.map((tp, i) => (
+                  <Line key={tp} dataKey={tp} name={tp} stroke={TYPE_COLORS[i % TYPE_COLORS.length]} strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                ))}
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="card p-4">
+            <h2 className="text-sm font-semibold mb-3">部屋タイプ別 ADR（月次・直近12ヶ月）</h2>
+            <ResponsiveContainer width="100%" height={260}>
+              <ComposedChart data={adrData}>
+                <XAxis dataKey="month" {...CHART_AXIS} />
+                <YAxis {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1000)}k`} />
+                <Tooltip {...chartTooltip} formatter={(v) => fmtYen(Number(v))} />
+                <Legend wrapperStyle={{ fontSize: 10 }} />
+                {typeNames.map((tp, i) => (
+                  <Line key={tp} dataKey={tp} name={tp} stroke={TYPE_COLORS[i % TYPE_COLORS.length]} strokeWidth={2} dot={{ r: 2 }} connectNulls />
+                ))}
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+      {rooms.length === 0 && types.length === 0 ? <Empty message="この月のデータがありません" /> : (
+      <>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
         <div className="card p-4">
           <h2 className="text-sm font-semibold mb-3">客室別売上</h2>
@@ -277,6 +340,8 @@ function RoomTab({ rooms, types }: { rooms: Row[]; types: Row[] }) {
       <div className="mb-4"><KpiTable dim="客室" rows={r} /></div>
       <h3 className="text-sm font-semibold mb-2">部屋タイプ別</h3>
       <KpiTable dim="部屋タイプ" rows={t} />
+      </>
+      )}
     </>
   )
 }
