@@ -74,6 +74,7 @@ export default function DailyPage() {
   const [soldMap, setSoldMap] = useState<Record<string, number>>({})
   const [revMap, setRevMap] = useState<Record<string, number>>({})
   const [guestMap, setGuestMap] = useState<Record<string, number>>({})
+  const [budgetMap, setBudgetMap] = useState<Record<string, Metrics>>({})
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
   const [rates, setRates] = useState<RateRow[]>([])
@@ -82,17 +83,19 @@ export default function DailyPage() {
 
   // KPI 表示制御
   const [visible, setVisible] = useState<Set<string>>(new Set(KPIS.map((k) => k.key)))
+  const [showBudget, setShowBudget] = useState(true)  // 予算
   const [showPY, setShowPY] = useState(false)   // 前年同日（曜日合わせ）
   const [showPM, setShowPM] = useState(false)   // 前年同月
 
-  // 1) 全販売室数 + 全予約（前年比較用に全期間） → 既定範囲
+  // 1) 全販売室数 + 全予約 + 予算（全期間） → 既定範囲
   useEffect(() => {
     if (!current) return
     setLoadingBase(true)
     Promise.all([
       fetchAll(() => supabase.from('mart_occupancy_daily').select('date, rooms_sold').eq('facility', current).order('date')),
       fetchAll(() => supabase.from('raw_reservation').select('checkin, nights, revenue_settled, guests_total').eq('facility', current).eq('status', 'C/O').order('id')),
-    ]).then(([sales, res]) => {
+      fetchAll(() => supabase.from('budget_daily').select('date, rooms_sold, occ, companion, guests, guest_unit, room_unit, total_revenue').eq('facility', current).order('date')),
+    ]).then(([sales, res, bud]) => {
       const sMap: Record<string, number> = {}
       for (const r of sales as any[]) sMap[r.date] = r.rooms_sold ?? 0
       const rMap: Record<string, number> = {}; const gMap: Record<string, number> = {}
@@ -105,7 +108,19 @@ export default function DailyPage() {
           gMap[d] = (gMap[d] ?? 0) + (r.guests_total ?? 0)
         }
       }
-      setSoldMap(sMap); setRevMap(rMap); setGuestMap(gMap)
+      const bMap: Record<string, Metrics> = {}
+      for (const b of bud as any[]) {
+        const rev = Number(b.total_revenue ?? 0), sold = Number(b.rooms_sold ?? 0), guests = Number(b.guests ?? 0)
+        bMap[b.date] = {
+          sold, revenue: Math.round(rev), guests,
+          guestUnit: b.guest_unit != null ? Math.round(Number(b.guest_unit)) : (guests > 0 ? Math.round(rev / guests) : null),
+          occ: b.occ != null ? Number(b.occ) : (totalRooms > 0 ? sold / totalRooms : null),
+          adr: b.room_unit != null ? Math.round(Number(b.room_unit)) : (sold > 0 ? Math.round(rev / sold) : null),
+          companion: b.companion != null ? Number(b.companion) : (sold > 0 ? guests / sold : null),
+          revpar: totalRooms > 0 ? Math.round(rev / totalRooms) : null,
+        }
+      }
+      setSoldMap(sMap); setRevMap(rMap); setGuestMap(gMap); setBudgetMap(bMap)
       const dates = Object.keys(sMap).sort()
       if (dates.length > 0) {
         const latest = dates[dates.length - 1].slice(0, 7)
@@ -113,7 +128,7 @@ export default function DailyPage() {
       }
       setLoadingBase(false)
     })
-  }, [current])
+  }, [current, totalRooms])
 
   // 2) 範囲のレートランク（全件ページネーション）
   useEffect(() => {
@@ -171,25 +186,35 @@ export default function DailyPage() {
       const cur = metricsFor(d)
       const py = showPY ? metricsFor(addDays(d, -364)) : null
       const pm = showPM ? metricsFor(prevYear(d)) : null
+      const bg = showBudget ? (budgetMap[d] ?? null) : null
       const o: any = { label: mmdd(d) }
       for (const k of KPIS) {
         o[`${k.key}__r`] = cur ? cur[k.key] : null
         o[`${k.key}_py__r`] = py ? py[k.key] : null
         o[`${k.key}_pm__r`] = pm ? pm[k.key] : null
+        o[`${k.key}_bg__r`] = bg ? bg[k.key] : null
       }
       return o
     })
     for (const k of KPIS) {
       let max = 0
-      for (const o of raw) for (const sfx of ['__r', '_py__r', '_pm__r']) { const v = o[`${k.key}${sfx}`]; if (v != null) max = Math.max(max, Math.abs(v)) }
+      for (const o of raw) for (const sfx of ['__r', '_py__r', '_pm__r', '_bg__r']) { const v = o[`${k.key}${sfx}`]; if (v != null) max = Math.max(max, Math.abs(v)) }
       for (const o of raw) {
         o[k.key] = o[`${k.key}__r`] != null && max > 0 ? (o[`${k.key}__r`] / max) * 100 : null
         o[`${k.key}_py`] = o[`${k.key}_py__r`] != null && max > 0 ? (o[`${k.key}_py__r`] / max) * 100 : null
         o[`${k.key}_pm`] = o[`${k.key}_pm__r`] != null && max > 0 ? (o[`${k.key}_pm__r`] / max) * 100 : null
+        o[`${k.key}_bg`] = o[`${k.key}_bg__r`] != null && max > 0 ? (o[`${k.key}_bg__r`] / max) * 100 : null
       }
     }
     return raw
-  }, [model, metricsFor, showPY, showPM])
+  }, [model, metricsFor, showPY, showPM, showBudget, budgetMap])
+
+  const budgetRange = useMemo(() => {
+    if (!model) return null
+    let rev = 0, sold = 0, has = false
+    for (const { date } of model.rows) { const b = budgetMap[date]; if (b) { has = true; rev += b.revenue || 0; sold += b.sold || 0 } }
+    return has ? { rev, sold } : null
+  }, [model, budgetMap])
 
   const HROW = 'h-9', HHEAD = 'h-11'
   const toggle = (key: string) => setVisible((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
@@ -214,6 +239,28 @@ export default function DailyPage() {
         <p style={{ color: 'var(--text-dim)' }}>範囲を選択してください</p>
       ) : (
         <>
+          {/* 範囲サマリ（実績 vs 予算） */}
+          {budgetRange && (
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+              <div className="card p-3">
+                <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>売上（実績／予算）</p>
+                <p className="text-lg font-bold">{fmtNum(model.total.revenue)} <span className="text-xs" style={{ color: 'var(--text-dim)' }}>/ {fmtNum(budgetRange.rev)}</span></p>
+              </div>
+              <div className="card p-3">
+                <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>売上 達成率</p>
+                <p className="text-lg font-bold" style={{ color: 'var(--accent)' }}>{budgetRange.rev > 0 ? pct(model.total.revenue / budgetRange.rev) : '-'}</p>
+              </div>
+              <div className="card p-3">
+                <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>販売室数（実績／予算）</p>
+                <p className="text-lg font-bold">{fmtNum(model.total.sold)} <span className="text-xs" style={{ color: 'var(--text-dim)' }}>/ {fmtNum(budgetRange.sold)}</span></p>
+              </div>
+              <div className="card p-3">
+                <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>販売室数 達成率</p>
+                <p className="text-lg font-bold" style={{ color: 'var(--accent)' }}>{budgetRange.sold > 0 ? pct(model.total.sold / budgetRange.sold) : '-'}</p>
+              </div>
+            </div>
+          )}
+
           {/* KPI 折れ線グラフ */}
           <div className="card p-4 mb-4">
             <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -228,6 +275,9 @@ export default function DailyPage() {
                 </label>
               ))}
               <span style={{ color: 'var(--border)' }}>|</span>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={showBudget} onChange={() => setShowBudget((v) => !v)} />予算
+              </label>
               <label className="flex items-center gap-1.5 cursor-pointer">
                 <input type="checkbox" checked={showPY} onChange={() => setShowPY((v) => !v)} />前年同日（曜日合わせ）
               </label>
@@ -244,6 +294,9 @@ export default function DailyPage() {
                 {KPIS.filter((k) => visible.has(k.key)).map((k) => (
                   <Line key={k.key} dataKey={k.key} name={k.label} stroke={k.color} dot={false} strokeWidth={2} connectNulls={false} isAnimationActive={false} />
                 ))}
+                {showBudget && KPIS.filter((k) => visible.has(k.key)).map((k) => (
+                  <Line key={k.key + '_bg'} dataKey={`${k.key}_bg`} stroke={k.color} dot={false} strokeWidth={1.5} strokeDasharray="6 4" strokeOpacity={0.6} connectNulls={false} isAnimationActive={false} />
+                ))}
                 {showPY && KPIS.filter((k) => visible.has(k.key)).map((k) => (
                   <Line key={k.key + '_py'} dataKey={`${k.key}_py`} stroke={k.color} dot={false} strokeWidth={1.5} strokeDasharray="5 3" strokeOpacity={0.7} connectNulls={false} isAnimationActive={false} />
                 ))}
@@ -253,7 +306,7 @@ export default function DailyPage() {
               </LineChart>
             </ResponsiveContainer>
             <p className="text-[10px] mt-1" style={{ color: 'var(--text-dim)' }}>
-              実線=当年 / 破線=前年同日 / 点線=前年同月。各線は指標ごとに正規化（実値はホバーで表示）。
+              実線=実績 / 破線=予算 / 破線=前年同日 / 点線=前年同月。各線は指標ごとに正規化（実値はホバーで表示）。
             </p>
           </div>
 
@@ -358,8 +411,8 @@ function KpiTooltip({ active, payload, label }: any) {
       <div style={{ color: '#8b8fa3', marginBottom: 4 }}>{label}</div>
       {payload.map((p: any, i: number) => {
         const dk: string = p.dataKey
-        const suffix = dk.endsWith('_py') ? '（前年同日）' : dk.endsWith('_pm') ? '（前年同月）' : ''
-        const base = dk.replace(/_(py|pm)$/, '')
+        const suffix = dk.endsWith('_py') ? '（前年同日）' : dk.endsWith('_pm') ? '（前年同月）' : dk.endsWith('_bg') ? '（予算）' : ''
+        const base = dk.replace(/_(py|pm|bg)$/, '')
         const kpi = KPIS.find((k) => k.key === base)
         if (!kpi) return null
         const real = p.payload[`${dk}__r`]

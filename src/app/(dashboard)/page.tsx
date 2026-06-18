@@ -32,6 +32,7 @@ export default function OverviewPage() {
   const [kpi, setKpi] = useState<MonthlyKpi[]>([])
   const [occByMonth, setOccByMonth] = useState<Record<string, number | null>>({})
   const [capByMonth, setCapByMonth] = useState<Record<string, number | null>>({})
+  const [budgetByMonth, setBudgetByMonth] = useState<Record<string, number | null>>({})
   const [channels, setChannels] = useState<ChannelRow[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -42,7 +43,8 @@ export default function OverviewPage() {
       supabase.from('mart_monthly_kpi').select('*').eq('facility', current)
         .order('month', { ascending: false }).limit(12),
       supabase.from('mart_occupancy_monthly').select('month, occ, rooms_sold, operating_days, total_rooms').eq('facility', current),
-    ]).then(([kpiRes, occRes]) => {
+      supabase.from('mart_budget_revenue_monthly').select('month, revenue_budget').eq('facility', current),
+    ]).then(([kpiRes, occRes, budRes]) => {
       const kpiData = (kpiRes.data as MonthlyKpi[]) ?? []
       setKpi(kpiData)
       const occMap: Record<string, number | null> = {}
@@ -51,6 +53,9 @@ export default function OverviewPage() {
         occMap[o.month] = o.occ
         capMap[o.month] = (o.total_rooms && o.operating_days) ? o.total_rooms * o.operating_days : null
       })
+      const budMap: Record<string, number | null> = {}
+      ;((budRes.data as { month: string; revenue_budget: number | null }[]) ?? []).forEach((b) => { budMap[b.month] = b.revenue_budget })
+      setBudgetByMonth(budMap)
       setOccByMonth(occMap)
       setCapByMonth(capMap)
 
@@ -74,8 +79,9 @@ export default function OverviewPage() {
   const latestCap = latest ? capByMonth[latest.month] ?? null : null
   // REVPAR = 売上 ÷ 利用可能室数（総室数×営業日数）。予算入力なしで自動算出。
   const latestRevpar = latest && latest.revenue && latestCap ? latest.revenue / latestCap : latest?.revpar ?? null
-  const budgetRate = latest && latest.revenue && latest.revenue_budget
-    ? latest.revenue / latest.revenue_budget : null
+  const latestBudget = latest ? budgetByMonth[latest.month] ?? latest.revenue_budget ?? null : null
+  const budgetRate = latest && latest.revenue && latestBudget
+    ? latest.revenue / latestBudget : null
 
   // Trend (oldest→newest, last 6)
   const trend = [...kpi].reverse().slice(-6).map((r) => ({
