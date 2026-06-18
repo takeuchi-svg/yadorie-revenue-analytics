@@ -11,7 +11,7 @@ const NAV_GROUPS: { group: string; items: { href: string; label: string }[] }[] 
     items: [
       { href: '/', label: 'Overview' },
       { href: '/revenue', label: 'Revenue' },
-      { href: '/onhand', label: 'On-hand' },
+      { href: '/daily', label: '日別売上' },
     ],
   },
   {
