@@ -580,6 +580,16 @@ CREATE POLICY "allow_all_authenticated" ON budget_daily FOR ALL TO authenticated
 ALTER TABLE budget_monthly ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "allow_all_authenticated" ON budget_monthly FOR ALL TO authenticated USING (true) WITH CHECK (true);
 
+-- 概要のAIサマリ キャッシュ（月が変わった時だけ生成）
+CREATE TABLE IF NOT EXISTS ai_summary (
+  id BIGSERIAL PRIMARY KEY,
+  facility TEXT NOT NULL, month TEXT NOT NULL, content TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(facility, month)
+);
+ALTER TABLE ai_summary ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "allow_all_authenticated" ON ai_summary FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- ========================================
 -- FRY初期データ
 -- ========================================

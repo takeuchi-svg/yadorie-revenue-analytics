@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import {
@@ -27,6 +27,9 @@ interface MonthlyKpi {
 
 interface OccRow { month: string; occ: number | null; rooms_sold: number | null; operating_days: number | null; total_rooms: number | null }
 interface ChannelRow { channel: string | null; revenue: number | null }
+
+// AIサマリのセッション内キャッシュ（facility|month → 本文）
+const summaryCache = new Map<string, string>()
 
 export default function OverviewPage() {
   const { current, currentFacility } = useFacility()
@@ -77,16 +80,33 @@ export default function OverviewPage() {
     })
   }, [current])
 
-  // 概要のAIサマリ（当月実績の自動要約）
+  // 概要のAIサマリ（月が変わった時だけ生成。メモリ＋DBキャッシュ）
+  const genSummary = useCallback(async (facility: string, month: string, force = false) => {
+    const key = `${facility}|${month}`
+    if (!force && summaryCache.has(key)) { setAiSummary(summaryCache.get(key)!); return }
+    if (!force) {
+      try {
+        const { data } = await supabase.from('ai_summary').select('content').eq('facility', facility).eq('month', month).maybeSingle()
+        if (data?.content) { summaryCache.set(key, data.content); setAiSummary(data.content); return }
+      } catch { /* テーブル未作成等は無視（メモリのみで動作） */ }
+    }
+    setAiLoading(true); setAiSummary('')
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ facility, messages: [{ role: 'user', content: `${month}の当施設の実績を、売上・稼働率・予算達成率・前年比などの観点から3〜4行で簡潔に要約してください。本文のみ（表やグラフは不要）。` }] }),
+      })
+      const d = await res.json()
+      const text = d.reply || ''
+      setAiSummary(text); summaryCache.set(key, text)
+      try { await supabase.from('ai_summary').upsert({ facility, month, content: text }, { onConflict: 'facility,month' }) } catch { /* ignore */ }
+    } catch { setAiSummary('') } finally { setAiLoading(false) }
+  }, [])
+
   useEffect(() => {
     const lm = kpi[0]?.month
-    if (!current || !lm) return
-    setAiLoading(true); setAiSummary('')
-    fetch('/api/chat', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ facility: current, messages: [{ role: 'user', content: `${lm}の当施設の実績を、売上・稼働率・予算達成率・前年比などの観点から3〜4行で簡潔に要約してください。本文のみ（表やグラフは不要）。` }] }),
-    }).then((r) => r.json()).then((d) => setAiSummary(d.reply || '')).catch(() => setAiSummary('')).finally(() => setAiLoading(false))
-  }, [current, kpi])
+    if (current && lm) genSummary(current, lm)
+  }, [current, kpi, genSummary])
 
   const latest = kpi[0]
   const latestOcc = latest ? occByMonth[latest.month] ?? null : null
@@ -140,6 +160,15 @@ export default function OverviewPage() {
             <div className="flex items-center gap-2 mb-2">
               <SparkleIcon size={16} />
               <h2 className="text-sm font-semibold">AI実績サマリ（{latest?.month}）</h2>
+              <button
+                onClick={() => latest && genSummary(current, latest.month, true)}
+                disabled={aiLoading || !latest}
+                className="ml-auto text-xs px-2 py-0.5 rounded-md hover:opacity-80 disabled:opacity-40"
+                style={{ color: 'var(--text-dim)', border: '1px solid var(--border)' }}
+                title="最新データで再生成"
+              >
+                ↻ 再生成
+              </button>
             </div>
             {aiLoading ? (
               <p className="text-sm" style={{ color: 'var(--text-dim)' }}>生成中...</p>
