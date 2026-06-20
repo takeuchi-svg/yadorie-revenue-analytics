@@ -12,6 +12,16 @@ interface ARow { fiscal_year: string; month: string; item_code: string; actual: 
 
 const CATS = ['売上', '原価', '人件費', '販売管理費', 'GOP', 'EBITDA', '営業損益']
 
+async function fetchAll(build: () => any): Promise<any[]> {
+  const size = 1000; let frm = 0; let all: any[] = []
+  for (let i = 0; i < 50; i++) {
+    const { data, error } = await build().range(frm, frm + size - 1)
+    if (error || !data || data.length === 0) break
+    all = all.concat(data); if (data.length < size) break; frm += size
+  }
+  return all
+}
+
 export default function YojitsuPage() {
   const { current, currentFacility } = useFacility()
   const [budget, setBudget] = useState<BRow[]>([])
@@ -25,11 +35,11 @@ export default function YojitsuPage() {
     if (!current) return
     setLoading(true)
     Promise.all([
-      supabase.from('budget_monthly').select('fiscal_year, month, category, item_code, item_name, amount, sort_order').eq('facility', current).order('sort_order'),
-      supabase.from('actual_monthly').select('fiscal_year, month, item_code, actual, prior_amount').eq('facility', current),
+      fetchAll(() => supabase.from('budget_monthly').select('fiscal_year, month, category, item_code, item_name, amount, sort_order').eq('facility', current).order('id')),
+      fetchAll(() => supabase.from('actual_monthly').select('fiscal_year, month, item_code, actual, prior_amount').eq('facility', current).order('id')),
     ]).then(([b, a]) => {
-      setBudget((b.data as BRow[]) ?? [])
-      setActual((a.data as ARow[]) ?? [])
+      setBudget((b as BRow[]) ?? [])
+      setActual((a as ARow[]) ?? [])
       setLoading(false)
     })
   }, [current])
