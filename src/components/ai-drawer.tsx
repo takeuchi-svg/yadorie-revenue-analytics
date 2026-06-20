@@ -2,6 +2,60 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { CHART_AXIS, chartTooltip } from '@/lib/ui'
+
+const SERIES_COLORS = ['#c75b39', '#2e9e6b', '#d98a2b', '#378ADD', '#9168E0', '#84cc16']
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function MiniChart({ spec }: { spec: any }) {
+  const series: { key: string; label?: string }[] = spec.series || []
+  const data = spec.data || []
+  const fmtY = (v: number) => (Math.abs(v) >= 1e6 ? `${Math.round(v / 1e5) / 10}M` : Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`)
+  return (
+    <div className="my-2 rounded-md p-2" style={{ background: 'var(--surface2)' }}>
+      {spec.title && <div className="text-[11px] mb-1" style={{ color: 'var(--text-dim)' }}>{spec.title}</div>}
+      <ResponsiveContainer width="100%" height={180}>
+        {spec.type === 'line' ? (
+          <LineChart data={data}>
+            <XAxis dataKey={spec.x} {...CHART_AXIS} tick={{ fill: '#927e6a', fontSize: 9 }} />
+            <YAxis {...CHART_AXIS} tick={{ fill: '#927e6a', fontSize: 9 }} tickFormatter={fmtY} width={36} />
+            <Tooltip {...chartTooltip} />
+            {series.map((s, i) => <Line key={s.key} dataKey={s.key} name={s.label || s.key} stroke={SERIES_COLORS[i % SERIES_COLORS.length]} strokeWidth={2} dot={false} />)}
+          </LineChart>
+        ) : (
+          <BarChart data={data}>
+            <XAxis dataKey={spec.x} {...CHART_AXIS} tick={{ fill: '#927e6a', fontSize: 9 }} />
+            <YAxis {...CHART_AXIS} tick={{ fill: '#927e6a', fontSize: 9 }} tickFormatter={fmtY} width={36} />
+            <Tooltip {...chartTooltip} />
+            {series.map((s, i) => <Bar key={s.key} dataKey={s.key} name={s.label || s.key} fill={SERIES_COLORS[i % SERIES_COLORS.length]} radius={[3, 3, 0, 0]} />)}
+          </BarChart>
+        )}
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
+export function AssistantContent({ content }: { content: string }) {
+  const parts: { t: 'md' | 'chart'; v: any }[] = []
+  const re = /```chart\s*([\s\S]*?)```/g
+  let last = 0, m: RegExpExecArray | null
+  while ((m = re.exec(content))) {
+    if (m.index > last) parts.push({ t: 'md', v: content.slice(last, m.index) })
+    try { parts.push({ t: 'chart', v: JSON.parse(m[1]) }) } catch { parts.push({ t: 'md', v: m[1] }) }
+    last = re.lastIndex
+  }
+  if (last < content.length) parts.push({ t: 'md', v: content.slice(last) })
+  return (
+    <div className="aimd text-sm">
+      {parts.map((p, i) => p.t === 'chart'
+        ? <MiniChart key={i} spec={p.v} />
+        : <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>{p.v}</ReactMarkdown>)}
+    </div>
+  )
+}
 
 interface Msg { role: 'user' | 'assistant'; content: string }
 
@@ -76,9 +130,9 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
         )}
         {messages.map((m, i) => (
           <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-            <div className="max-w-[85%] px-3 py-2 rounded-lg text-sm whitespace-pre-wrap"
+            <div className="max-w-[90%] px-3 py-2 rounded-lg text-sm"
               style={{ background: m.role === 'user' ? 'var(--accent)' : 'var(--surface2)', color: m.role === 'user' ? '#fff' : 'var(--text)' }}>
-              {m.content}
+              {m.role === 'user' ? <span className="whitespace-pre-wrap">{m.content}</span> : <AssistantContent content={m.content} />}
             </div>
           </div>
         ))}

@@ -37,20 +37,20 @@ export function channelColor(name: string, index = 0): string {
   return FALLBACK_PALETTE[index % FALLBACK_PALETTE.length]
 }
 
-// Recharts 共通スタイル（ダーク）
+// Recharts 共通スタイル（ライト/ウォーム）
 export const CHART_AXIS = {
-  tick: { fill: '#8b8fa3', fontSize: 11 },
-  axisLine: { stroke: '#2e3347' },
-  tickLine: { stroke: '#2e3347' },
+  tick: { fill: '#927e6a', fontSize: 11 },
+  axisLine: { stroke: '#e7dac6' },
+  tickLine: { stroke: '#e7dac6' },
 }
 
 export const chartTooltip = {
   contentStyle: {
-    background: '#1a1d27',
-    border: '1px solid #2e3347',
+    background: '#ffffff',
+    border: '1px solid #e7dac6',
     borderRadius: 8,
-    color: '#e4e6f0',
+    color: '#3d2b1f',
     fontSize: 12,
   },
-  labelStyle: { color: '#8b8fa3' },
+  labelStyle: { color: '#927e6a' },
 }

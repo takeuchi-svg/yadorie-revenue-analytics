@@ -329,7 +329,7 @@ function RoomTab({ rooms, types, typeMonthly, capByType }: { rooms: Row[]; types
           <ResponsiveContainer width="100%" height={Math.max(220, t.length * 30)}>
             <BarChart data={t} layout="vertical" margin={{ left: 30 }}>
               <XAxis type="number" {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1e6)}M`} />
-              <YAxis type="category" dataKey="name" {...CHART_AXIS} width={120} tick={{ fill: '#8b8fa3', fontSize: 10 }} />
+              <YAxis type="category" dataKey="name" {...CHART_AXIS} width={120} tick={{ fill: '#927e6a', fontSize: 10 }} />
               <Tooltip {...chartTooltip} formatter={(v) => fmtYen(Number(v))} />
               <Bar dataKey="revenue" fill="#22c55e" radius={[0, 4, 4, 0]} />
             </BarChart>
@@ -378,7 +378,7 @@ function PlanTab({ events }: { events: Ev[] }) {
         <ResponsiveContainer width="100%" height={Math.max(240, chart.length * 30)}>
           <BarChart data={chart} layout="vertical" margin={{ left: 30 }}>
             <XAxis type="number" {...CHART_AXIS} tickFormatter={(v) => `${Math.round(v / 1e6)}M`} />
-            <YAxis type="category" dataKey="name" {...CHART_AXIS} width={140} tick={{ fill: '#8b8fa3', fontSize: 10 }} />
+            <YAxis type="category" dataKey="name" {...CHART_AXIS} width={140} tick={{ fill: '#927e6a', fontSize: 10 }} />
             <Tooltip {...chartTooltip} formatter={(v) => fmtYen(Number(v))} />
             <Bar dataKey="revenue" fill="var(--accent)" radius={[0, 4, 4, 0]} />
           </BarChart>
@@ -519,7 +519,7 @@ function AdrBandTab({ events }: { events: Ev[] }) {
       <Section title="ADR帯 分布">
         <ResponsiveContainer width="100%" height={300}>
           <ComposedChart data={chart} margin={{ bottom: 20 }}>
-            <XAxis dataKey="name" {...CHART_AXIS} interval={0} angle={-15} textAnchor="end" height={60} tick={{ fill: '#8b8fa3', fontSize: 10 }} />
+            <XAxis dataKey="name" {...CHART_AXIS} interval={0} angle={-15} textAnchor="end" height={60} tick={{ fill: '#927e6a', fontSize: 10 }} />
             <YAxis yAxisId="l" {...CHART_AXIS} allowDecimals={false} />
             <YAxis yAxisId="r" orientation="right" {...CHART_AXIS} tickFormatter={yenAxis} width={70} />
             <Tooltip {...chartTooltip} formatter={(v) => fmtYen(Number(v))} />

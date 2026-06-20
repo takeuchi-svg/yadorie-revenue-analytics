@@ -1,19 +1,19 @@
 @import "tailwindcss";
 
 /* ============================================================
-   売上分析BI — ダークテーマ（UI仕様書 §1.2 準拠）
+   売上分析BI — ヤドリエ ブランドテーマ（ライト/ウォーム）
    ============================================================ */
 :root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --surface2: #232733;
-  --border: #2e3347;
-  --text: #e4e6f0;
-  --text-dim: #8b8fa3;
-  --accent: #6366f1;
-  --green: #22c55e;
-  --red: #ef4444;
-  --yellow: #f59e0b;
+  --bg: #faf5ec;       /* クリーム地 */
+  --surface: #ffffff;   /* カード */
+  --surface2: #f4ecdf;  /* 入力/淡い面 */
+  --border: #e7dac6;    /* ボーダー */
+  --text: #3d2b1f;      /* 濃いブラウン */
+  --text-dim: #927e6a;  /* 淡いブラウン */
+  --accent: #c75b39;    /* テラコッタ */
+  --green: #2e9e6b;
+  --red: #d64545;
+  --yellow: #d98a2b;
 }
 
 @theme inline {
@@ -53,3 +53,17 @@ html, body {
   outline: none;
   border-color: var(--accent);
 }
+
+/* AI回答のMarkdown */
+.aimd > * { margin: 0.35rem 0; }
+.aimd p { line-height: 1.6; }
+.aimd strong { font-weight: 700; }
+.aimd ul, .aimd ol { padding-left: 1.2rem; }
+.aimd ul { list-style: disc; }
+.aimd ol { list-style: decimal; }
+.aimd table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 0.4rem 0; }
+.aimd th, .aimd td { border: 1px solid var(--border); padding: 4px 8px; text-align: right; }
+.aimd th:first-child, .aimd td:first-child { text-align: left; }
+.aimd thead th { background: var(--bg); color: var(--text-dim); font-weight: 600; }
+.aimd h1, .aimd h2, .aimd h3 { font-weight: 700; margin: 0.4rem 0 0.2rem; }
+.aimd code { background: var(--bg); padding: 0 4px; border-radius: 4px; }

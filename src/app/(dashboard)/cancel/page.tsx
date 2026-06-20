@@ -122,7 +122,7 @@ export default function CancelPage() {
             <h2 className="text-sm font-semibold mb-3">リードタイム分布（予約=青 / 取消=橙、横軸=チェックインまでの日数）</h2>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={dist} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
-                <CartesianGrid stroke="#2e3347" vertical={false} />
+                <CartesianGrid stroke="#e7dac6" vertical={false} />
                 <XAxis dataKey="lt" {...CHART_AXIS} interval={9} tickFormatter={(v) => (v === 999 ? '120+' : v)} />
                 <YAxis {...CHART_AXIS} allowDecimals={false} />
                 <Tooltip {...chartTooltip} labelFormatter={(v) => (v === 999 ? '120日以上前' : `${v}日前`)} />

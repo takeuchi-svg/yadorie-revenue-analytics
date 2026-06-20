@@ -287,9 +287,9 @@ export default function DailyPage() {
             </div>
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={chart} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
-                <CartesianGrid stroke="#2e3347" vertical={false} />
-                <XAxis dataKey="label" tick={{ fill: '#8b8fa3', fontSize: 10 }} axisLine={{ stroke: '#2e3347' }} tickLine={{ stroke: '#2e3347' }} interval="preserveStartEnd" minTickGap={20} />
-                <YAxis tick={{ fill: '#8b8fa3', fontSize: 10 }} axisLine={{ stroke: '#2e3347' }} tickLine={{ stroke: '#2e3347' }} domain={[0, 100]} tickFormatter={(v) => `${v}`} />
+                <CartesianGrid stroke="#e7dac6" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill: '#927e6a', fontSize: 10 }} axisLine={{ stroke: '#e7dac6' }} tickLine={{ stroke: '#e7dac6' }} interval="preserveStartEnd" minTickGap={20} />
+                <YAxis tick={{ fill: '#927e6a', fontSize: 10 }} axisLine={{ stroke: '#e7dac6' }} tickLine={{ stroke: '#e7dac6' }} domain={[0, 100]} tickFormatter={(v) => `${v}`} />
                 <Tooltip content={<KpiTooltip />} />
                 {KPIS.filter((k) => visible.has(k.key)).map((k) => (
                   <Line key={k.key} dataKey={k.key} name={k.label} stroke={k.color} dot={false} strokeWidth={2} connectNulls={false} isAnimationActive={false} />
@@ -407,8 +407,8 @@ export default function DailyPage() {
 function KpiTooltip({ active, payload, label }: any) {
   if (!active || !payload || payload.length === 0) return null
   return (
-    <div style={{ background: '#1a1d27', border: '1px solid #2e3347', borderRadius: 8, padding: '8px 10px', fontSize: 12 }}>
-      <div style={{ color: '#8b8fa3', marginBottom: 4 }}>{label}</div>
+    <div style={{ background: '#ffffff', border: '1px solid #e7dac6', borderRadius: 8, padding: '8px 10px', fontSize: 12 }}>
+      <div style={{ color: '#927e6a', marginBottom: 4 }}>{label}</div>
       {payload.map((p: any, i: number) => {
         const dk: string = p.dataKey
         const suffix = dk.endsWith('_py') ? '（前年同日）' : dk.endsWith('_pm') ? '（前年同月）' : dk.endsWith('_bg') ? '（予算）' : ''
@@ -418,7 +418,7 @@ function KpiTooltip({ active, payload, label }: any) {
         const real = p.payload[`${dk}__r`]
         if (real == null) return null
         return (
-          <div key={i} style={{ color: '#e4e6f0', display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div key={i} style={{ color: '#3d2b1f', display: 'flex', gap: 6, alignItems: 'center' }}>
             <span style={{ color: kpi.color }}>●</span>{kpi.label}{suffix}: {kpi.fmt(real)}
           </div>
         )

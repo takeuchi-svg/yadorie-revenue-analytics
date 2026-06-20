@@ -8,6 +8,7 @@ import {
   PieChart, Pie, Cell, Legend,
 } from 'recharts'
 import { fmtYen, pct, fmtNum, channelColor, CHART_AXIS, chartTooltip } from '@/lib/ui'
+import { AssistantContent, SparkleIcon } from '@/components/ai-drawer'
 
 interface MonthlyKpi {
   facility: string
@@ -33,6 +34,8 @@ export default function OverviewPage() {
   const [occByMonth, setOccByMonth] = useState<Record<string, number | null>>({})
   const [capByMonth, setCapByMonth] = useState<Record<string, number | null>>({})
   const [budgetByMonth, setBudgetByMonth] = useState<Record<string, number | null>>({})
+  const [aiSummary, setAiSummary] = useState('')
+  const [aiLoading, setAiLoading] = useState(false)
   const [channels, setChannels] = useState<ChannelRow[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -73,6 +76,17 @@ export default function OverviewPage() {
       }
     })
   }, [current])
+
+  // 概要のAIサマリ（当月実績の自動要約）
+  useEffect(() => {
+    const lm = kpi[0]?.month
+    if (!current || !lm) return
+    setAiLoading(true); setAiSummary('')
+    fetch('/api/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ facility: current, messages: [{ role: 'user', content: `${lm}の当施設の実績を、売上・稼働率・予算達成率・前年比などの観点から3〜4行で簡潔に要約してください。本文のみ（表やグラフは不要）。` }] }),
+    }).then((r) => r.json()).then((d) => setAiSummary(d.reply || '')).catch(() => setAiSummary('')).finally(() => setAiLoading(false))
+  }, [current, kpi])
 
   const latest = kpi[0]
   const latestOcc = latest ? occByMonth[latest.month] ?? null : null
@@ -119,6 +133,21 @@ export default function OverviewPage() {
             <KpiCard label="客単価" value={fmtYen(latest?.guest_unit)} />
             <KpiCard label="予算達成率" value={pct(budgetRate)} />
             <KpiCard label="同伴係数" value={latest?.companion?.toFixed(2) ?? '-'} />
+          </div>
+
+          {/* AI実績サマリ */}
+          <div className="card p-4 mb-6" style={{ background: 'linear-gradient(135deg, var(--surface), var(--surface2))', borderColor: 'var(--accent)' }}>
+            <div className="flex items-center gap-2 mb-2">
+              <SparkleIcon size={16} />
+              <h2 className="text-sm font-semibold">AI実績サマリ（{latest?.month}）</h2>
+            </div>
+            {aiLoading ? (
+              <p className="text-sm" style={{ color: 'var(--text-dim)' }}>生成中...</p>
+            ) : aiSummary ? (
+              <AssistantContent content={aiSummary} />
+            ) : (
+              <p className="text-sm" style={{ color: 'var(--text-dim)' }}>AIサマリは未生成です（APIキー設定後に表示されます）。</p>
+            )}
           </div>
 
           {/* Charts */}

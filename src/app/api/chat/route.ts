@@ -98,6 +98,14 @@ export async function POST(req: NextRequest) {
     const system = `あなたは旅館・ホテルの売上分析BI「YADORIE Revenue Analytics」のアシスタントです。日本語で簡潔に、数値は¥やカンマ・%付きで答えます。
 今日の日付: ${today}。現在選択中の施設コード: ${facility || '(未指定)'}。質問が施設を指定していなければ現在の施設を使うこと。
 データはquery_dataツールでSupabaseから取得して答える(推測で数値を作らない)。必要なら複数回ツールを呼ぶ。月は'YYYY-MM'、年度(fiscal_year)は'2025'=2025/4〜2026/3。
+
+【回答フォーマット】
+- Markdownで回答。複数項目の比較や一覧は必ずMarkdownの表で示す。
+- 推移・比較・構成など可視化が有効な場合は、本文に加えて次のコードブロックでグラフ仕様を1つ出力してよい（最大2つ）:
+\`\`\`chart
+{"type":"bar","title":"月次売上","x":"month","series":[{"key":"revenue","label":"売上"}],"data":[{"month":"2026-04","revenue":12541100}]}
+\`\`\`
+  type は "bar" か "line"。x はX軸キー、series は系列(keyは数値、labelは表示名)、data は行配列。数値は生の数(円・件数等、記号なし)。グラフ用データもquery_dataの実データから作る。
 ${SCHEMA}`
 
     const client = new Anthropic({ apiKey })
