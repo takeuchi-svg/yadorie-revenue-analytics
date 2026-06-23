@@ -32,7 +32,7 @@ function fyMonths(fy: string): string[] {
 }
 
 export default function SettingsPage() {
-  const { current, currentFacility, isAdmin } = useFacility()
+  const { current, currentFacility, isAdmin, facilities, setCurrent } = useFacility()
   const [totalRooms, setTotalRooms] = useState<number | ''>('')
   const [otaData, setOtaData] = useState<OtaRow[]>([])
   const [otaMonth, setOtaMonth] = useState(() => {
@@ -148,7 +148,17 @@ export default function SettingsPage() {
 
   return (
     <div className="p-6 max-w-4xl">
-      <h1 className="text-2xl font-bold mb-6">Settings</h1>
+      <div className="flex items-end justify-between mb-6 flex-wrap gap-3">
+        <h1 className="text-2xl font-bold">Settings</h1>
+        <div>
+          <label className="block text-[10px] mb-1 tracking-wide" style={{ color: 'var(--text-dim)' }}>設定対象の施設</label>
+          <select className="field px-3 py-1.5 text-sm min-w-56" value={current} onChange={(e) => setCurrent(e.target.value)}>
+            {facilities.map((f) => (
+              <option key={f.facility} value={f.facility}>{f.name}</option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       {/* Facility master */}
       <section className="card p-6 mb-6">

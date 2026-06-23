@@ -24,13 +24,12 @@ const NAV_GROUPS: { group: string; items: { href: string; label: string }[] }[] 
       { href: '/yojitsu', label: '予実管理（PL）' },
     ],
   },
-  {
-    group: 'ツール',
-    items: [
-      { href: '/upload', label: 'アップロード' },
-      { href: '/settings', label: '設定' },
-    ],
-  },
+]
+
+// 左下に固定するツール（施設選択の下・ログアウトの上）
+const BOTTOM_TOOLS: { href: string; label: string }[] = [
+  { href: '/upload', label: 'アップロード' },
+  { href: '/settings', label: '設定' },
 ]
 
 export default function Sidebar() {
@@ -46,7 +45,7 @@ export default function Sidebar() {
 
   return (
     <aside
-      className="flex flex-col min-h-screen shrink-0"
+      className="flex flex-col h-screen shrink-0"
       style={{ width: 220, background: 'var(--surface)', borderRight: '1px solid var(--border)' }}
     >
       {/* Logo */}
@@ -91,8 +90,8 @@ export default function Sidebar() {
         ))}
       </nav>
 
-      {/* Facility selector + logout */}
-      <div className="p-3 space-y-3" style={{ borderTop: '1px solid var(--border)' }}>
+      {/* 左下固定: 施設選択 → アップロード/設定 → ログアウト */}
+      <div className="p-3 space-y-3 shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
         <div>
           <label className="block text-[10px] mb-1 tracking-wide" style={{ color: 'var(--text-dim)' }}>
             施設
@@ -108,6 +107,22 @@ export default function Sidebar() {
               </option>
             ))}
           </select>
+        </div>
+
+        <div className="space-y-0.5">
+          {BOTTOM_TOOLS.map((item) => {
+            const active = pathname === item.href
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors"
+                style={{ background: active ? 'var(--accent)' : 'transparent', color: active ? '#fff' : 'var(--text-dim)' }}
+              >
+                {item.label}
+              </Link>
+            )
+          })}
         </div>
 
         <button

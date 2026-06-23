@@ -13,7 +13,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
     <AuthGuard>
       <FacilityProvider>
-        <div className="flex min-h-screen" style={{ background: 'var(--bg)' }}>
+        <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg)' }}>
           {leftOpen && <Sidebar />}
           <main className="flex-1 min-w-0 overflow-auto flex flex-col" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
             {/* Top bar */}

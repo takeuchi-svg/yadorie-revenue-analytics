@@ -241,10 +241,10 @@ export default function YojitsuPage() {
 
           {view === 'month' ? (
             /* ===== 単月ビュー ===== */
-            <div className="card overflow-x-auto">
+            <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 200px)' }}>
               <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-left">
+                <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-[var(--surface2)]">
+                  <tr style={{ color: 'var(--text-dim)' }} className="text-left">
                     <th className="px-4 py-3 whitespace-nowrap">項目（{month}）</th>
                     <th className="px-4 py-3 text-right">実績</th>
                     <th className="px-4 py-3 text-right">予算</th>
@@ -297,100 +297,82 @@ export default function YojitsuPage() {
                 <span className="flex items-center gap-1"><span style={{ width: 10, height: 10, background: 'var(--border)', borderRadius: 2, display: 'inline-block' }} />予算（着地見込み）</span>
                 <span>上段=実績／予算、下段={yCmp}</span>
               </div>
-              <div className="card overflow-hidden">
-                <div className="flex">
-                  {/* 固定: 項目列 */}
-                  <table className="text-sm shrink-0" style={{ borderRight: '2px solid var(--border)' }}>
-                    <thead>
-                      <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-left">
-                        <th className="px-4 h-14 whitespace-nowrap">項目</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {visibleItems.map((it) => {
-                        const isTotal = CAT_TOTALS.has(it.code)
-                        const cat = it.category && it.category in COLLAPSIBLE ? it.category : null
-                        const isGroupHead = cat != null && it.code === COLLAPSIBLE[cat]
+              <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+                <table className="text-sm border-separate" style={{ borderSpacing: 0 }}>
+                  <thead>
+                    <tr style={{ color: 'var(--text-dim)' }}>
+                      <th className="px-4 h-14 whitespace-nowrap text-left sticky left-0 top-0 z-30"
+                        style={{ background: 'var(--surface2)', borderRight: '2px solid var(--border)' }}>項目</th>
+                      {months.map((m) => {
+                        const act = actualMonths.has(m)
                         return (
-                          <tr key={it.code} style={{ borderTop: '1px solid var(--border)', background: isTotal ? 'var(--surface2)' : undefined }}>
-                            <td className={`px-4 h-14 whitespace-nowrap ${isTotal ? 'font-semibold' : ''}`}>
-                              {isGroupHead ? (
-                                <button onClick={() => toggle(cat!)} className="flex items-center gap-1.5">
-                                  <span style={{ color: 'var(--text-dim)', width: 12, display: 'inline-block' }}>{collapsed.has(cat!) ? '▸' : '▾'}</span>
-                                  {it.name}
-                                </button>
-                              ) : (
-                                <span className={isTotal ? '' : 'pl-4'} style={{ color: isTotal ? undefined : 'var(--text-dim)' }}>{it.name}</span>
-                              )}
-                            </td>
-                          </tr>
+                          <th key={m} className="px-3 h-14 text-right whitespace-nowrap sticky top-0 z-20" style={{ minWidth: 104, background: 'var(--surface2)' }}>
+                            <div style={{ color: act ? 'var(--accent)' : 'var(--text-dim)', fontWeight: act ? 600 : 400 }}>{m.slice(5)}月</div>
+                            <div className="text-[10px]">{act ? '実績' : '予算'}</div>
+                          </th>
                         )
                       })}
-                    </tbody>
-                  </table>
-                  {/* スクロール: 各月 + 年度合計 */}
-                  <div className="overflow-x-auto flex-1">
-                    <table className="text-sm">
-                      <thead>
-                        <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>
+                      <th className="px-3 h-14 text-right whitespace-nowrap sticky top-0 z-20" style={{ minWidth: 116, background: 'var(--surface)', borderLeft: '2px solid var(--border)' }}>
+                        <div className="font-semibold" style={{ color: 'var(--text)' }}>年度合計</div>
+                        <div className="text-[10px]">着地見込み</div>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleItems.map((it) => {
+                      const isTotal = CAT_TOTALS.has(it.code)
+                      const cat = it.category && it.category in COLLAPSIBLE ? it.category : null
+                      const isGroupHead = cat != null && it.code === COLLAPSIBLE[cat]
+                      const rowBg = isTotal ? 'var(--surface2)' : 'var(--surface)'
+                      const land = yearLanding(it.code)
+                      const yb = yearBudget(it.code)
+                      const ydiff = land != null && yb != null ? land - yb : null
+                      return (
+                        <tr key={it.code} style={{ background: isTotal ? 'var(--surface2)' : undefined }}>
+                          <td className={`px-4 h-14 whitespace-nowrap sticky left-0 z-10 ${isTotal ? 'font-semibold' : ''}`}
+                            style={{ background: rowBg, borderTop: '1px solid var(--border)', borderRight: '2px solid var(--border)' }}>
+                            {isGroupHead ? (
+                              <button onClick={() => toggle(cat!)} className="flex items-center gap-1.5">
+                                <span style={{ color: 'var(--text-dim)', width: 12, display: 'inline-block' }}>{collapsed.has(cat!) ? '▸' : '▾'}</span>
+                                {it.name}
+                              </button>
+                            ) : (
+                              <span className={isTotal ? '' : 'pl-4'} style={{ color: isTotal ? undefined : 'var(--text-dim)' }}>{it.name}</span>
+                            )}
+                          </td>
                           {months.map((m) => {
                             const act = actualMonths.has(m)
+                            const a = getActual(it.code, m)
+                            const b = getBudget(it.code, m)
+                            const top = act ? a : b
+                            let sub = ''
+                            let subColor = 'var(--text-dim)'
+                            if (act && a != null) {
+                              if (yCmp === '予算差異') {
+                                const d = b != null ? a - b : null
+                                sub = fmtDiff(it.code, d); subColor = d == null ? 'var(--text-dim)' : d >= 0 ? 'var(--green)' : 'var(--red)'
+                              } else if (yCmp === '予算比') {
+                                const r = b ? a / b : null; sub = pct(r); subColor = r == null ? 'var(--text-dim)' : r >= 1 ? 'var(--green)' : 'var(--red)'
+                              } else {
+                                const p = getActual(it.code, priorYM(m)); const r = p ? a / p : null; sub = pct(r); subColor = r == null ? 'var(--text-dim)' : r >= 1 ? 'var(--green)' : 'var(--red)'
+                              }
+                            }
                             return (
-                              <th key={m} className="px-3 h-14 text-right whitespace-nowrap" style={{ minWidth: 104 }}>
-                                <div style={{ color: act ? 'var(--accent)' : 'var(--text-dim)', fontWeight: act ? 600 : 400 }}>{m.slice(5)}月</div>
-                                <div className="text-[10px]">{act ? '実績' : '予算'}</div>
-                              </th>
+                              <td key={m} className="px-3 h-14 text-right whitespace-nowrap" style={{ minWidth: 104, borderTop: '1px solid var(--border)' }}>
+                                <div style={{ color: act ? 'var(--text)' : 'var(--text-dim)', fontStyle: act ? undefined : 'italic' }}>{fmtVal(it.code, top)}</div>
+                                <div className="text-[10px]" style={{ color: subColor }}>{sub}</div>
+                              </td>
                             )
                           })}
-                          <th className="px-3 h-14 text-right whitespace-nowrap" style={{ minWidth: 116, background: 'var(--surface)', borderLeft: '2px solid var(--border)' }}>
-                            <div className="font-semibold" style={{ color: 'var(--text)' }}>年度合計</div>
-                            <div className="text-[10px]">着地見込み</div>
-                          </th>
+                          <td className="px-3 h-14 text-right whitespace-nowrap" style={{ minWidth: 116, background: 'var(--surface)', borderLeft: '2px solid var(--border)', borderTop: '1px solid var(--border)' }}>
+                            <div className={isTotal ? 'font-semibold' : ''}>{fmtVal(it.code, land)}</div>
+                            <div className="text-[10px]" style={{ color: ydiff == null ? 'var(--text-dim)' : ydiff >= 0 ? 'var(--green)' : 'var(--red)' }}>{ydiff == null ? '' : fmtDiff(it.code, ydiff)}</div>
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {visibleItems.map((it) => {
-                          const isTotal = CAT_TOTALS.has(it.code)
-                          const land = yearLanding(it.code)
-                          const yb = yearBudget(it.code)
-                          const ydiff = land != null && yb != null ? land - yb : null
-                          return (
-                            <tr key={it.code} style={{ borderTop: '1px solid var(--border)', background: isTotal ? 'var(--surface2)' : undefined }}>
-                              {months.map((m) => {
-                                const act = actualMonths.has(m)
-                                const a = getActual(it.code, m)
-                                const b = getBudget(it.code, m)
-                                const top = act ? a : b
-                                let sub: string = ''
-                                let subColor = 'var(--text-dim)'
-                                if (act && a != null) {
-                                  if (yCmp === '予算差異') {
-                                    const d = b != null ? a - b : null
-                                    sub = fmtDiff(it.code, d); subColor = d == null ? 'var(--text-dim)' : d >= 0 ? 'var(--green)' : 'var(--red)'
-                                  } else if (yCmp === '予算比') {
-                                    const r = b ? a / b : null; sub = pct(r); subColor = r == null ? 'var(--text-dim)' : r >= 1 ? 'var(--green)' : 'var(--red)'
-                                  } else {
-                                    const p = getActual(it.code, priorYM(m)); const r = p ? a / p : null; sub = pct(r); subColor = r == null ? 'var(--text-dim)' : r >= 1 ? 'var(--green)' : 'var(--red)'
-                                  }
-                                }
-                                return (
-                                  <td key={m} className="px-3 h-14 text-right whitespace-nowrap" style={{ minWidth: 104 }}>
-                                    <div style={{ color: act ? 'var(--text)' : 'var(--text-dim)', fontStyle: act ? undefined : 'italic' }}>{fmtVal(it.code, top)}</div>
-                                    <div className="text-[10px]" style={{ color: subColor }}>{sub}</div>
-                                  </td>
-                                )
-                              })}
-                              <td className="px-3 h-14 text-right whitespace-nowrap" style={{ minWidth: 116, background: 'var(--surface)', borderLeft: '2px solid var(--border)' }}>
-                                <div className={isTotal ? 'font-semibold' : ''}>{fmtVal(it.code, land)}</div>
-                                <div className="text-[10px]" style={{ color: ydiff == null ? 'var(--text-dim)' : ydiff >= 0 ? 'var(--green)' : 'var(--red)' }}>{ydiff == null ? '' : fmtDiff(it.code, ydiff)}</div>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
             </>
           )}
