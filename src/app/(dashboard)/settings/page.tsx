@@ -21,6 +21,16 @@ const OTA_METRICS = [
   { key: 'coupon', label: 'クーポン負担' },
 ] as const
 
+// 年度(4月開始)の12ヶ月 'YYYY-MM' を返す
+function fyMonths(fy: string): string[] {
+  const y = Number(fy)
+  if (!y) return []
+  const out: string[] = []
+  for (let m = 4; m <= 12; m++) out.push(`${y}-${String(m).padStart(2, '0')}`)
+  for (let m = 1; m <= 3; m++) out.push(`${y + 1}-${String(m).padStart(2, '0')}`)
+  return out
+}
+
 export default function SettingsPage() {
   const { current, currentFacility, isAdmin } = useFacility()
   const [totalRooms, setTotalRooms] = useState<number | ''>('')
@@ -31,6 +41,10 @@ export default function SettingsPage() {
   })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+  // 稼働日数
+  const [opFys, setOpFys] = useState<string[]>([])
+  const [opFy, setOpFy] = useState('')
+  const [opDays, setOpDays] = useState<Record<string, number | ''>>({})
 
   useEffect(() => {
     if (!current) return
@@ -56,6 +70,40 @@ export default function SettingsPage() {
         setOtaData(full)
       })
   }, [current, otaMonth])
+
+  // 稼働日数: 利用可能な年度を budget_monthly から取得
+  useEffect(() => {
+    if (!current) return
+    supabase.from('budget_monthly').select('fiscal_year').eq('facility', current).then(({ data }) => {
+      const fys = [...new Set(((data as { fiscal_year: string }[]) ?? []).map((r) => r.fiscal_year))].sort().reverse()
+      setOpFys(fys)
+      setOpFy((prev) => (fys.includes(prev) ? prev : fys[0] ?? ''))
+    })
+  }, [current])
+
+  // 稼働日数: 選択年度の値を読み込み
+  useEffect(() => {
+    if (!current || !opFy) return
+    const months = fyMonths(opFy)
+    supabase.from('dim_operating_days').select('month, days').eq('facility', current).in('month', months)
+      .then(({ data }) => {
+        const map: Record<string, number | ''> = {}
+        months.forEach((m) => { map[m] = '' })
+        ;((data as { month: string; days: number | null }[]) ?? []).forEach((r) => { map[r.month] = r.days ?? '' })
+        setOpDays(map)
+      })
+  }, [current, opFy])
+
+  const saveOpDays = async () => {
+    setSaving(true); setMessage('')
+    const rows = Object.entries(opDays)
+      .filter(([, v]) => v !== '' && v != null)
+      .map(([month, days]) => ({ facility: current, month, days: Number(days) }))
+    if (rows.length === 0) { setMessage('稼働日数が未入力です'); setSaving(false); return }
+    const { error } = await supabase.from('dim_operating_days').upsert(rows, { onConflict: 'facility,month' })
+    setMessage(error ? `Error: ${error.message}` : '稼働日数を保存しました')
+    setSaving(false)
+  }
 
   const saveFacility = async () => {
     setSaving(true)
@@ -176,6 +224,33 @@ export default function SettingsPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      </section>
+
+      {/* 稼働日数 */}
+      <section className="card p-6 mt-6">
+        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <h2 className="text-lg font-semibold">稼働日数（月別）</h2>
+          <div className="flex items-center gap-2">
+            {opFys.length > 0 && (
+              <select className="field px-3 py-1.5 text-sm" value={opFy} onChange={(e) => setOpFy(e.target.value)}>
+                {opFys.map((y) => <option key={y} value={y}>{y}年度</option>)}
+              </select>
+            )}
+            <button onClick={saveOpDays} disabled={saving}
+              className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50">保存</button>
+          </div>
+        </div>
+        <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>予実管理の在庫数（＝総客室数 {currentFacility?.total_rooms ?? '-'} × 稼働日数）の算出に使用します。</p>
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
+          {fyMonths(opFy).map((m) => (
+            <div key={m}>
+              <label className="block text-xs mb-1" style={{ color: 'var(--text-dim)' }}>{m.slice(5)}月（{m.slice(0, 4)}）</label>
+              <input type="number" min={0} max={31} className="field px-2 py-1.5 text-sm w-full"
+                value={opDays[m] ?? ''}
+                onChange={(e) => setOpDays((p) => ({ ...p, [m]: e.target.value === '' ? '' : Number(e.target.value) }))} />
+            </div>
+          ))}
         </div>
       </section>
 

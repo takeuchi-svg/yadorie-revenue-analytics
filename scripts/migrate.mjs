@@ -618,6 +618,17 @@ INSERT INTO app_user (user_id, email, role)
 SELECT id, email, 'admin' FROM auth.users
 ON CONFLICT (user_id) DO NOTHING;
 
+-- 稼働日数マスタ（予実管理の在庫数 = 総客室数 × 稼働日数）
+CREATE TABLE IF NOT EXISTS dim_operating_days (
+  facility TEXT NOT NULL,
+  month TEXT NOT NULL,
+  days INT,
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (facility, month)
+);
+ALTER TABLE dim_operating_days ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "operating_days_all_authenticated" ON dim_operating_days FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
 -- ========================================
 -- FRY初期データ
 -- ========================================
