@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
+import UserAdmin from '@/components/user-admin'
 
 interface OtaRow {
   id?: number
@@ -21,7 +22,7 @@ const OTA_METRICS = [
 ] as const
 
 export default function SettingsPage() {
-  const { current, currentFacility } = useFacility()
+  const { current, currentFacility, isAdmin } = useFacility()
   const [totalRooms, setTotalRooms] = useState<number | ''>('')
   const [otaData, setOtaData] = useState<OtaRow[]>([])
   const [otaMonth, setOtaMonth] = useState(() => {
@@ -183,6 +184,9 @@ export default function SettingsPage() {
           {message}
         </p>
       )}
+
+      {/* ユーザー管理（管理者のみ） */}
+      {isAdmin && <UserAdmin />}
     </div>
   )
 }
