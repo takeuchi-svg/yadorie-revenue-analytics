@@ -30,6 +30,83 @@ const BLANK_YEAR_CODES = new Set(['食材原価率'])
 const k = (ym: string, code: string) => `${ym}|${code}`
 const priorYM = (ym: string) => `${Number(ym.slice(0, 4)) - 1}-${ym.slice(5)}`
 
+/* ===== 損益分岐点・原価分析（固変分解） =====
+   原価は全額変動費。水道光熱費は変動30%（固定70%）。賞与は計上月そのまま固定費。
+   固定費は「総費用 − 変動費」の残差で算出（各項目の固変ラベルと一致し二重計上を防ぐ）。 */
+const WATER_VAR_RATIO = 0.30
+// 変動費の非原価項目（原価=cogs_totalは別途全額変動として加算）
+const COST_VAR_ITEMS = ['雑給', '広告宣伝費', '販売促進費', '消耗品費', '修繕費', 'リネン費', '送客手数料', 'カード手数料', '雑費']
+
+type Agg = { sales: number | null; oi: number | null; gop: number | null; guests: number | null; rooms: number | null; varC: number | null }
+
+// 資源解決関数 g(code) から変動費を算出（cogsが無い月は null）
+function varCostFrom(g: (code: string) => number | null): number | null {
+  const cogs = g('cogs_total')
+  if (cogs == null) return null
+  let v = cogs // 原価は全額変動
+  for (const c of COST_VAR_ITEMS) v += g(c) ?? 0
+  // 外注費（変動）: 実績は合算「外注費」、予算は人材＋清掃の明細
+  const gaichu = g('外注費')
+  v += gaichu != null ? gaichu : (g('外注費_人材_') ?? 0) + (g('外注費_清掃_') ?? 0)
+  // 水道光熱費の変動分（30%）
+  v += (g('水道光熱費') ?? 0) * WATER_VAR_RATIO
+  return v
+}
+
+const aggFrom = (g: (code: string) => number | null): Agg => ({
+  sales: g('sales_total'), oi: g('operating_income'), gop: g('gop'),
+  guests: g('宿泊客数'), rooms: g('販売室数'), varC: varCostFrom(g),
+})
+
+// 損益関連KPI（kind: 表示形式 / up: 高いほど良い）
+const DERIVED: { code: string; name: string; kind: 'yen' | 'pct'; up: boolean }[] = [
+  { code: 'bep_sales', name: '損益分岐点売上高', kind: 'yen', up: false },
+  { code: 'bep_ratio', name: '損益分岐点比率', kind: 'pct', up: false },
+  { code: 'fixed_cost', name: '固定費', kind: 'yen', up: false },
+  { code: 'var_cost', name: '変動費', kind: 'yen', up: false },
+  { code: 'var_ratio', name: '変動費率', kind: 'pct', up: false },
+  { code: 'cm_ratio', name: '限界利益率', kind: 'pct', up: true },
+  { code: 'cost_per_guest', name: 'お客様1人あたりの費用', kind: 'yen', up: false },
+  { code: 'varcost_per_guest', name: 'お客様1人あたりの変動費', kind: 'yen', up: false },
+  { code: 'cost_per_room', name: '1部屋あたりの費用', kind: 'yen', up: false },
+  { code: 'varcost_per_room', name: '1部屋あたりの変動費', kind: 'yen', up: false },
+  { code: 'gop_per_guest', name: 'お客様1人あたりのGOP', kind: 'yen', up: true },
+  { code: 'oi_per_guest', name: 'お客様1人あたりの営業利益', kind: 'yen', up: true },
+]
+
+function calcDeriv(code: string, a: Agg): number | null {
+  const { sales, oi, gop, guests, rooms, varC } = a
+  const totalC = sales != null && oi != null ? sales - oi : null // 総費用 = 売上 − 営業利益
+  const fixedC = totalC != null && varC != null ? totalC - varC : null
+  const cmRatio = varC != null && sales ? (sales - varC) / sales : null // 限界利益率
+  const div = (x: number | null, d: number | null | undefined) => (x != null && d ? x / d : null)
+  switch (code) {
+    case 'var_cost': return varC
+    case 'fixed_cost': return fixedC
+    case 'var_ratio': return div(varC, sales)
+    case 'cm_ratio': return cmRatio
+    case 'bep_sales': return fixedC != null && cmRatio ? fixedC / cmRatio : null
+    case 'bep_ratio': return fixedC != null && cmRatio && sales ? fixedC / cmRatio / sales : null
+    case 'cost_per_guest': return div(totalC, guests)
+    case 'varcost_per_guest': return div(varC, guests)
+    case 'cost_per_room': return div(totalC, rooms)
+    case 'varcost_per_room': return div(varC, rooms)
+    case 'gop_per_guest': return div(gop, guests)
+    case 'oi_per_guest': return div(oi, guests)
+  }
+  return null
+}
+
+const fmtDerivVal = (kind: 'yen' | 'pct', v: number | null) => (v == null ? '-' : kind === 'pct' ? pct(v) : fmtNum(v))
+const fmtDerivDiff = (kind: 'yen' | 'pct', v: number | null) => {
+  if (v == null) return '-'
+  const s = v >= 0 ? '+' : ''
+  return kind === 'pct' ? s + (v * 100).toFixed(1) + 'pt' : s + fmtNum(v)
+}
+// 良し悪しの色（up=高いほど良い）
+const goodColor = (v: number | null, base: number, up: boolean) =>
+  v == null ? undefined : (v >= base) === up ? 'var(--green)' : 'var(--red)'
+
 export default function YojitsuPage() {
   const { current, currentFacility } = useFacility()
   const [budget, setBudget] = useState<BRow[]>([])
@@ -182,6 +259,36 @@ export default function YojitsuPage() {
 
   const visibleItems = items.filter((it) => !isHidden(it))
 
+  // ---- 損益分岐点・原価分析の集計 ----
+  // 単月（実績/予算/前年）
+  const derivA = aggFrom((c) => getActual(c, month))
+  const derivB = aggFrom((c) => getBudget(c, month))
+  const derivP = aggFrom((c) => getActual(c, priorYM(month)))
+  // 年度: 月別Agg（実績/予算/前年）と年度集計
+  const actAggByMonth: Record<string, Agg> = {}
+  const budAggByMonth: Record<string, Agg> = {}
+  const priorAggByMonth: Record<string, Agg> = {}
+  for (const m of months) {
+    actAggByMonth[m] = aggFrom((c) => getActual(c, m))
+    budAggByMonth[m] = aggFrom((c) => getBudget(c, m))
+    priorAggByMonth[m] = aggFrom((c) => getActual(c, priorYM(m)))
+  }
+  const sumAgg = (resolve: (m: string) => (c: string) => number | null): Agg => {
+    let sales = 0, oi = 0, gop = 0, guests = 0, rooms = 0, varC = 0
+    for (const m of months) {
+      const g = resolve(m)
+      sales += g('sales_total') ?? 0
+      oi += g('operating_income') ?? 0
+      gop += g('gop') ?? 0
+      guests += g('宿泊客数') ?? 0
+      rooms += g('販売室数') ?? 0
+      varC += varCostFrom(g) ?? 0
+    }
+    return { sales, oi, gop, guests, rooms, varC }
+  }
+  const derivYearLand = sumAgg((m) => (c) => landingFor(c, m))
+  const derivYearBudget = sumAgg((m) => (c) => getBudget(c, m))
+
   return (
     <div className="p-6">
       <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
@@ -233,6 +340,7 @@ export default function YojitsuPage() {
 
           {view === 'month' ? (
             /* ===== 単月ビュー ===== */
+            <>
             <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 200px)' }}>
               <table className="w-full text-sm">
                 <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-[var(--surface2)]">
@@ -281,6 +389,46 @@ export default function YojitsuPage() {
                 </tbody>
               </table>
             </div>
+
+            {/* ===== 損益分岐点・原価分析（単月） ===== */}
+            <div className="text-sm font-semibold mt-6 mb-2" style={{ color: 'var(--text)' }}>損益分岐点・原価分析</div>
+            <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 200px)' }}>
+              <table className="w-full text-sm">
+                <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-[var(--surface2)]">
+                  <tr style={{ color: 'var(--text-dim)' }} className="text-left">
+                    <th className="px-4 py-3 whitespace-nowrap">項目（{month}）</th>
+                    <th className="px-4 py-3 text-right">実績</th>
+                    <th className="px-4 py-3 text-right">予算</th>
+                    <th className="px-4 py-3 text-right">予算差異</th>
+                    <th className="px-4 py-3 text-right">達成率</th>
+                    <th className="px-4 py-3 text-right">昨年</th>
+                    <th className="px-4 py-3 text-right">前年比</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {DERIVED.map((d) => {
+                    const a = calcDeriv(d.code, derivA)
+                    const b = calcDeriv(d.code, derivB)
+                    const prior = calcDeriv(d.code, derivP)
+                    const diff = a != null && b != null ? a - b : null
+                    const rate = a != null && b ? a / b : null
+                    const yoy = a != null && prior ? a / prior : null
+                    return (
+                      <tr key={d.code} style={{ borderTop: '1px solid var(--border)' }}>
+                        <td className="px-4 py-2 whitespace-nowrap" style={{ color: 'var(--text-dim)' }}>{d.name}</td>
+                        <td className="px-4 py-2 text-right">{fmtDerivVal(d.kind, a)}</td>
+                        <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{fmtDerivVal(d.kind, b)}</td>
+                        <td className="px-4 py-2 text-right" style={{ color: goodColor(diff, 0, d.up) }}>{fmtDerivDiff(d.kind, diff)}</td>
+                        <td className="px-4 py-2 text-right" style={{ color: goodColor(rate, 1, d.up) }}>{pct(rate)}</td>
+                        <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{fmtDerivVal(d.kind, prior)}</td>
+                        <td className="px-4 py-2 text-right">{pct(yoy)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            </>
           ) : (
             /* ===== 年度ビュー ===== */
             <>
@@ -366,12 +514,81 @@ export default function YojitsuPage() {
                   </tbody>
                 </table>
               </div>
+
+              {/* ===== 損益分岐点・原価分析（年度） ===== */}
+              <div className="text-sm font-semibold mt-6 mb-2" style={{ color: 'var(--text)' }}>損益分岐点・原価分析</div>
+              <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
+                <table className="text-sm border-separate" style={{ borderSpacing: 0 }}>
+                  <thead>
+                    <tr style={{ color: 'var(--text-dim)' }}>
+                      <th className="px-4 h-14 whitespace-nowrap text-left sticky left-0 top-0 z-30"
+                        style={{ background: 'var(--surface2)', borderRight: '2px solid var(--border)' }}>項目</th>
+                      {months.map((m) => {
+                        const act = actualMonths.has(m)
+                        return (
+                          <th key={m} className="px-3 h-14 text-right whitespace-nowrap sticky top-0 z-20" style={{ minWidth: 104, background: 'var(--surface2)' }}>
+                            <div style={{ color: act ? 'var(--accent)' : 'var(--text-dim)', fontWeight: act ? 600 : 400 }}>{m.slice(5)}月</div>
+                            <div className="text-[10px]">{act ? '実績' : '予算'}</div>
+                          </th>
+                        )
+                      })}
+                      <th className="px-3 h-14 text-right whitespace-nowrap sticky top-0 z-20" style={{ minWidth: 116, background: 'var(--surface)', borderLeft: '2px solid var(--border)' }}>
+                        <div className="font-semibold" style={{ color: 'var(--text)' }}>年度合計</div>
+                        <div className="text-[10px]">着地見込み</div>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {DERIVED.map((d) => {
+                      const land = calcDeriv(d.code, derivYearLand)
+                      const yb = calcDeriv(d.code, derivYearBudget)
+                      const ydiff = land != null && yb != null ? land - yb : null
+                      return (
+                        <tr key={d.code}>
+                          <td className="px-4 h-14 whitespace-nowrap sticky left-0 z-10"
+                            style={{ background: 'var(--surface)', borderTop: '1px solid var(--border)', borderRight: '2px solid var(--border)', color: 'var(--text-dim)' }}>{d.name}</td>
+                          {months.map((m) => {
+                            const act = actualMonths.has(m)
+                            const top = calcDeriv(d.code, act ? actAggByMonth[m] : budAggByMonth[m])
+                            let sub = ''
+                            let subColor = 'var(--text-dim)'
+                            if (act && top != null) {
+                              if (yCmp === '予算差異') {
+                                const bv = calcDeriv(d.code, budAggByMonth[m]); const dd = bv != null ? top - bv : null
+                                sub = fmtDerivDiff(d.kind, dd); subColor = goodColor(dd, 0, d.up) ?? 'var(--text-dim)'
+                              } else if (yCmp === '予算比') {
+                                const bv = calcDeriv(d.code, budAggByMonth[m]); const r = bv ? top / bv : null
+                                sub = pct(r); subColor = goodColor(r, 1, d.up) ?? 'var(--text-dim)'
+                              } else {
+                                const pv = calcDeriv(d.code, priorAggByMonth[m]); const r = pv ? top / pv : null
+                                sub = pct(r); subColor = goodColor(r, 1, d.up) ?? 'var(--text-dim)'
+                              }
+                            }
+                            return (
+                              <td key={m} className="px-3 h-14 text-right whitespace-nowrap" style={{ minWidth: 104, borderTop: '1px solid var(--border)' }}>
+                                <div style={{ color: act ? 'var(--text)' : 'var(--text-dim)', fontStyle: act ? undefined : 'italic' }}>{fmtDerivVal(d.kind, top)}</div>
+                                <div className="text-[10px]" style={{ color: subColor }}>{sub}</div>
+                              </td>
+                            )
+                          })}
+                          <td className="px-3 h-14 text-right whitespace-nowrap" style={{ minWidth: 116, background: 'var(--surface)', borderLeft: '2px solid var(--border)', borderTop: '1px solid var(--border)' }}>
+                            <div>{fmtDerivVal(d.kind, land)}</div>
+                            <div className="text-[10px]" style={{ color: goodColor(ydiff, 0, d.up) ?? 'var(--text-dim)' }}>{ydiff == null ? '' : fmtDerivDiff(d.kind, ydiff)}</div>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </>
           )}
 
           <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
             予算=月次計画、実績=アップロード由来（集計行は明細から再計算）。KPI（稼働率・販売室数・客数・単価等）は売上実績、在庫数=総客室数×稼働日数（稼働日数は設定で入力）。
             {view === 'year' && ' 年度合計=着地見込み（実績月は実績、未到来月は予算）。下段の年度合計差異は対予算。'}
+            <br />
+            損益分岐点・原価分析: 原価=全額変動費／水道光熱費=変動30%・固定70%／賞与=計上月のまま固定費。総費用=売上−営業利益、固定費=総費用−変動費。限界利益率=(売上−変動費)/売上、損益分岐点売上高=固定費/限界利益率。1人あたり=÷宿泊客数、1部屋あたり=÷販売室数。
           </p>
         </>
       )}
