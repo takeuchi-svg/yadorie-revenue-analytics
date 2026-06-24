@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts'
 import { fmtNum, fmtYen, pct, CHART_AXIS, chartTooltip } from '@/lib/ui'
 import { Loading, Empty } from '@/components/page-bits'
@@ -10,15 +11,6 @@ import { Loading, Empty } from '@/components/page-bits'
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface Ev { event_type: string; checkin: string | null; received_at: string | null; amount_gross: number | null; rooms: number | null; guests_total: number | null }
 
-async function fetchAll(build: () => any): Promise<any[]> {
-  const size = 1000; let frm = 0; let all: any[] = []
-  for (let i = 0; i < 50; i++) {
-    const { data, error } = await build().range(frm, frm + size - 1)
-    if (error || !data || data.length === 0) break
-    all = all.concat(data); if (data.length < size) break; frm += size
-  }
-  return all
-}
 
 const lt = (e: Ev) => {
   if (!e.checkin || !e.received_at) return null

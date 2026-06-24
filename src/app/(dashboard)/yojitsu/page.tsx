@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { fmtNum, pct } from '@/lib/ui'
 import { Loading, Empty } from '@/components/page-bits'
 
@@ -25,15 +26,6 @@ const RECOMPUTE_CODES = new Set(['稼働率', '客単価', '室単価', '同伴�
 // 年度合計を空欄にする行
 const BLANK_YEAR_CODES = new Set(['食材原価率'])
 
-async function fetchAll(build: () => any): Promise<any[]> {
-  const size = 1000; let frm = 0; let all: any[] = []
-  for (let i = 0; i < 50; i++) {
-    const { data, error } = await build().range(frm, frm + size - 1)
-    if (error || !data || data.length === 0) break
-    all = all.concat(data); if (data.length < size) break; frm += size
-  }
-  return all
-}
 
 const k = (ym: string, code: string) => `${ym}|${code}`
 const priorYM = (ym: string) => `${Number(ym.slice(0, 4)) - 1}-${ym.slice(5)}`

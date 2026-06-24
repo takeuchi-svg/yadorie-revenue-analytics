@@ -159,29 +159,16 @@ export default function UploadPage() {
             ? (facilityData.rooms_json as { name: string }[])
             : []
           const payload = parseRateSheet(workbook, entry.facility, rooms)
-          if (payload.data.length === 0) {
-            const sheetNames = workbook.SheetNames.join(', ')
-            console.warn(`[rate_sheet] 0 rows. Sheets: ${sheetNames}`)
-          }
           payloads.push(payload)
           fileIndexMap.push(i)
         } else {
           const rows = parseFileToRows(buffer, entry.file.name)
-          if (rows.length > 0) {
-            console.log(`[${entry.detection.type}] headers:`, Object.keys(rows[0]))
-            console.log(`[${entry.detection.type}] sample row:`, rows[0])
-          } else {
-            console.warn(`[${entry.detection.type}] CSV parsed to 0 rows`)
-          }
           const payload = transformByType(
             entry.detection.type,
             rows,
             entry.facility,
             entry.file.name
           )
-          if (payload.data.length === 0 && rows.length > 0) {
-            console.warn(`[${entry.detection.type}] transform produced 0 rows from ${rows.length} CSV rows. Headers: ${Object.keys(rows[0]).join(', ')}`)
-          }
           payloads.push(payload)
           fileIndexMap.push(i)
         }

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   ComposedChart, Line, Legend,
@@ -25,15 +26,6 @@ interface Ev { checkin: string | null; received_at: string | null; plan: string 
 interface Resv { checkin: string | null; prefecture: string | null; revenue_settled: number | null; nights: number | null; guests_total: number | null }
 interface Row { name: string; revenue: number; rooms: number; guests: number; count?: number }
 
-async function fetchAll(build: () => any): Promise<any[]> {
-  const size = 1000; let frm = 0; let all: any[] = []
-  for (let i = 0; i < 50; i++) {
-    const { data, error } = await build().range(frm, frm + size - 1)
-    if (error || !data || data.length === 0) break
-    all = all.concat(data); if (data.length < size) break; frm += size
-  }
-  return all
-}
 
 const gsLabel = (g: number) => (g <= 1 ? '1名' : g >= 5 ? '5名以上' : `${g}名`)
 const bandLabel = (adr: number) =>

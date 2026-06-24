@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
@@ -14,15 +15,6 @@ import { PageHeader, Kpi, Loading, Empty } from '@/components/page-bits'
 interface OP { item_name: string | null; category: string | null; total: number | null; quantity: number | null; source_month: string | null; status: string | null }
 interface Pay { payment_method: string | null; amount: number | null; source_month: string | null }
 
-async function fetchAll(build: () => any): Promise<any[]> {
-  const size = 1000; let frm = 0; let all: any[] = []
-  for (let i = 0; i < 50; i++) {
-    const { data, error } = await build().range(frm, frm + size - 1)
-    if (error || !data || data.length === 0) break
-    all = all.concat(data); if (data.length < size) break; frm += size
-  }
-  return all
-}
 
 export default function FbPage() {
   const { current, currentFacility } = useFacility()

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { fmtNum, fmtYen, pct } from '@/lib/ui'
 import { Loading, Empty } from '@/components/page-bits'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
@@ -55,17 +56,6 @@ const KPIS: { key: keyof Metrics; label: string; color: string; fmt: (v: any) =>
 interface Res { checkin: string; nights: number | null; revenue_settled: number | null; guests_total: number | null }
 interface RateRow { snapshot_date: string; stay_date: string; rate_rank: number | null }
 
-async function fetchAll(build: () => any): Promise<any[]> {
-  const size = 1000; let frm = 0; let all: any[] = []
-  for (let i = 0; i < 50; i++) {
-    const { data, error } = await build().range(frm, frm + size - 1)
-    if (error || !data || data.length === 0) break
-    all = all.concat(data)
-    if (data.length < size) break
-    frm += size
-  }
-  return all
-}
 
 export default function DailyPage() {
   const { current, currentFacility } = useFacility()
