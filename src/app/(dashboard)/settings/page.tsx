@@ -45,6 +45,14 @@ export default function SettingsPage() {
   const [opFys, setOpFys] = useState<string[]>([])
   const [opFy, setOpFy] = useState('')
   const [opDays, setOpDays] = useState<Record<string, number | ''>>({})
+  // 生産性手動入力
+  const [prodMonth, setProdMonth] = useState(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
+  })
+  const [deemedPay, setDeemedPay] = useState<number | ''>('')
+  const [dispatchHours, setDispatchHours] = useState<number | ''>('')
+  const [dispatchNotes, setDispatchNotes] = useState('')
 
   useEffect(() => {
     if (!current) return
@@ -102,6 +110,31 @@ export default function SettingsPage() {
     if (rows.length === 0) { setMessage('稼働日数が未入力です'); setSaving(false); return }
     const { error } = await supabase.from('dim_operating_days').upsert(rows, { onConflict: 'facility,month' })
     setMessage(error ? `Error: ${error.message}` : '稼働日数を保存しました')
+    setSaving(false)
+  }
+
+  // 生産性手動入力: 選択施設×月の値を読み込み
+  useEffect(() => {
+    if (!current || !prodMonth) return
+    supabase.from('dim_productivity_manual').select('*').eq('facility', current).eq('month', prodMonth).maybeSingle()
+      .then(({ data }) => {
+        const r = data as { deemed_overtime_excess_pay: number | null; dispatch_work_hours: number | null; dispatch_other_notes: string | null } | null
+        setDeemedPay(r?.deemed_overtime_excess_pay ?? '')
+        setDispatchHours(r?.dispatch_work_hours ?? '')
+        setDispatchNotes(r?.dispatch_other_notes ?? '')
+      })
+  }, [current, prodMonth])
+
+  const saveProd = async () => {
+    setSaving(true); setMessage('')
+    const { error } = await supabase.from('dim_productivity_manual').upsert({
+      facility: current, month: prodMonth,
+      deemed_overtime_excess_pay: deemedPay === '' ? 0 : Number(deemedPay),
+      dispatch_work_hours: dispatchHours === '' ? 0 : Number(dispatchHours),
+      dispatch_other_notes: dispatchNotes || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'facility,month' })
+    setMessage(error ? `Error: ${error.message}` : '生産性手動入力を保存しました')
     setSaving(false)
   }
 
@@ -261,6 +294,36 @@ export default function SettingsPage() {
                 onChange={(e) => setOpDays((p) => ({ ...p, [m]: e.target.value === '' ? '' : Number(e.target.value) }))} />
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* 生産性手動入力 */}
+      <section className="card p-6 mt-6">
+        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <h2 className="text-lg font-semibold">生産性 手動入力（月別）</h2>
+          <div className="flex items-center gap-2">
+            <input type="month" className="field px-3 py-1.5 text-sm" value={prodMonth} onChange={(e) => setProdMonth(e.target.value)} />
+            <button onClick={saveProd} disabled={saving}
+              className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50">保存</button>
+          </div>
+        </div>
+        <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>生産性ページのKPIに反映します（勤怠CSVからは算出できない指標）。</p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>みなし残業超の残業代（円）</label>
+            <input type="number" min={0} className="field px-3 py-2 text-sm w-full"
+              value={deemedPay} onChange={(e) => setDeemedPay(e.target.value === '' ? '' : Number(e.target.value))} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>派遣・その他の労働時間（時間）</label>
+            <input type="number" min={0} step="0.1" className="field px-3 py-2 text-sm w-full"
+              value={dispatchHours} onChange={(e) => setDispatchHours(e.target.value === '' ? '' : Number(e.target.value))} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>備考</label>
+            <input type="text" className="field px-3 py-2 text-sm w-full"
+              value={dispatchNotes} onChange={(e) => setDispatchNotes(e.target.value)} />
+          </div>
         </div>
       </section>
 

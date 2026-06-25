@@ -12,9 +12,11 @@ import {
 } from '@/lib/etl'
 import type { DetectionResult, UploadPayload, UploadResult } from '@/lib/etl'
 import { parsePlCsv } from '@/lib/etl/pl-parser'
+import { parseAttendanceHtml } from '@/lib/etl/attendance-parser'
 import { supabase } from '@/lib/supabase/client'
 
 interface PlEntry { name: string; fy: string; rows: number; status: 'processing' | 'done' | 'error'; error?: string }
+interface AttEntry { name: string; workDate: string; rows: number; staff: number; status: 'processing' | 'done' | 'error'; error?: string }
 
 interface FileEntry {
   file: File
@@ -32,9 +34,45 @@ export default function UploadPage() {
   >([])
   const [uploading, setUploading] = useState(false)
   const [globalFacility, setGlobalFacility] = useState<string>('')
-  const [tab, setTab] = useState<'sales' | 'pl'>('sales')
+  const [tab, setTab] = useState<'sales' | 'pl' | 'attendance'>('sales')
   const [plFiles, setPlFiles] = useState<PlEntry[]>([])
   const [plUploading, setPlUploading] = useState(false)
+  const [attFiles, setAttFiles] = useState<AttEntry[]>([])
+  const [attUploading, setAttUploading] = useState(false)
+
+  // 勤怠CSV（Touch On Time / HTML）取込: 全施設一括。施設選択は不要。
+  const handleAttFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return
+    setAttUploading(true)
+    // ファイル名順（=日付順）で安定処理
+    const list = Array.from(fileList).sort((a, b) => a.name.localeCompare(b.name))
+    for (const file of list) {
+      const entry: AttEntry = { name: file.name, workDate: '', rows: 0, staff: 0, status: 'processing' }
+      setAttFiles((prev) => [...prev, entry])
+      const upd = (patch: Partial<AttEntry>) => setAttFiles((prev) => prev.map((p) => (p === entry ? { ...p, ...patch } : p)))
+      try {
+        const html = await file.text() // UTF-8
+        const { workDate, rows, staff } = parseAttendanceHtml(html, file.name)
+        if (!workDate || rows.length === 0) throw new Error('勤怠を解析できませんでした（フォーマット要確認）')
+        // 従業員マスタ upsert（新規社員番号を追加）
+        const staffPayload = staff.map((s) => ({ ...s, updated_at: new Date().toISOString() }))
+        for (let i = 0; i < staffPayload.length; i += 500) {
+          const { error } = await supabase.from('dim_staff').upsert(staffPayload.slice(i, i + 500), { onConflict: 'staff_code' })
+          if (error) throw error
+        }
+        // 日次勤怠 upsert（未マッピング施設=nullの行は除外。同日同施設は上書き）
+        const attPayload = rows.filter((r) => r.work_facility != null)
+        for (let i = 0; i < attPayload.length; i += 500) {
+          const { error } = await supabase.from('raw_attendance_daily').upsert(attPayload.slice(i, i + 500), { onConflict: 'staff_code,work_date,work_facility' })
+          if (error) throw error
+        }
+        upd({ workDate, rows: attPayload.length, staff: staff.length, status: 'done' })
+      } catch (err) {
+        upd({ status: 'error', error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    setAttUploading(false)
+  }
 
   const handlePlFiles = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return
@@ -271,7 +309,7 @@ export default function UploadPage() {
 
         {/* Tabs */}
         <div className="flex gap-1 mb-5">
-          {([['sales', '売上データ'], ['pl', 'PL実績']] as const).map(([k, label]) => (
+          {([['sales', '売上データ'], ['pl', 'PL実績'], ['attendance', '勤怠']] as const).map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)} className="px-4 py-1.5 rounded-md text-sm"
               style={{ background: tab === k ? 'var(--accent)' : 'var(--surface)', color: tab === k ? '#fff' : 'var(--text-dim)', border: '1px solid var(--border)' }}>
               {label}
@@ -279,8 +317,8 @@ export default function UploadPage() {
           ))}
         </div>
 
-        {/* Facility selector */}
-        <div className="mb-4 flex items-center gap-4">
+        {/* Facility selector（勤怠は全施設一括のため不要） */}
+        <div className="mb-4 flex items-center gap-4" style={{ display: tab === 'attendance' ? 'none' : undefined }}>
           <label className="text-sm font-medium" style={{ color: 'var(--text-dim)' }}>デフォルト施設:</label>
           <select
             className="field px-3 py-1.5 text-sm"
@@ -449,6 +487,47 @@ export default function UploadPage() {
               </div>
             )}
             {plUploading && <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>アップロード中...</p>}
+          </>
+        )}
+
+        {tab === 'attendance' && (
+          <>
+            <p className="text-sm mb-3" style={{ color: 'var(--text-dim)' }}>
+              勤怠CSV（Touch On Time の日次出力／拡張子.xls・実体HTML）を取り込みます。
+              <strong>1ファイル＝1日分・全施設</strong>。月末に1ヶ月分（約30ファイル）をまとめて選択してください。
+              施設マッピング・ヘルプ按分は自動。<strong>同日同施設はUPSERT（上書き）</strong>のため再取込しても重複しません。
+            </p>
+            <label
+              className="border-2 border-dashed rounded-lg p-12 text-center transition-colors card block cursor-pointer"
+              style={{ borderColor: 'var(--border)' }}
+            >
+              <p className="mb-2">勤怠ファイル（.xls）をドロップ / クリックして選択（複数可）</p>
+              <p className="text-sm" style={{ color: 'var(--text-dim)' }}>例: working_daily_working_list20260624142552.xls</p>
+              <input type="file" className="hidden" multiple accept=".xls,.html,.htm" onChange={(e) => { handleAttFiles(e.target.files); e.target.value = '' }} />
+            </label>
+
+            {attFiles.length > 0 && (
+              <div className="mt-6 space-y-2">
+                {attFiles.map((p, i) => (
+                  <div key={i} className={`border rounded-lg p-3 flex items-center gap-3 ${p.status === 'done' ? 'bg-green-500/10 border-green-500/40' : p.status === 'error' ? 'bg-red-500/10 border-red-500/40' : 'bg-[var(--surface)] border-[var(--border)]'}`}>
+                    <div className="w-6 flex-shrink-0">
+                      {p.status === 'done' && <span className="text-green-500">&#10003;</span>}
+                      {p.status === 'error' && <span className="text-red-500">&#10007;</span>}
+                      {p.status === 'processing' && <span className="inline-block w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{p.name}</p>
+                      <div className="text-xs mt-0.5" style={{ color: 'var(--text-dim)' }}>
+                        {p.status === 'done' && `${p.workDate} ・ ${p.rows}件投入 ・ 従業員${p.staff}名`}
+                        {p.status === 'error' && <span style={{ color: 'var(--red)' }}>{p.error}</span>}
+                        {p.status === 'processing' && '処理中...'}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {attUploading && <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>アップロード中...</p>}
           </>
         )}
       </div>
