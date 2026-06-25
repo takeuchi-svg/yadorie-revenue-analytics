@@ -500,6 +500,8 @@ export default function UploadPage() {
             <label
               className="border-2 border-dashed rounded-lg p-12 text-center transition-colors card block cursor-pointer"
               style={{ borderColor: 'var(--border)' }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); handleAttFiles(e.dataTransfer.files) }}
             >
               <p className="mb-2">勤怠ファイル（.xls）をドロップ / クリックして選択（複数可）</p>
               <p className="text-sm" style={{ color: 'var(--text-dim)' }}>例: working_daily_working_list20260624142552.xls</p>
