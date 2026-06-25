@@ -438,7 +438,7 @@ export default function YojitsuPage() {
                 <span>上段=実績／予算、下段={yCmp}</span>
               </div>
               <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
-                <table className="text-sm border-separate" style={{ borderSpacing: 0 }}>
+                <table className="w-full text-sm border-separate" style={{ borderSpacing: 0 }}>
                   <thead>
                     <tr style={{ color: 'var(--text-dim)' }}>
                       <th className="px-4 h-14 whitespace-nowrap text-left sticky left-0 top-0 z-30"
@@ -518,7 +518,7 @@ export default function YojitsuPage() {
               {/* ===== 損益分岐点・原価分析（年度） ===== */}
               <div className="text-sm font-semibold mt-6 mb-2" style={{ color: 'var(--text)' }}>損益分岐点・原価分析</div>
               <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
-                <table className="text-sm border-separate" style={{ borderSpacing: 0 }}>
+                <table className="w-full text-sm border-separate" style={{ borderSpacing: 0 }}>
                   <thead>
                     <tr style={{ color: 'var(--text-dim)' }}>
                       <th className="px-4 h-14 whitespace-nowrap text-left sticky left-0 top-0 z-30"
