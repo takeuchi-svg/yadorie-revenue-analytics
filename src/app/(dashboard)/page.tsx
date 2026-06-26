@@ -28,8 +28,24 @@ interface MonthlyKpi {
 interface OccRow { month: string; occ: number | null; rooms_sold: number | null; operating_days: number | null; total_rooms: number | null }
 interface ChannelRow { channel: string | null; revenue: number | null }
 
-// AIサマリのセッション内キャッシュ（facility|month → 本文）
+// AIサマリ/課題のセッション内キャッシュ（facility|month → 本文）
 const summaryCache = new Map<string, string>()
+const issueCache = new Map<string, string>()
+
+// 実績サマリのプロンプト（売上・予実・生産性を横断、500〜1000字）
+const SUMMARY_PROMPT = (month: string) =>
+  `${month}の当施設の月次実績サマリを、経営層が読む文章として日本語500〜1000字で作成してください。次の3観点を必ず含めます。` +
+  `(1)売上実績: 売上・稼働率(occ)・客単価・同伴係数の水準と前年同月比、予算達成率。` +
+  `(2)予実(PL): budget_monthly/actual_monthlyを参照し、営業損益(operating_income)の予算差・前年差、原価率や販管費など費用面の所感。` +
+  `(3)生産性: mart_labor_monthly/actual_monthlyを参照し、売上高人件費率、従業員1人1時間あたり売上、総労働時間・総残業時間。勤怠データが無い月はその旨を一文添える。` +
+  `出力は段落の地の文のみ(見出し・箇条書き・表・グラフは不要)。数値は¥・%・カンマ付き。データはquery_dataツールで取得し、推測値は作らない。`
+
+// 課題と対策のプロンプト（参考・仮説提示）
+const ISSUE_PROMPT = (month: string) =>
+  `${month}の当施設のデータを横断分析し、改善余地のある「課題」と「対策(打ち手)」を抽出してください。` +
+  `売上・稼働・チャネル構成(mart_channel_monthly)・予実(コスト/営業損益)・生産性(人件費率/総労働時間/残業)などを観点に、` +
+  `根拠となる数値を添えて課題と対策をセットで3〜4点、Markdownの箇条書きで簡潔に示します。各項目は「**課題**: … → **対策**: …」の形式。` +
+  `あくまで参考情報のため断定は避け、仮説・示唆として提示。データはquery_dataツールで取得し、推測の数値は作らない。冒頭の前置きは不要。`
 
 export default function OverviewPage() {
   const { current, currentFacility } = useFacility()
@@ -39,6 +55,8 @@ export default function OverviewPage() {
   const [budgetByMonth, setBudgetByMonth] = useState<Record<string, number | null>>({})
   const [aiSummary, setAiSummary] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
+  const [aiIssue, setAiIssue] = useState('')
+  const [aiIssueLoading, setAiIssueLoading] = useState(false)
   const [channels, setChannels] = useState<ChannelRow[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -94,7 +112,7 @@ export default function OverviewPage() {
     try {
       const res = await fetch('/api/chat', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ facility, messages: [{ role: 'user', content: `${month}の当施設の実績を、売上・稼働率・予算達成率・前年比などの観点から3〜4行で簡潔に要約してください。本文のみ（表やグラフは不要）。` }] }),
+        body: JSON.stringify({ facility, messages: [{ role: 'user', content: SUMMARY_PROMPT(month) }] }),
       })
       const d = await res.json()
       const text = d.reply || ''
@@ -103,10 +121,33 @@ export default function OverviewPage() {
     } catch { setAiSummary('') } finally { setAiLoading(false) }
   }, [])
 
+  // 概要のAI課題と対策（参考）。サマリと同様にキャッシュ
+  const genIssue = useCallback(async (facility: string, month: string, force = false) => {
+    const key = `${facility}|${month}`
+    if (!force && issueCache.has(key)) { setAiIssue(issueCache.get(key)!); return }
+    if (!force) {
+      try {
+        const { data } = await supabase.from('ai_issue').select('content').eq('facility', facility).eq('month', month).maybeSingle()
+        if (data?.content) { issueCache.set(key, data.content); setAiIssue(data.content); return }
+      } catch { /* テーブル未作成等は無視 */ }
+    }
+    setAiIssueLoading(true); setAiIssue('')
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ facility, messages: [{ role: 'user', content: ISSUE_PROMPT(month) }] }),
+      })
+      const d = await res.json()
+      const text = d.reply || ''
+      setAiIssue(text); issueCache.set(key, text)
+      try { await supabase.from('ai_issue').upsert({ facility, month, content: text }, { onConflict: 'facility,month' }) } catch { /* ignore */ }
+    } catch { setAiIssue('') } finally { setAiIssueLoading(false) }
+  }, [])
+
   useEffect(() => {
     const lm = kpi[0]?.month
-    if (current && lm) genSummary(current, lm)
-  }, [current, kpi, genSummary])
+    if (current && lm) { genSummary(current, lm); genIssue(current, lm) }
+  }, [current, kpi, genSummary, genIssue])
 
   const latest = kpi[0]
   const latestOcc = latest ? occByMonth[latest.month] ?? null : null
@@ -176,6 +217,31 @@ export default function OverviewPage() {
               <AssistantContent content={aiSummary} />
             ) : (
               <p className="text-sm" style={{ color: 'var(--text-dim)' }}>AIサマリは未生成です（APIキー設定後に表示されます）。</p>
+            )}
+          </div>
+
+          {/* AI分析の課題と対策（参考） */}
+          <div className="card p-4 mb-6" style={{ borderColor: 'var(--border)' }}>
+            <div className="flex items-center gap-2 mb-2">
+              <SparkleIcon size={16} />
+              <h2 className="text-sm font-semibold">AI分析の課題と対策（参考）</h2>
+              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>仮説・参考</span>
+              <button
+                onClick={() => latest && genIssue(current, latest.month, true)}
+                disabled={aiIssueLoading || !latest}
+                className="ml-auto text-xs px-2 py-0.5 rounded-md hover:opacity-80 disabled:opacity-40"
+                style={{ color: 'var(--text-dim)', border: '1px solid var(--border)' }}
+                title="最新データで再生成"
+              >
+                ↻ 再生成
+              </button>
+            </div>
+            {aiIssueLoading ? (
+              <p className="text-sm" style={{ color: 'var(--text-dim)' }}>生成中...</p>
+            ) : aiIssue ? (
+              <AssistantContent content={aiIssue} />
+            ) : (
+              <p className="text-sm" style={{ color: 'var(--text-dim)' }}>課題と対策は未生成です（APIキー設定後に表示されます）。</p>
             )}
           </div>
 

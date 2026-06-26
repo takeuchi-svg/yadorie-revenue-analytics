@@ -14,6 +14,7 @@ const ALLOWED_TABLES = new Set([
   'mart_adr_band_monthly', 'mart_gs_monthly', 'mart_cxl_summary', 'mart_cxl_lt',
   'mart_booking_lt', 'budget_monthly', 'actual_monthly', 'mart_budget_revenue_monthly',
   'dim_facility', 'raw_other_product', 'raw_room_sales',
+  'mart_labor_monthly', 'dim_productivity_manual',
 ])
 
 const SCHEMA = `参照可能なテーブル/ビュー（列）:
@@ -32,7 +33,15 @@ const SCHEMA = `参照可能なテーブル/ビュー（列）:
 - actual_monthly(facility, fiscal_year, month, item_code, item_name, actual 実績, prior_amount 昨年)
 - mart_budget_revenue_monthly(facility, month, revenue_budget)
 - raw_other_product(facility, item_name 商品, category, total, quantity, source_month) ※料飲/物販の明細(売れ筋)
-- dim_facility(facility, name, total_rooms)`
+- dim_facility(facility, name, total_rooms)
+- mart_labor_monthly(facility, month, staff_count_monthly 月給社員数, parttime_count アルバイト数, total_work_hours 総労働時間, total_overtime_hours 総残業時間, own_work_hours 自施設, help_work_hours ヘルプ, operating_days) ※勤怠由来。本社(HQ)は除外済み。未取込の月は行が無い
+- dim_productivity_manual(facility, month, deemed_overtime_excess_pay みなし残業超の残業代(円), dispatch_work_hours 派遣・その他の労働時間(h)) ※手動入力
+
+【生産性KPIの算出方法】※必要に応じてactual_monthlyとmart_labor_monthlyを結合して算出
+- 人件費 = actual_monthlyのitem_name合計: 給料手当+賞与+通勤費+法定福利費+福利厚生費+雑給+外注費（人材）(無ければ外注費)
+- 売上高人件費率 = 人件費 ÷ 売上(item_code='sales_total') ／ 付加価値 = 売上 − 原価(cogs_total)
+- 従業員1人1時間あたり売上 = 売上(mart_monthly_kpi.revenue) ÷ total_work_hours
+- 1人1時間あたり付加価値 = 付加価値 ÷ total_work_hours ／ 月給社員1人あたり平均残業 = total_overtime_hours ÷ staff_count_monthly`
 
 function makeSupabase() {
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!)
@@ -113,7 +122,7 @@ ${SCHEMA}`
     const msgs: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }))
 
     for (let i = 0; i < 6; i++) {
-      const resp = await client.messages.create({ model: MODEL, max_tokens: 1500, system, tools: [TOOL], messages: msgs })
+      const resp = await client.messages.create({ model: MODEL, max_tokens: 2000, system, tools: [TOOL], messages: msgs })
       if (resp.stop_reason === 'tool_use') {
         const results: Anthropic.ToolResultBlockParam[] = []
         for (const block of resp.content) {
