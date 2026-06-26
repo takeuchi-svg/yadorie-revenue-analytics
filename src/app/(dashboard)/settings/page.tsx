@@ -57,6 +57,9 @@ export default function SettingsPage() {
   const [ctxConcept, setCtxConcept] = useState('')
   const [ctxInitiatives, setCtxInitiatives] = useState('')
   const [ctxNotes, setCtxNotes] = useState('')
+  const [ctxDocUrl, setCtxDocUrl] = useState('')
+  const [ctxDocInfo, setCtxDocInfo] = useState<{ syncedAt: string | null; len: number }>({ syncedAt: null, len: 0 })
+  const [syncing, setSyncing] = useState(false)
 
   useEffect(() => {
     if (!current) return
@@ -132,10 +135,11 @@ export default function SettingsPage() {
   // 施設コンテキスト: 選択施設の値を読み込み
   useEffect(() => {
     if (!current) return
-    supabase.from('dim_facility_context').select('concept, initiatives, notes').eq('facility', current).maybeSingle()
+    supabase.from('dim_facility_context').select('concept, initiatives, notes, doc_url, doc_content, doc_synced_at').eq('facility', current).maybeSingle()
       .then(({ data }) => {
-        const c = data as { concept: string | null; initiatives: string | null; notes: string | null } | null
+        const c = data as { concept: string | null; initiatives: string | null; notes: string | null; doc_url: string | null; doc_content: string | null; doc_synced_at: string | null } | null
         setCtxConcept(c?.concept ?? ''); setCtxInitiatives(c?.initiatives ?? ''); setCtxNotes(c?.notes ?? '')
+        setCtxDocUrl(c?.doc_url ?? ''); setCtxDocInfo({ syncedAt: c?.doc_synced_at ?? null, len: c?.doc_content?.length ?? 0 })
       })
   }, [current])
 
@@ -143,10 +147,29 @@ export default function SettingsPage() {
     setSaving(true); setMessage('')
     const { error } = await supabase.from('dim_facility_context').upsert({
       facility: current, concept: ctxConcept || null, initiatives: ctxInitiatives || null, notes: ctxNotes || null,
-      updated_at: new Date().toISOString(),
+      doc_url: ctxDocUrl || null, updated_at: new Date().toISOString(),
     }, { onConflict: 'facility' })
     setMessage(error ? `Error: ${error.message}` : '施設コンテキストを保存しました')
     setSaving(false)
+  }
+
+  // Googleドキュメントを取り込み（サーバー経由でエクスポート→doc_contentへ上書き）
+  const syncDoc = async () => {
+    if (!ctxDocUrl) { setMessage('GoogleドキュメントのURLを入力してください'); return }
+    setSyncing(true); setMessage('')
+    try {
+      const res = await fetch('/api/facility-context/sync', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ facility: current, docUrl: ctxDocUrl }),
+      })
+      const d = await res.json()
+      if (!res.ok || d.error) { setMessage(`Error: ${d.error || '取得に失敗しました'}`) }
+      else {
+        setMessage(`ドキュメントを取り込みました（${d.length}文字${d.truncated ? '・上限で一部省略' : ''}）`)
+        setCtxDocInfo({ syncedAt: new Date().toISOString(), len: d.length })
+      }
+    } catch (e) { setMessage('Error: ' + (e instanceof Error ? e.message : String(e))) }
+    finally { setSyncing(false) }
   }
 
   const saveProd = async () => {
@@ -379,6 +402,29 @@ export default function SettingsPage() {
             <textarea className="field px-3 py-2 text-sm w-full" rows={2}
               placeholder="例: 冬季は積雪で稼働が落ちる。団体は受けていない。"
               value={ctxNotes} onChange={(e) => setCtxNotes(e.target.value)} />
+          </div>
+
+          {/* Googleドキュメント連携 */}
+          <div className="pt-3" style={{ borderTop: '1px solid var(--border)' }}>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>Googleドキュメント連携（任意）</label>
+            <p className="text-xs mb-2" style={{ color: 'var(--text-dim)' }}>
+              文書を「リンクを知っている全員が閲覧可」またはウェブに公開し、URLを貼って「取り込む」を押すと本文をAIの前提情報に取り込みます（押すたびに最新で上書き）。
+            </p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <input type="url" className="field px-3 py-2 text-sm flex-1 min-w-64"
+                placeholder="https://docs.google.com/document/d/.../edit"
+                value={ctxDocUrl} onChange={(e) => setCtxDocUrl(e.target.value)} />
+              <button onClick={syncDoc} disabled={syncing || !ctxDocUrl}
+                className="px-4 py-2 rounded-md text-sm hover:opacity-90 disabled:opacity-50"
+                style={{ background: 'var(--surface2)', border: '1px solid var(--border)', color: 'var(--text)' }}>
+                {syncing ? '取込中...' : '取り込む（同期）'}
+              </button>
+            </div>
+            {ctxDocInfo.len > 0 && (
+              <p className="text-xs mt-1" style={{ color: 'var(--green)' }}>
+                取込済み: {ctxDocInfo.len}文字{ctxDocInfo.syncedAt ? ` ・ ${new Date(ctxDocInfo.syncedAt).toLocaleString('ja-JP')}` : ''}
+              </p>
+            )}
           </div>
         </div>
       </section>

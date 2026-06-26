@@ -111,13 +111,14 @@ export async function POST(req: NextRequest) {
     let contextBlock = ''
     if (facility) {
       try {
-        const { data } = await sb.from('dim_facility_context').select('concept, initiatives, notes').eq('facility', facility).maybeSingle()
-        const c = data as { concept: string | null; initiatives: string | null; notes: string | null } | null
-        if (c && (c.concept || c.initiatives || c.notes)) {
+        const { data } = await sb.from('dim_facility_context').select('concept, initiatives, notes, doc_content').eq('facility', facility).maybeSingle()
+        const c = data as { concept: string | null; initiatives: string | null; notes: string | null; doc_content: string | null } | null
+        if (c && (c.concept || c.initiatives || c.notes || c.doc_content)) {
           contextBlock = `\n\n【施設の定性コンテキスト】数値の解釈・要約・課題抽出の前提として必ず考慮する（コンセプトと実績の整合、取組の効果検証の観点を含める）。\n` +
             (c.concept ? `- コンセプト/ターゲット: ${c.concept}\n` : '') +
             (c.initiatives ? `- 直近の取組・施策: ${c.initiatives}\n` : '') +
-            (c.notes ? `- その他メモ: ${c.notes}\n` : '')
+            (c.notes ? `- その他メモ: ${c.notes}\n` : '') +
+            (c.doc_content ? `- 連携ドキュメント(Google)からの補足情報:\n${c.doc_content}\n` : '')
         }
       } catch { /* テーブル未作成等は無視 */ }
     }
