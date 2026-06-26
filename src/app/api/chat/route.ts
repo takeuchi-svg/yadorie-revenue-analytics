@@ -104,6 +104,24 @@ export async function POST(req: NextRequest) {
   try {
     const { messages, facility } = (await req.json()) as { messages: { role: 'user' | 'assistant'; content: string }[]; facility?: string }
     const today = new Date().toISOString().slice(0, 10)
+    const client = new Anthropic({ apiKey })
+    const sb = makeSupabase()
+
+    // 施設の定性コンテキスト（コンセプト・直近の取組）をプロンプトに注入
+    let contextBlock = ''
+    if (facility) {
+      try {
+        const { data } = await sb.from('dim_facility_context').select('concept, initiatives, notes').eq('facility', facility).maybeSingle()
+        const c = data as { concept: string | null; initiatives: string | null; notes: string | null } | null
+        if (c && (c.concept || c.initiatives || c.notes)) {
+          contextBlock = `\n\n【施設の定性コンテキスト】数値の解釈・要約・課題抽出の前提として必ず考慮する（コンセプトと実績の整合、取組の効果検証の観点を含める）。\n` +
+            (c.concept ? `- コンセプト/ターゲット: ${c.concept}\n` : '') +
+            (c.initiatives ? `- 直近の取組・施策: ${c.initiatives}\n` : '') +
+            (c.notes ? `- その他メモ: ${c.notes}\n` : '')
+        }
+      } catch { /* テーブル未作成等は無視 */ }
+    }
+
     const system = `あなたは旅館・ホテルの売上分析BI「YADORIE Revenue Analytics」のアシスタントです。日本語で簡潔に、数値は¥やカンマ・%付きで答えます。
 今日の日付: ${today}。現在選択中の施設コード: ${facility || '(未指定)'}。質問が施設を指定していなければ現在の施設を使うこと。
 データはquery_dataツールでSupabaseから取得して答える(推測で数値を作らない)。必要なら複数回ツールを呼ぶ。月は'YYYY-MM'、年度(fiscal_year)は'2025'=2025/4〜2026/3。
@@ -115,10 +133,8 @@ export async function POST(req: NextRequest) {
 {"type":"bar","title":"月次売上","x":"month","series":[{"key":"revenue","label":"売上"}],"data":[{"month":"2026-04","revenue":12541100}]}
 \`\`\`
   type は "bar" か "line"。x はX軸キー、series は系列(keyは数値、labelは表示名)、data は行配列。数値は生の数(円・件数等、記号なし)。グラフ用データもquery_dataの実データから作る。
-${SCHEMA}`
+${SCHEMA}${contextBlock}`
 
-    const client = new Anthropic({ apiKey })
-    const sb = makeSupabase()
     const msgs: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }))
 
     for (let i = 0; i < 8; i++) {

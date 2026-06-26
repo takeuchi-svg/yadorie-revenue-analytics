@@ -53,6 +53,10 @@ export default function SettingsPage() {
   const [deemedPay, setDeemedPay] = useState<number | ''>('')
   const [dispatchHours, setDispatchHours] = useState<number | ''>('')
   const [dispatchNotes, setDispatchNotes] = useState('')
+  // 施設コンテキスト（AI用）
+  const [ctxConcept, setCtxConcept] = useState('')
+  const [ctxInitiatives, setCtxInitiatives] = useState('')
+  const [ctxNotes, setCtxNotes] = useState('')
 
   useEffect(() => {
     if (!current) return
@@ -124,6 +128,26 @@ export default function SettingsPage() {
         setDispatchNotes(r?.dispatch_other_notes ?? '')
       })
   }, [current, prodMonth])
+
+  // 施設コンテキスト: 選択施設の値を読み込み
+  useEffect(() => {
+    if (!current) return
+    supabase.from('dim_facility_context').select('concept, initiatives, notes').eq('facility', current).maybeSingle()
+      .then(({ data }) => {
+        const c = data as { concept: string | null; initiatives: string | null; notes: string | null } | null
+        setCtxConcept(c?.concept ?? ''); setCtxInitiatives(c?.initiatives ?? ''); setCtxNotes(c?.notes ?? '')
+      })
+  }, [current])
+
+  const saveContext = async () => {
+    setSaving(true); setMessage('')
+    const { error } = await supabase.from('dim_facility_context').upsert({
+      facility: current, concept: ctxConcept || null, initiatives: ctxInitiatives || null, notes: ctxNotes || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'facility' })
+    setMessage(error ? `Error: ${error.message}` : '施設コンテキストを保存しました')
+    setSaving(false)
+  }
 
   const saveProd = async () => {
     setSaving(true); setMessage('')
@@ -323,6 +347,38 @@ export default function SettingsPage() {
             <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>備考</label>
             <input type="text" className="field px-3 py-2 text-sm w-full"
               value={dispatchNotes} onChange={(e) => setDispatchNotes(e.target.value)} />
+          </div>
+        </div>
+      </section>
+
+      {/* 施設コンテキスト（AI用） */}
+      <section className="card p-6 mt-6">
+        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <h2 className="text-lg font-semibold">施設コンテキスト（AI分析用）</h2>
+          <button onClick={saveContext} disabled={saving}
+            className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50">保存</button>
+        </div>
+        <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>
+          ここに入力した定性情報は、概要ページのAI実績サマリ・課題と対策・AIチャットの分析前提として使われます（施設ごと）。
+        </p>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>コンセプト / ターゲット層</label>
+            <textarea className="field px-3 py-2 text-sm w-full" rows={2}
+              placeholder="例: 大人の隠れ家。客層は40〜60代の夫婦・カップル中心。料理と温泉が主軸。"
+              value={ctxConcept} onChange={(e) => setCtxConcept(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>直近の取組・施策</label>
+            <textarea className="field px-3 py-2 text-sm w-full" rows={3}
+              placeholder="例: 4月に夕食を会席へ刷新し客単価UP施策。5月から一休プラン強化。6月は改装で一部客室停止。"
+              value={ctxInitiatives} onChange={(e) => setCtxInitiatives(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>その他メモ（季節要因・制約など）</label>
+            <textarea className="field px-3 py-2 text-sm w-full" rows={2}
+              placeholder="例: 冬季は積雪で稼働が落ちる。団体は受けていない。"
+              value={ctxNotes} onChange={(e) => setCtxNotes(e.target.value)} />
           </div>
         </div>
       </section>
