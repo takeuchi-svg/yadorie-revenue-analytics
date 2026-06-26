@@ -121,7 +121,7 @@ ${SCHEMA}`
     const sb = makeSupabase()
     const msgs: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }))
 
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 8; i++) {
       const resp = await client.messages.create({ model: MODEL, max_tokens: 2000, system, tools: [TOOL], messages: msgs })
       if (resp.stop_reason === 'tool_use') {
         const results: Anthropic.ToolResultBlockParam[] = []
