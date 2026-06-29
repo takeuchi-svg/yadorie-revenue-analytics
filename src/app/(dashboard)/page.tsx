@@ -28,28 +28,9 @@ interface MonthlyKpi {
 interface OccRow { month: string; occ: number | null; rooms_sold: number | null; operating_days: number | null; total_rooms: number | null }
 interface ChannelRow { channel: string | null; revenue: number | null }
 
-// AIサマリ/課題のセッション内キャッシュ（facility|month → 本文）
+// AIサマリ/課題のセッション内キャッシュ（facility|month → 本文）。本体の共有キャッシュはDB(ai_summary/ai_issue)
 const summaryCache = new Map<string, string>()
 const issueCache = new Map<string, string>()
-
-// 実績サマリのプロンプト（売上・予実・生産性を横断、500〜1000字）
-const SUMMARY_PROMPT = (month: string) =>
-  `${month}の当施設の月次実績サマリを、経営層が読む文章として日本語500〜1000字で作成してください。次の3観点を必ず含めます。` +
-  `(1)売上実績: 売上・稼働率(occ)・客単価・同伴係数の水準と前年同月比、予算達成率。` +
-  `(2)予実(PL): budget_monthly/actual_monthlyを参照し、営業損益(operating_income)の予算差・前年差、原価率や販管費など費用面の所感。` +
-  `(3)生産性: mart_labor_monthly/actual_monthlyを参照し、売上高人件費率、従業員1人1時間あたり売上、総労働時間・総残業時間。勤怠データが無い月はその旨を一文添える。` +
-  `出力は段落の地の文のみ(見出し・箇条書き・表・グラフは不要)。数値は¥・%・カンマ付き。データはquery_dataツールで取得し、推測値は作らない。`
-
-// 課題と対策のプロンプト（過去データ分析＋自己検証つき・参考/仮説提示）
-const ISSUE_PROMPT = (month: string) =>
-  `${month}を起点に当施設のデータを横断分析し、改善余地のある「課題」と「対策(打ち手)」を抽出してください。\n` +
-  `手順1【過去データの分析】状況に応じて過去データも参照する。直近6〜12ヶ月の推移(売上・稼働occ・客単価・チャネル構成mart_channel_monthly・営業損益operating_income・人件費率/総労働時間)や前年同月比をquery_dataで取得し、` +
-  `単月の良し悪しだけでなくトレンド・季節性・変化点(急に悪化/改善した月)を踏まえて課題を特定する。\n` +
-  `手順2【対策の立案】各課題に対し具体的な打ち手を立てる。\n` +
-  `手順3【自己検証・改善】提示する対策が本当に最適かを自分で批判的に見直す。代替案の有無・実現可能性・副作用(他KPIへの悪影響)・コスト対効果の観点で再評価し、より優れた案があれば差し替える。\n` +
-  `最終出力は、自己検証を経た課題と対策をセットで3〜4点、Markdownの箇条書きで簡潔に。各項目は次の3行構成にする:\n` +
-  `「**課題**: …(根拠となる数値・推移)」「**対策**: …(なぜそれが最適かを一言)」「_自己検証_: 検討した代替案と、それを採らなかった理由/この対策にした理由を1〜2行」。\n` +
-  `あくまで参考情報のため断定は避け仮説として提示。データはquery_dataツールで取得し推測の数値は作らない。前置き・手順の説明文は出力せず、最終結果のみ示す。`
 
 export default function OverviewPage() {
   const { current, currentFacility } = useFacility()
@@ -102,49 +83,36 @@ export default function OverviewPage() {
     })
   }, [current])
 
-  // 概要のAIサマリ（月が変わった時だけ生成。メモリ＋DBキャッシュ）
+  // 概要のAIサマリ。生成・保存はサーバー(/api/insight)が担い、DB(ai_summary)に1つだけ保存して全員で共有。
+  // 開いてもキャッシュがあれば再生成しない。再生成ボタン(force)を押した時だけ作り直す。
   const genSummary = useCallback(async (facility: string, month: string, force = false) => {
     const key = `${facility}|${month}`
     if (!force && summaryCache.has(key)) { setAiSummary(summaryCache.get(key)!); return }
-    if (!force) {
-      try {
-        const { data } = await supabase.from('ai_summary').select('content').eq('facility', facility).eq('month', month).maybeSingle()
-        if (data?.content) { summaryCache.set(key, data.content); setAiSummary(data.content); return }
-      } catch { /* テーブル未作成等は無視（メモリのみで動作） */ }
-    }
     setAiLoading(true); setAiSummary('')
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch('/api/insight', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ facility, messages: [{ role: 'user', content: SUMMARY_PROMPT(month) }] }),
+        body: JSON.stringify({ facility, month, kind: 'summary', force }),
       })
       const d = await res.json()
-      const text = d.reply || ''
-      setAiSummary(text); summaryCache.set(key, text)
-      try { await supabase.from('ai_summary').upsert({ facility, month, content: text }, { onConflict: 'facility,month' }) } catch { /* ignore */ }
+      const text = d.content || ''
+      setAiSummary(text); if (text) summaryCache.set(key, text)
     } catch { setAiSummary('') } finally { setAiLoading(false) }
   }, [])
 
-  // 概要のAI課題と対策（参考）。サマリと同様にキャッシュ
+  // 概要のAI課題と対策（参考）。サマリと同じく1つだけ保存して全員で共有。
   const genIssue = useCallback(async (facility: string, month: string, force = false) => {
     const key = `${facility}|${month}`
     if (!force && issueCache.has(key)) { setAiIssue(issueCache.get(key)!); return }
-    if (!force) {
-      try {
-        const { data } = await supabase.from('ai_issue').select('content').eq('facility', facility).eq('month', month).maybeSingle()
-        if (data?.content) { issueCache.set(key, data.content); setAiIssue(data.content); return }
-      } catch { /* テーブル未作成等は無視 */ }
-    }
     setAiIssueLoading(true); setAiIssue('')
     try {
-      const res = await fetch('/api/chat', {
+      const res = await fetch('/api/insight', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ facility, messages: [{ role: 'user', content: ISSUE_PROMPT(month) }] }),
+        body: JSON.stringify({ facility, month, kind: 'issue', force }),
       })
       const d = await res.json()
-      const text = d.reply || ''
-      setAiIssue(text); issueCache.set(key, text)
-      try { await supabase.from('ai_issue').upsert({ facility, month, content: text }, { onConflict: 'facility,month' }) } catch { /* ignore */ }
+      const text = d.content || ''
+      setAiIssue(text); if (text) issueCache.set(key, text)
     } catch { setAiIssue('') } finally { setAiIssueLoading(false) }
   }, [])
 
