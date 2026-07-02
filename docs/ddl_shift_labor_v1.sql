@@ -56,6 +56,18 @@ comment on column dim_staff.is_spot is
 
 
 -- ============================================================
+--  B-2. 既存 raw_attendance_daily への由来列追加（ALTER / T01）
+--       実DBには source 列が無く source_file のみのため source を追加。
+--       既存行(KOT取込)は 'KOT'。スポット手入力行は 'manual'。
+--       is_spot は attendance には持たず、dim_staff.is_spot で判定する。
+-- ============================================================
+alter table raw_attendance_daily
+  add column if not exists source text not null default 'KOT';
+comment on column raw_attendance_daily.source is
+  '実績の由来。KOT=勤怠取込 / manual=シフト画面のスポット手入力';
+
+
+-- ============================================================
 --  C. 役割マスタ（設定画面で追加・色指定可）
 -- ============================================================
 create table dim_role (
@@ -189,8 +201,23 @@ select
   case when s.is_spot then h.hours else 0 end as spot_hours  -- ＝ 生産性KPI「派遣・その他労働時間」
 from h
 join dim_staff s on s.staff_code = h.staff_code;
--- 生産性KPIの旧・手入力2項目は、施設×月で
---   sum(ot_pay_over_deemed) / sum(spot_hours) を参照する形に切替（手入力は廃止）。
+
+
+-- ============================================================
+--  I-2. 人件費 施設×月ロールアップ ＝ 生産性KPIへの供給ソース（T13）
+--       本repoに mart_productivity ビューは存在しない（生産性はページで
+--       クライアント集計）。KPI改修は「productivityページの2指標を
+--       本ビューへ差し替え、設定の手入力2項目UIを廃止（備考は残す）」で行う。
+-- ============================================================
+create view mart_labor_cost_monthly as
+select
+  work_facility                       as facility,
+  to_char(ym, 'YYYY-MM')              as month,
+  sum(labor_cost)                     as labor_cost,          -- 実績人件費合計
+  sum(ot_pay_over_deemed)             as deemed_ot_excess_pay,-- ＝ みなし残業超の残業代
+  sum(spot_hours)                     as spot_hours           -- ＝ 派遣・その他の労働時間(h)
+from mart_labor_cost_actual
+group by work_facility, ym;
 
 
 -- ============================================================
