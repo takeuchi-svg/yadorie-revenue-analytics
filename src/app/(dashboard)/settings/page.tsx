@@ -14,6 +14,18 @@ interface OtaRow {
   value: number | null
 }
 
+interface StaffWage {
+  staff_code: string
+  name: string | null
+  employment_type: string | null
+  wage_type: string | null
+  hourly_wage: number | null
+  monthly_salary: number | null
+  deemed_ot_hours: number | null
+  contracted_monthly_hours: number | null
+  is_spot: boolean | null
+}
+
 const OTA_LIST = ['楽天トラベル', 'じゃらん', '一休', 'Booking.com', 'Expedia', '自社HP'] as const
 const OTA_METRICS = [
   { key: 'ad_cost', label: '広告費' },
@@ -45,6 +57,8 @@ export default function SettingsPage() {
   const [opFys, setOpFys] = useState<string[]>([])
   const [opFy, setOpFy] = useState('')
   const [opDays, setOpDays] = useState<Record<string, number | ''>>({})
+  // 従業員 賃金設定（シフト・労務）
+  const [staffWages, setStaffWages] = useState<StaffWage[]>([])
   // 生産性手動入力
   const [prodMonth, setProdMonth] = useState(() => {
     const now = new Date()
@@ -124,6 +138,35 @@ export default function SettingsPage() {
         setDispatchNotes(r?.dispatch_other_notes ?? '')
       })
   }, [current, prodMonth])
+
+  // 従業員 賃金設定: 選択施設(home_facility)の従業員を読み込み
+  useEffect(() => {
+    if (!current) return
+    supabase.from('dim_staff')
+      .select('staff_code, name, employment_type, wage_type, hourly_wage, monthly_salary, deemed_ot_hours, contracted_monthly_hours, is_spot')
+      .eq('home_facility', current).order('staff_code')
+      .then(({ data }) => setStaffWages(((data as StaffWage[]) ?? [])))
+  }, [current])
+
+  const updateWage = (code: string, patch: Partial<StaffWage>) =>
+    setStaffWages((prev) => prev.map((s) => (s.staff_code === code ? { ...s, ...patch } : s)))
+
+  const saveStaffWages = async () => {
+    setSaving(true); setMessage('')
+    const rows = staffWages.map((s) => ({
+      staff_code: s.staff_code,
+      wage_type: s.wage_type || null,
+      hourly_wage: s.hourly_wage,
+      monthly_salary: s.monthly_salary,
+      deemed_ot_hours: s.deemed_ot_hours ?? 0,
+      contracted_monthly_hours: s.contracted_monthly_hours,
+      is_spot: !!s.is_spot,
+      updated_at: new Date().toISOString(),
+    }))
+    const { error } = await supabase.from('dim_staff').upsert(rows, { onConflict: 'staff_code' })
+    setMessage(error ? `Error: ${error.message}` : `賃金設定を保存しました（${rows.length}名）`)
+    setSaving(false)
+  }
 
   const saveProd = async () => {
     setSaving(true); setMessage('')
@@ -294,6 +337,79 @@ export default function SettingsPage() {
                 onChange={(e) => setOpDays((p) => ({ ...p, [m]: e.target.value === '' ? '' : Number(e.target.value) }))} />
             </div>
           ))}
+        </div>
+      </section>
+
+      {/* 従業員 賃金設定（シフト・労務） */}
+      <section className="card p-6 mt-6">
+        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
+          <h2 className="text-lg font-semibold">従業員 賃金設定（シフト・労務）</h2>
+          <button onClick={saveStaffWages} disabled={saving}
+            className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50">保存</button>
+        </div>
+        <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>
+          人件費・残業の計算に使用（{currentFacility?.name ?? current} 所属 {staffWages.length}名）。
+          <strong>月給者</strong>は月所定・見込み残業が必須（残業単価=月給÷月所定×1.25、見込み超過分のみ残業代）。時給者は時給のみ。
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm whitespace-nowrap">
+            <thead>
+              <tr className="text-left" style={{ color: 'var(--text-dim)' }}>
+                <th className="px-2 py-2">社員</th>
+                <th className="px-2 py-2">区分</th>
+                <th className="px-2 py-2 text-right">時給</th>
+                <th className="px-2 py-2 text-right">月給</th>
+                <th className="px-2 py-2 text-right">月所定h</th>
+                <th className="px-2 py-2 text-right">見込残業h</th>
+                <th className="px-2 py-2 text-center">スポット</th>
+              </tr>
+            </thead>
+            <tbody>
+              {staffWages.map((s) => (
+                <tr key={s.staff_code} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td className="px-2 py-1.5">
+                    <span className="font-medium">{s.name ?? s.staff_code}</span>
+                    <span className="ml-1 text-[10px]" style={{ color: 'var(--text-dim)' }}>{s.staff_code}</span>
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <select className="field px-2 py-1 text-xs w-20" value={s.wage_type ?? ''}
+                      onChange={(e) => updateWage(s.staff_code, { wage_type: e.target.value || null })}>
+                      <option value="">未設定</option>
+                      <option value="時給">時給</option>
+                      <option value="月給">月給</option>
+                    </select>
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <input type="number" min={0} className="field px-2 py-1 text-xs w-24 text-right"
+                      value={s.hourly_wage ?? ''} disabled={s.wage_type === '月給'}
+                      onChange={(e) => updateWage(s.staff_code, { hourly_wage: e.target.value === '' ? null : Number(e.target.value) })} />
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <input type="number" min={0} className="field px-2 py-1 text-xs w-28 text-right"
+                      value={s.monthly_salary ?? ''} disabled={s.wage_type !== '月給'}
+                      onChange={(e) => updateWage(s.staff_code, { monthly_salary: e.target.value === '' ? null : Number(e.target.value) })} />
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <input type="number" min={0} step="0.1" className="field px-2 py-1 text-xs w-20 text-right"
+                      value={s.contracted_monthly_hours ?? ''} disabled={s.wage_type !== '月給'}
+                      onChange={(e) => updateWage(s.staff_code, { contracted_monthly_hours: e.target.value === '' ? null : Number(e.target.value) })} />
+                  </td>
+                  <td className="px-2 py-1.5 text-right">
+                    <input type="number" min={0} step="0.1" className="field px-2 py-1 text-xs w-20 text-right"
+                      value={s.deemed_ot_hours ?? ''} disabled={s.wage_type !== '月給'}
+                      onChange={(e) => updateWage(s.staff_code, { deemed_ot_hours: e.target.value === '' ? null : Number(e.target.value) })} />
+                  </td>
+                  <td className="px-2 py-1.5 text-center">
+                    <input type="checkbox" checked={!!s.is_spot}
+                      onChange={(e) => updateWage(s.staff_code, { is_spot: e.target.checked })} />
+                  </td>
+                </tr>
+              ))}
+              {staffWages.length === 0 && (
+                <tr><td colSpan={7} className="px-2 py-4 text-center" style={{ color: 'var(--text-dim)' }}>この施設所属の従業員がいません（勤怠取込で登録されます）。</td></tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </section>
 
