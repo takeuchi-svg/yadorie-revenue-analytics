@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>シフト入力 UIモック</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@3/dist/tabler-icons.min.css">
+<style>
+:root{
+ --surface-0:#faf9f5; --surface-1:#f1efe8; --surface-2:#ffffff;
+ --text-primary:#3d3d3a; --text-secondary:#73726c; --text-muted:#9c9a92;
+ --border:#e5e3db; --border-strong:#d3d1c7; --radius:8px;
+ --bg-accent:#e6f1fb; --text-accent:#185fa5;
+ --bg-success:#eaf3de; --text-success:#3b6d11;
+ --bg-warning:#faeeda; --text-warning:#854f0b;
+ --bg-pro:#eeedfe; --text-pro:#534ab7;
+ --bg-danger:#fcebeb; --text-danger:#a32d2d;
+}
+@media (prefers-color-scheme: dark){
+ :root{
+  --surface-0:#262624; --surface-1:#30302e; --surface-2:#3a3a37;
+  --text-primary:#ecebe4; --text-secondary:#c2c0b6; --text-muted:#9c9a92;
+  --border:#46453f; --border-strong:#5a594f;
+  --bg-accent:#0c447c; --text-accent:#b5d4f4;
+  --bg-success:#27500a; --text-success:#c0dd97;
+  --bg-warning:#633806; --text-warning:#fac775;
+  --bg-pro:#3c3489; --text-pro:#cecbf6;
+  --bg-danger:#791f1f; --text-danger:#f7c1c1;
+ }
+}
+*{box-sizing:border-box}
+body{font-family:-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
+ background:var(--surface-0);color:var(--text-primary);margin:0;padding:24px;line-height:1.6}
+.wrap{max-width:920px;margin:0 auto}
+h1{font-size:20px;font-weight:500;margin:0 0 4px}
+.sub{color:var(--text-secondary);font-size:13px;margin:0 0 18px}
+button,select,input{font-family:inherit;color:var(--text-primary)}
+button{background:var(--surface-2);border:0.5px solid var(--border-strong);border-radius:var(--radius);
+ padding:6px 12px;font-size:13px;cursor:pointer}
+button:hover{background:var(--surface-1)}
+select,input{background:var(--surface-2);border:0.5px solid var(--border);border-radius:var(--radius);padding:4px 8px;font-size:13px}
+.g td,.g th{border:0.5px solid var(--border);padding:3px 3px;text-align:center;font-size:12px;vertical-align:middle}
+.nm{text-align:left;font-size:12px;padding-left:8px}
+.tag{font-size:10px;padding:1px 5px;border-radius:10px;margin-left:4px;white-space:nowrap}
+.oin{width:40px;height:26px;padding:2px;text-align:center;font-size:12px}
+.pat{width:100%;height:24px;padding:0 2px;font-size:11px;border-radius:5px;border:0.5px solid var(--border)}
+.hrs{width:100%;height:20px;padding:0;text-align:center;font-size:11px;margin-top:2px;border-radius:4px;border:0.5px solid var(--border)}
+tr.spot td{border-top:1.5px dashed var(--border-strong)}
+.mtile{background:var(--surface-1);border-radius:8px;padding:12px 14px}
+.mtile .lb{font-size:13px;color:var(--text-secondary)}
+.mtile .vl{font-size:22px;font-weight:500;margin-top:2px}
+.memo{display:inline-block;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--text-secondary);cursor:help}
+details{margin-bottom:12px;border:0.5px solid var(--border);border-radius:12px;padding:6px 10px 10px}
+summary{cursor:pointer;font-size:13px;font-weight:500;color:var(--text-secondary)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>シフト入力（UIモック）</h1>
+<p class="sub">月グリッド・パターン選択・時間手修正・役割分割・稼働前提/メモ・即時集計のイメージ。数値は実際に再計算します。</p>
+
+<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px">
+  <select style="width:auto"><option>山の手ホテル</option></select>
+  <select style="width:auto"><option>2026年4月</option></select>
+  <button><i class="ti ti-copy"></i> 前月コピー（曜日合わせ）</button>
+  <button><i class="ti ti-user-plus"></i> 短期バイト追加</button>
+  <button><i class="ti ti-settings"></i> パターン・役割設定</button>
+  <button><i class="ti ti-device-floppy"></i> 保存</button>
+</div>
+
+<details open>
+  <summary>稼働前提・メモ（折りたたみ可）</summary>
+  <table class="g" style="width:100%;border-collapse:collapse;table-layout:fixed;margin-top:8px">
+    <colgroup><col style="width:132px"><col span="6" style="width:66px"><col style="width:104px"></colgroup>
+    <tr>
+      <td class="nm" style="color:var(--text-secondary)">予算 稼働室 / 人数</td>
+      <td>2<div style="font-size:11px;color:var(--text-muted)">3</div></td>
+      <td>1<div style="font-size:11px;color:var(--text-muted)">3</div></td>
+      <td>8<div style="font-size:11px;color:var(--text-muted)">19</div></td>
+      <td>4<div style="font-size:11px;color:var(--text-muted)">8</div></td>
+      <td>6<div style="font-size:11px;color:var(--text-muted)">15</div></td>
+      <td>6<div style="font-size:11px;color:var(--text-muted)">6</div></td>
+      <td style="background:var(--surface-1);font-size:11px;color:var(--text-muted)">budget_daily</td>
+    </tr>
+    <tr>
+      <td class="nm" style="color:var(--text-secondary)">オンハンド室 <span style="font-size:10px">手入力</span></td>
+      <td><input class="oin" value="2"></td><td><input class="oin" value="1"></td><td><input class="oin" value="7"></td>
+      <td><input class="oin" value="4"></td><td><input class="oin" value="5"></td><td><input class="oin" value="6"></td>
+      <td style="background:var(--surface-1)"></td>
+    </tr>
+    <tr>
+      <td class="nm" style="color:var(--text-secondary)">予測室 <span style="font-size:10px">手入力</span></td>
+      <td><input class="oin" value="3"></td><td><input class="oin" value="2"></td><td><input class="oin" value="9"></td>
+      <td><input class="oin" value="6"></td><td><input class="oin" value="8"></td><td><input class="oin" value="7"></td>
+      <td style="background:var(--surface-1)"></td>
+    </tr>
+    <tr>
+      <td class="nm" style="color:var(--text-secondary)">メモ <span style="font-size:10px">手入力</span></td>
+      <td></td><td></td>
+      <td><span class="memo" title="花火大会・周辺道路混雑・IN集中">花火…</span></td>
+      <td></td>
+      <td><span class="memo" title="団体20名・朝食時間前倒し要調整">団体…</span></td>
+      <td></td>
+      <td style="background:var(--surface-1);font-size:11px;color:var(--text-muted)">2文字＋ホバー全文</td>
+    </tr>
+  </table>
+</details>
+
+<table class="g" style="width:100%;border-collapse:collapse;table-layout:fixed">
+  <colgroup><col style="width:132px"><col span="6" style="width:66px"><col style="width:58px"><col style="width:46px"></colgroup>
+  <thead>
+    <tr>
+      <th class="nm">氏名</th>
+      <th>1<div style="font-size:11px;color:var(--text-muted)">水</div></th>
+      <th>2<div style="font-size:11px;color:var(--text-muted)">木</div></th>
+      <th>3<div style="font-size:11px;color:var(--text-muted)">金</div></th>
+      <th>4<div style="font-size:11px;color:var(--text-muted)">土</div></th>
+      <th>5<div style="font-size:11px;color:var(--text-muted)">日</div></th>
+      <th>6<div style="font-size:11px;color:var(--text-muted)">月</div></th>
+      <th>労働<br>時間計</th>
+      <th>休日<br>数</th>
+    </tr>
+  </thead>
+  <tbody id="body"></tbody>
+</table>
+<div style="font-size:11px;color:var(--text-muted);margin-top:6px">セルはプルダウンで選択。時間数は選択後も手修正可。Excel風コピペ（⌘C/⌘V）で複製＝イメージ。数値は即時集計。※デモは6日分表示（実際は月末まで）。</div>
+
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px">
+  <div class="mtile"><div class="lb">月次 労働時間 合計</div><div class="vl" id="mH">–</div></div>
+  <div class="mtile"><div class="lb">月次 人件費 合計</div><div class="vl" id="mC">–</div></div>
+  <div class="mtile"><div class="lb">うち 派遣・その他 時間</div><div class="vl" id="sH">–</div></div>
+</div>
+</div>
+
+<script>
+const patterns={
+ '早番':{h:8,type:'work',bg:'var(--bg-accent)',fg:'var(--text-accent)'},
+ '中番':{h:8,type:'work',bg:'var(--bg-success)',fg:'var(--text-success)'},
+ '遅番':{h:8,type:'work',bg:'var(--bg-warning)',fg:'var(--text-warning)'},
+ 'ナイト':{h:9,type:'work',bg:'var(--bg-pro)',fg:'var(--text-pro)'},
+ '公休':{h:0,type:'off',bg:'var(--surface-1)',fg:'var(--text-muted)'},
+ '有給':{h:0,type:'off',bg:'var(--bg-danger)',fg:'var(--text-danger)'},
+ '－':{h:0,type:'none',bg:'transparent',fg:'var(--text-muted)'}
+};
+const order=['早番','中番','遅番','ナイト','公休','有給','－'];
+const staff=[
+ {name:'佐々木 孝',wt:'月給',salary:280000,deemed:20,contracted:160,base:128,baseoff:5,sched:['早番','早番','早番','公休','早番','遅番']},
+ {name:'本庄 矩子',wt:'月給',salary:265000,deemed:15,contracted:160,base:120,baseoff:6,sched:['公休','遅番','遅番','遅番','中番','有給']},
+ {name:'菊地 達矢',wt:'時給',hourly:1150,base:124,baseoff:6,sched:['遅番','公休','早番','早番','遅番','早番']},
+ {name:'山崎 純子',wt:'時給',hourly:1100,base:110,baseoff:5,sched:['早番','中番','公休','早番','早番','有給']},
+ {name:'佐藤 みか',wt:'時給',hourly:1300,spot:true,base:0,baseoff:0,sched:['－','－','早番','－','－','－']}
+];
+function cell(ri,di,code){
+ const p=patterns[code];const dis=p.type!=='work';
+ const opts=order.map(o=>'<option'+(o===code?' selected':'')+'>'+o+'</option>').join('');
+ return '<td><select class="pat" data-r="'+ri+'" data-d="'+di+'" onchange="onPat(this)" style="background:'+p.bg+';color:'+p.fg+'">'+opts+'</select>'
+  +'<input class="hrs" data-r="'+ri+'" data-d="'+di+'" value="'+(p.type==='work'?p.h.toFixed(1):'')+'"'+(dis?' disabled':'')+' oninput="recompute()"></td>';
+}
+function build(){
+ let html='';
+ staff.forEach((st,ri)=>{
+  const tag=st.spot?'スポット':st.wt;
+  const tb=st.spot?'var(--bg-success)':(st.wt==='月給'?'var(--bg-accent)':'var(--surface-1)');
+  const tf=st.spot?'var(--text-success)':(st.wt==='月給'?'var(--text-accent)':'var(--text-secondary)');
+  let row='<tr class="'+(st.spot?'spot':'')+'"><td class="nm">'+st.name+'<span class="tag" style="background:'+tb+';color:'+tf+'">'+tag+'</span></td>';
+  st.sched.forEach((c,di)=>{row+=cell(ri,di,c);});
+  row+='<td id="rh-'+ri+'"></td><td id="ro-'+ri+'"></td></tr>';
+  html+=row;
+ });
+ html+='<tr><td class="nm" style="text-align:right;background:var(--surface-1);color:var(--text-secondary)">日別 予定合計</td>';
+ for(let d=0;d<6;d++) html+='<td id="dt-'+d+'" style="background:var(--surface-1)"></td>';
+ html+='<td style="background:var(--surface-1)"></td><td style="background:var(--surface-1)"></td></tr>';
+ document.getElementById('body').innerHTML=html;
+}
+function onPat(sel){
+ const p=patterns[sel.value];sel.style.background=p.bg;sel.style.color=p.fg;
+ const inp=document.querySelector('.hrs[data-r="'+sel.dataset.r+'"][data-d="'+sel.dataset.d+'"]');
+ if(p.type==='work'){inp.disabled=false;inp.value=p.h.toFixed(1);}else{inp.disabled=true;inp.value='';}
+ recompute();
+}
+function recompute(){
+ let mH=0,mC=0,sH=0;const days=[0,0,0,0,0,0];
+ staff.forEach((st,ri)=>{
+  let rH=st.base||0,rOff=st.baseoff||0;
+  for(let di=0;di<6;di++){
+   const sel=document.querySelector('.pat[data-r="'+ri+'"][data-d="'+di+'"]');
+   const p=patterns[sel.value];
+   if(p.type==='work'){const v=parseFloat(document.querySelector('.hrs[data-r="'+ri+'"][data-d="'+di+'"]').value)||0;rH+=v;days[di]+=v;if(st.spot)sH+=v;}
+   else if(p.type==='off'){rOff+=1;}
+  }
+  document.getElementById('rh-'+ri).textContent=rH.toFixed(1)+'h';
+  document.getElementById('ro-'+ri).textContent=rOff;
+  let cost;
+  if(st.wt==='月給'){const ot=Math.max(0,rH-st.contracted-st.deemed);cost=st.salary+Math.round(ot*(st.salary/st.contracted*1.25));}
+  else{cost=Math.round(rH*st.hourly);}
+  mH+=rH;mC+=cost;
+ });
+ for(let d=0;d<6;d++)document.getElementById('dt-'+d).textContent=days[d].toFixed(1);
+ document.getElementById('mH').textContent=mH.toFixed(1)+' h';
+ document.getElementById('mC').textContent='¥'+mC.toLocaleString();
+ document.getElementById('sH').textContent=sH.toFixed(1)+' h';
+}
+build();recompute();
+</script>
+</body>
+</html>
