@@ -51,6 +51,11 @@ export interface StaffLite {
   employment_type: string | null
   wage_type: string | null
   is_spot: boolean | null
+  // 月次人件費合計のライブ計算用（個人別金額はUI非表示）
+  hourly_wage: number | null
+  monthly_salary: number | null
+  deemed_ot_hours: number | null
+  contracted_monthly_hours: number | null
 }
 
 // 月の [初日, 末日] を 'YYYY-MM-DD' で返す
@@ -74,7 +79,7 @@ export async function loadMasters(facility: string): Promise<{ roles: Role[]; pa
 // 施設所属の従業員（フラット表示用）
 export async function loadStaff(facility: string): Promise<StaffLite[]> {
   const { data } = await supabase.from('dim_staff')
-    .select('staff_code, name, employment_type, wage_type, is_spot')
+    .select('staff_code, name, employment_type, wage_type, is_spot, hourly_wage, monthly_salary, deemed_ot_hours, contracted_monthly_hours')
     .eq('home_facility', facility).order('staff_code')
   return (data as StaffLite[]) ?? []
 }

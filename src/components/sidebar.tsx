@@ -23,6 +23,7 @@ const NAV_GROUPS: { group: string; items: { href: string; label: string }[] }[] 
       { href: '/ota', label: 'OTA分析' },
       { href: '/yojitsu', label: '予実管理（PL）' },
       { href: '/productivity', label: '生産性' },
+      { href: '/shift', label: 'シフト・労務' },
     ],
   },
 ]
