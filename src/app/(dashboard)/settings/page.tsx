@@ -5,7 +5,6 @@ import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { FacilitySelect } from '@/components/facility-select'
 import UserAdmin from '@/components/user-admin'
-import FacilityProfile from '@/components/facility-profile'
 
 interface OtaRow {
   id?: number
@@ -48,7 +47,6 @@ function fyMonths(fy: string): string[] {
 
 export default function SettingsPage() {
   const { current, currentFacility, isAdmin, facilities, setCurrent } = useFacility()
-  const [totalRooms, setTotalRooms] = useState<number | ''>('')
   const [otaData, setOtaData] = useState<OtaRow[]>([])
   const [otaMonth, setOtaMonth] = useState(() => {
     const now = new Date()
@@ -69,11 +67,6 @@ export default function SettingsPage() {
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   })
   const [dispatchNotes, setDispatchNotes] = useState('')
-
-  useEffect(() => {
-    if (!current) return
-    setTotalRooms(currentFacility?.total_rooms ?? '')
-  }, [current, currentFacility])
 
   useEffect(() => {
     if (!current || !otaMonth) return
@@ -208,17 +201,6 @@ export default function SettingsPage() {
     setSaving(false)
   }
 
-  const saveFacility = async () => {
-    setSaving(true)
-    setMessage('')
-    const { error } = await supabase
-      .from('dim_facility')
-      .update({ total_rooms: totalRooms || null, updated_at: new Date().toISOString() })
-      .eq('facility', current)
-    setMessage(error ? `Error: ${error.message}` : '保存しました')
-    setSaving(false)
-  }
-
   const updateOta = (ota: string, metric: string, value: string) => {
     setOtaData(otaData.map((r) =>
       r.ota === ota && r.metric === metric
@@ -259,31 +241,10 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Facility master */}
-      <section className="card p-6 mb-6">
-        <h2 className="text-lg font-semibold mb-4">施設マスタ: {currentFacility?.name}</h2>
-        <div className="flex items-end gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>総客室数</label>
-            <input
-              type="number"
-              className="field px-3 py-2 text-sm w-32"
-              value={totalRooms}
-              onChange={(e) => setTotalRooms(e.target.value === '' ? '' : Number(e.target.value))}
-            />
-          </div>
-          <button
-            onClick={saveFacility}
-            disabled={saving}
-            className="px-4 py-2 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50"
-          >
-            保存
-          </button>
-        </div>
-      </section>
-
-      {/* 施設プロフィール（AIコンテキスト基盤） */}
-      <FacilityProfile />
+      {/* 施設マスタ(総客室数)・施設プロフィールは「ビュー → 施設プロフィール」ページへ移設 */}
+      <p className="text-xs mb-4" style={{ color: 'var(--text-dim)' }}>
+        総客室数・施設プロフィールの編集は <a href="/profile" style={{ color: 'var(--accent)' }}>施設プロフィール</a> ページに移動しました。
+      </p>
 
       {/* OTA Marketing */}
       <section className="card p-6 mt-6">

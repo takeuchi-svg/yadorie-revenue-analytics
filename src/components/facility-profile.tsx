@@ -37,6 +37,7 @@ function Gauge({ text }: { text: string }) {
 export default function FacilityProfile() {
   const { current, currentFacility } = useFacility()
   const [profile, setProfile] = useState<Record<string, any>>({})
+  const [totalRooms, setTotalRooms] = useState<number | ''>('')  // dim_facility.total_rooms（旧・設定/施設マスタから統合）
   const [dirty, setDirty] = useState(false)
   const [openSec, setOpenSec] = useState<Set<number>>(new Set([0]))
   const [seasonal, setSeasonal] = useState<Record<number, string>>({})
@@ -67,6 +68,7 @@ export default function FacilityProfile() {
     setDirty(false); setSeasonalDirty(false)
   }, [current])
   useEffect(() => { reload() }, [reload])
+  useEffect(() => { setTotalRooms(currentFacility?.total_rooms ?? '') }, [currentFacility])
 
   const setField = (k: string, v: any) => { setProfile((prev) => ({ ...prev, [k]: v })); setDirty(true) }
 
@@ -78,8 +80,13 @@ export default function FacilityProfile() {
     row.price_min = profile.price_min || null
     row.price_max = profile.price_max || null
     const { error } = await supabase.from('dim_facility_profile').upsert(row, { onConflict: 'facility' })
-    setMsg(error ? `Error: ${error.message}` : 'プロフィールを保存しました')
-    if (!error) setDirty(false)
+    // 総客室数は dim_facility（旧・設定/施設マスタから統合。予実の在庫数等で使用）
+    const { error: e2 } = await supabase.from('dim_facility')
+      .update({ total_rooms: totalRooms === '' ? null : Number(totalRooms), updated_at: new Date().toISOString() })
+      .eq('facility', current)
+    const err = error ?? e2
+    setMsg(err ? `Error: ${err.message}` : 'プロフィールを保存しました')
+    if (!err) setDirty(false)
     setSaving(false)
   }
 
@@ -168,7 +175,12 @@ export default function FacilityProfile() {
                   </div>
                 ))}
                 {si === 0 && (
-                  <div className="flex gap-4">
+                  <div className="flex gap-4 flex-wrap">
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-dim)' }}>総客室数（予実の在庫数等に使用）</label>
+                      <input type="number" min={0} className="field px-3 py-1.5 text-sm w-32"
+                        value={totalRooms} onChange={(e) => { setTotalRooms(e.target.value === '' ? '' : Number(e.target.value)); setDirty(true) }} />
+                    </div>
                     <div>
                       <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-dim)' }}>最低価格帯（1泊2食・円）</label>
                       <input type="number" min={0} className="field px-3 py-1.5 text-sm w-32"

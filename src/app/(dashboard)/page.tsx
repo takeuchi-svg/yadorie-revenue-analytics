@@ -15,6 +15,22 @@ import type { MonthlyKpiRow as MonthlyKpi, OccupancyMonthlyRow as OccRow, Channe
 const summaryCache = new Map<string, string>()
 const issueCache = new Map<string, string>()
 
+// 灯からの季節の一言（YADORIE Core §6。静的・月替わり）
+const SEASONAL_WORDS: Record<number, string> = {
+  1: '新しい年ですね。今年もお客様の「ホッとする」を、一緒に結んでいきましょう',
+  2: '河津の桜が咲く頃ですね。春を待つお客様を、あたたかくお迎えしましょう',
+  3: '春の足音が聞こえます。旅立ちの季節、お客様の思い出づくりを支えましょうね',
+  4: '新年度ですね。今年の宿の物語、どんな一年にしましょうか',
+  5: '新緑の季節です。連休のお客様をお見送りしたら、ひと息つきましょうね',
+  6: '雨の音も、宿では風情になりますね。梅雨こそ「おこもり」の魅力を',
+  7: '夏がやってきます。湯上がりの夕涼み、お客様の記憶に残る季節ですね',
+  8: 'お盆の繁忙、本当におつかれさまです。スタッフの皆さんにもねぎらいを',
+  9: '夏の疲れが出る頃です。宿もわたしたちも、少し息を整えましょう',
+  10: '紅葉の便りが届き始めましたね。秋のお客様をお迎えする準備を',
+  11: '湯けむりが恋しい季節になりました。温泉宿の本領発揮ですね',
+  12: '一年の締めくくりですね。年越しのお客様に、良い年の瀬を',
+}
+
 export default function OverviewPage() {
   const { current, currentFacility } = useFacility()
   const [kpi, setKpi] = useState<MonthlyKpi[]>([])
@@ -138,10 +154,18 @@ export default function OverviewPage() {
 
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-bold mb-1">Overview</h1>
-      <p className="text-sm mb-6" style={{ color: 'var(--text-dim)' }}>
-        {currentFacility?.name ?? current}{latest ? ` ・ ${latest.month}` : ''}
-      </p>
+      <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold mb-1">Overview</h1>
+          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>
+            {currentFacility?.name ?? current}{latest ? ` ・ ${latest.month}` : ''}
+          </p>
+        </div>
+        {/* 灯からの季節の一言（§6） */}
+        <p className="text-[11px] max-w-72 text-right leading-relaxed" style={{ color: 'var(--text-dim)' }}>
+          {SEASONAL_WORDS[new Date().getMonth() + 1]} — 灯
+        </p>
+      </div>
 
       {loading ? (
         <p style={{ color: 'var(--text-dim)' }}>読み込み中...</p>
@@ -169,6 +193,17 @@ export default function OverviewPage() {
             <KpiCard label="予算達成率" value={pct(budgetRate)} />
             <KpiCard label="同伴係数" value={latest?.companion?.toFixed(2) ?? '-'} />
           </div>
+
+          {/* 達成の小さな祝い（§6: 予算達成の節目に、控えめな水引と灯の一言） */}
+          {budgetRate != null && budgetRate >= 1 && (
+            <div className="flex items-center gap-3 mb-6 px-4 py-2.5 rounded-lg" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/mizuhiki.png" alt="" className="mizuhiki-celebrate" style={{ width: 30, height: 'auto' }} />
+              <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
+                {latest?.month} は予算達成（{pct(budgetRate)}）です。皆さんの積み重ねが結ばれましたね。おめでとうございます — 灯
+              </p>
+            </div>
+          )}
 
           {/* AI実績サマリ */}
           <div className="card p-4 mb-6" style={{ background: 'linear-gradient(135deg, var(--surface), var(--surface2))', borderColor: 'var(--accent)' }}>

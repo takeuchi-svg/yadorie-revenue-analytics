@@ -67,3 +67,18 @@ html, body {
 .aimd thead th { background: var(--bg); color: var(--text-dim); font-weight: 600; }
 .aimd h1, .aimd h2, .aimd h3 { font-weight: 700; margin: 0.4rem 0 0.2rem; }
 .aimd code { background: var(--bg); padding: 0 4px; border-radius: 4px; }
+
+/* 水引ローディング（YADORIE Core §6）: 結びがゆっくり息づく */
+@keyframes mizuhiki-breathe {
+  0%, 100% { transform: scale(1) rotate(0deg); opacity: 0.55; }
+  50%      { transform: scale(1.1) rotate(6deg); opacity: 1; }
+}
+.mizuhiki-loading { animation: mizuhiki-breathe 1.8s ease-in-out infinite; }
+
+/* 達成の小さな祝い: 水引がふわっと現れる */
+@keyframes mizuhiki-celebrate {
+  0%   { transform: scale(0.4) rotate(-16deg); opacity: 0; }
+  60%  { transform: scale(1.12) rotate(4deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+.mizuhiki-celebrate { animation: mizuhiki-celebrate 0.9s ease-out both; }

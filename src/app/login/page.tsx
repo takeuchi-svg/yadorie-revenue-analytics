@@ -33,7 +33,9 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="card p-8">
           <div className="text-center mb-6">
-            <div className="text-xl font-bold tracking-wide">YADORIE Core</div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/yadorie-logo.png" alt="YADORIE宿GROUP" style={{ height: 44, width: 'auto' }} className="mx-auto mb-2" />
+            <div className="text-sm font-bold tracking-wide">Core</div>
             <div className="text-xs" style={{ color: 'var(--text-dim)' }}>宿の数だけ、ストーリー。</div>
           </div>
 

@@ -33,8 +33,15 @@ export function Kpi({ label, value, accent }: { label: string; value: string; ac
   )
 }
 
+// 水引ローディング（YADORIE Core §6: 待ち時間すら世界観に）
 export function Loading() {
-  return <p style={{ color: 'var(--text-dim)' }}>読み込み中...</p>
+  return (
+    <div className="flex flex-col items-center justify-center py-12 gap-2">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src="/mizuhiki.png" alt="" className="mizuhiki-loading" style={{ width: 46, height: 'auto' }} />
+      <p className="text-xs" style={{ color: 'var(--text-dim)' }}>結んでいます…</p>
+    </div>
+  )
 }
 
 export function Empty({ message }: { message?: string }) {
