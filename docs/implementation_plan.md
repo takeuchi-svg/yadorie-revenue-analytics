@@ -51,9 +51,10 @@ insert into dim_shift_pattern (pattern_type,name,start_time,end_time,break_minut
 - スポット要員の実働を人×日で入力 → `raw_attendance_daily`(`source='manual'`, is_spot)。
 - DoD: 入力分が総労働時間・人件費・KPIに反映。
 
-## 8. KPI改修（二重計上防止・必須）
-- 旧・月別手入力2項目を廃止し、`mart_labor_cost_actual` ロールアップへ切替。`mart_productivity` の参照元を差し替え、旧UI/カラムを除去。
-- DoD: KPIの総労働時間・残業代・派遣時間が新ソースのみで算出され、旧値と重複しない。
+## 8. KPI改修（二重計上防止・必須）※実装で読み替え（T13）
+- `mart_productivity` は存在しないため、施設×月ロールアップ **`mart_labor_cost_monthly`** を新設し、productivity ページの2指標（みなし残業超残業代／派遣時間）をそこへ差し替え。
+- 設定の**手入力2項目の入力UIは廃止**（`dim_productivity_manual` の**列・備考 dispatch_other_notes は残す**＝過去値保全）。※「カラム除去」ではない。
+- DoD: KPIの総労働時間・残業代・派遣時間が新ソースのみで算出され、旧値と重複しない。（実装済）
 
 ## 9. 検証
 - 予実（欠勤/計画外出勤の検出）、人件費（時給/月給OT/スポット）、マルチ施設（2施設以上で崩れない）。

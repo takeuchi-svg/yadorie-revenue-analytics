@@ -1,4 +1,10 @@
 # 売上分析BI — 生産性KPI機能 データベース設計書
+
+> ⚠️ 更新（as-built）: 本書は設計時案。実装は下記が優先。DB全体の正は [`データベース全体設計.md`](データベース全体設計.md)。
+> - **`mart_productivity` ビューは作成していない**。生産性KPIは `productivity` ページでクライアント集計（`mart_labor_monthly`＋`actual_monthly`＋`mart_labor_cost_monthly`）。§5.2/§9のmart_productivity DDLは無効。
+> - 既存テーブル名は **`raw_reservation`**（本文の `fact_reservation` は存在しない）、PLは **`actual_monthly`/`budget_monthly`**（`raw_pl_actual` は存在しない。§4.4が正）。
+> - 「みなし残業超残業代」「派遣時間」は手入力廃止 → シフト・労務の `mart_labor_cost_monthly` から自動算出（T13）。
+
 **目的**: 生産性KPI管理表（OKJ_2025生産性KPI管理表）をBIツールに実装する  
 **前提**: 既存の本番環境（Supabase）に統合。売上分析・PL予実は実装済み  
 **スコープ**: 生産性KPI表示のみ（シフト管理は別フェーズ、口コミ点数は対象外）  

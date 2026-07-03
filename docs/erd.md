@@ -1,5 +1,9 @@
 # ER図（シフト・労務管理 v1）
 
+> ⚠️ 更新（as-built）: 実装で一部変更あり。DB全体の正は [`データベース全体設計.md`](データベース全体設計.md)。
+> - 賃金は `dim_staff` ではなく **`dim_staff_wage`（別テーブル）** に分離（給与閲覧権限のRLS保護のため）。下図の dim_staff の賃金列は dim_staff_wage に読み替え。
+> - `budget_daily` の日付列は **`date`**（下図の work_date は誤り。ビュー側で date→work_date 別名）。
+
 凡例: 既存＝再利用（`dim_staff`/`raw_attendance_daily`/`dim_facility_mapping`/`budget_daily`）、新規＝シフト系テーブル、`mart_*`＝集計ビュー。
 施設キーは `work_facility`/`facility`（BIコード）、従業員キーは `staff_code`（KOTコード）。時間は分(整数)。
 
@@ -39,7 +43,7 @@ erDiagram
   }
   budget_daily {
     text facility
-    date work_date
+    date date
     int rooms_sold
     int guests
   }
