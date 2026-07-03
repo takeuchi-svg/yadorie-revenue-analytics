@@ -1,14 +1,15 @@
 import pg from 'pg';
 const { Client } = pg;
 
-const client = new Client({
-  host: 'db.hilglsnoqkuvrkcyjrnr.supabase.co',
-  port: 5432,
-  database: 'postgres',
-  user: 'postgres',
-  password: 'ZoIb8yZ6k2LmJ9gB',
-  ssl: { rejectUnauthorized: false },
-});
+// 接続情報は環境変数から（ハードコード禁止）。
+//   例: SUPABASE_DB_URL=postgres://postgres:<PASSWORD>@db.<ref>.supabase.co:5432/postgres node scripts/migrate.mjs
+const conn = process.env.SUPABASE_DB_URL;
+if (!conn) {
+  console.error('環境変数 SUPABASE_DB_URL が未設定です。');
+  console.error('例: SUPABASE_DB_URL=postgres://postgres:<PASSWORD>@db.<project-ref>.supabase.co:5432/postgres');
+  process.exit(1);
+}
+const client = new Client({ connectionString: conn, ssl: { rejectUnauthorized: false } });
 
 const DDL = `
 -- ========================================

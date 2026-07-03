@@ -50,25 +50,24 @@ export function FacilityProvider({ children }: { children: ReactNode }) {
         .from('dim_facility').select('facility, name, short_name, total_rooms').order('facility')
       const all = (facData as Facility[]) ?? []
 
-      let admin = true
-      let allowed = all
+      // フェイルクローズ: 権限が確認できない場合は「施設ゼロのmember」扱い（誤って全施設を見せない）
+      let admin = false
+      let allowed: Facility[] = []
       try {
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
           const { data: au, error } = await supabase.from('app_user').select('role').eq('user_id', user.id).maybeSingle()
-          if (error) throw error // テーブル未作成 → フォールバック(全施設/admin)
-          if (au) {
-            admin = au.role === 'admin'
-            if (!admin) {
-              const { data: uf } = await supabase.from('user_facility').select('facility').eq('user_id', user.id)
-              const set = new Set((uf ?? []).map((r: { facility: string }) => r.facility))
-              allowed = all.filter((f) => set.has(f.facility))
-            }
+          if (error) throw error
+          admin = au?.role === 'admin'
+          if (admin) {
+            allowed = all
           } else {
-            admin = true // app_user未登録 → 暫定で全権限(初期ブートストラップ)
+            const { data: uf } = await supabase.from('user_facility').select('facility').eq('user_id', user.id)
+            const set = new Set((uf ?? []).map((r: { facility: string }) => r.facility))
+            allowed = all.filter((f) => set.has(f.facility))
           }
         }
-      } catch { admin = true; allowed = all }
+      } catch { admin = false; allowed = [] }
 
       setIsAdmin(admin)
       setFacilities(allowed)

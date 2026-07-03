@@ -50,10 +50,15 @@ export function hasApiKey() {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-async function runQuery(sb: any, input: any): Promise<string> {
+async function runQuery(sb: any, input: any, allowedFacilities: string[] | null): Promise<string> {
   const { table, columns, filters, order, limit } = input || {}
   if (!ALLOWED_TABLES.has(table)) return `エラー: テーブル ${table} は参照できません`
   let q = sb.from(table).select(columns || '*')
+  // member は許可施設のみ（全ALLOWED_TABLESは facility 列を持つ。service_roleはRLSを通らないためここで強制）
+  if (allowedFacilities != null) {
+    if (allowedFacilities.length === 0) return 'エラー: 閲覧可能な施設がありません'
+    q = q.in('facility', allowedFacilities)
+  }
   for (const f of (filters || [])) {
     const { column, op, value } = f
     if (op === 'eq') q = q.eq(column, value)
@@ -115,9 +120,11 @@ ${SCHEMA}`
 }
 
 // 会話を実行して最終テキストを返す（query_dataツールを最大8往復）
+// allowedFacilities: null=全施設可(admin) / 配列=memberの許可施設（query_dataに強制適用）
 export async function runAgent(
   messages: { role: 'user' | 'assistant'; content: string }[],
   facility?: string,
+  allowedFacilities: string[] | null = null,
 ): Promise<string> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
   const sb = makeSupabase()
@@ -130,7 +137,7 @@ export async function runAgent(
       const results: Anthropic.ToolResultBlockParam[] = []
       for (const block of resp.content) {
         if (block.type === 'tool_use') {
-          const out = await runQuery(sb, block.input)
+          const out = await runQuery(sb, block.input, allowedFacilities)
           results.push({ type: 'tool_result', tool_use_id: block.id, content: out })
         }
       }

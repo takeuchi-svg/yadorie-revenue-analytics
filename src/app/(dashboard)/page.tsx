@@ -90,8 +90,10 @@ export default function OverviewPage() {
     if (!force && summaryCache.has(key)) { setAiSummary(summaryCache.get(key)!); return }
     setAiLoading(true); setAiSummary('')
     try {
+      const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch('/api/insight', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
         body: JSON.stringify({ facility, month, kind: 'summary', force }),
       })
       const d = await res.json()
@@ -106,8 +108,10 @@ export default function OverviewPage() {
     if (!force && issueCache.has(key)) { setAiIssue(issueCache.get(key)!); return }
     setAiIssueLoading(true); setAiIssue('')
     try {
+      const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch('/api/insight', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
         body: JSON.stringify({ facility, month, kind: 'issue', force }),
       })
       const d = await res.json()
