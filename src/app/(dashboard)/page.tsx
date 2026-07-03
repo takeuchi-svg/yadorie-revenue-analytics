@@ -9,24 +9,7 @@ import {
 } from 'recharts'
 import { fmtYen, pct, fmtNum, channelColor, CHART_AXIS, chartTooltip } from '@/lib/ui'
 import { AssistantContent, SparkleIcon } from '@/components/ai-drawer'
-
-interface MonthlyKpi {
-  facility: string
-  month: string
-  revenue: number | null
-  rooms_sold: number | null
-  guests: number | null
-  occ: number | null
-  adr: number | null
-  guest_unit: number | null
-  revpar: number | null
-  companion: number | null
-  revenue_budget: number | null
-  total_inventory: number | null
-}
-
-interface OccRow { month: string; occ: number | null; rooms_sold: number | null; operating_days: number | null; total_rooms: number | null }
-interface ChannelRow { channel: string | null; revenue: number | null }
+import type { MonthlyKpiRow as MonthlyKpi, OccupancyMonthlyRow as OccRow, ChannelRow } from '@/lib/db-types'
 
 // AIサマリ/課題のセッション内キャッシュ（facility|month → 本文）。本体の共有キャッシュはDB(ai_summary/ai_issue)
 const summaryCache = new Map<string, string>()

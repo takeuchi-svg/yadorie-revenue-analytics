@@ -9,14 +9,13 @@ import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { fmtNum, fmtYen, pct, CHART_AXIS, chartTooltip } from '@/lib/ui'
 import { Loading, Empty, LoadError } from '@/components/page-bits'
+import type { LaborCostMonthlyRow as LaborCostRow } from '@/lib/db-types'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface LaborRow { month: string; staff_count_monthly: number | null; parttime_count: number | null; total_work_hours: number | null; total_overtime_hours: number | null }
 interface KpiRow { month: string; revenue: number | null; guests: number | null; rooms_sold: number | null }
 interface ActRow { month: string; item_code: string; item_name: string; actual: number | null }
-// T13: みなし残業超残業代・派遣時間は手入力(dim_productivity_manual)から
-// 勤怠×賃金の自動算出(mart_labor_cost_monthly)へ切替済み
-interface LaborCostRow { month: string; deemed_ot_excess_pay: number | null; spot_hours: number | null }
+// T13: みなし残業超残業代・派遣時間の手入力→勤怠×賃金の自動算出(mart_labor_cost_monthly)へ切替済み
 
 // 人件費 = 以下のitem_name合計（+ 外注費（人材） or 実績合算「外注費」）
 const LABOR_NAMES = ['給料手当', '賞与', '通勤費', '法定福利費', '福利厚生費', '雑給']

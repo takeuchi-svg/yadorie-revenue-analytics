@@ -1,17 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
-import { PageHeader, Loading, Empty } from '@/components/page-bits'
-
-interface RateRow {
-  snapshot_date: string
-  stay_date: string
-  dow: string | null
-  rate_rank: number | null
-  remaining: number | null
-}
+import { fetchAll } from '@/lib/supabase/fetch-all'
+import { useFacilityData } from '@/lib/use-facility-data'
+import { Loading, Empty, LoadError } from '@/components/page-bits'
+import type { RateSnapshotRow as RateRow } from '@/lib/db-types'
 
 function rankColor(rank: number | null): string {
   if (rank === null) return 'var(--surface2)'
@@ -22,28 +17,17 @@ function rankColor(rank: number | null): string {
 
 export default function RatePage() {
   const { current, currentFacility } = useFacility()
-  const [rows, setRows] = useState<RateRow[]>([])
   const [snapshot, setSnapshot] = useState('')
-  const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    if (!current) return
-    setLoading(true)
-    supabase.from('raw_rate_snapshot')
+  const { data, loading, error } = useFacilityData<RateRow[]>((facility) =>
+    fetchAll<RateRow>(() => supabase.from('raw_rate_snapshot')
       .select('snapshot_date, stay_date, dow, rate_rank, remaining')
-      .eq('facility', current).eq('scope', 'total')
-      .order('stay_date').limit(10000)
-      .then(({ data }) => {
-        const r = (data as RateRow[]) ?? []
-        setRows(r)
-        const snaps = [...new Set(r.map((x) => x.snapshot_date))].sort().reverse()
-        setSnapshot((s) => s || snaps[0] || '')
-        setLoading(false)
-      })
-  }, [current])
+      .eq('facility', facility).eq('scope', 'total').order('stay_date')))
+  const rows = data ?? []
 
   const snapshots = [...new Set(rows.map((r) => r.snapshot_date))].sort().reverse()
-  const grid = rows.filter((r) => r.snapshot_date === snapshot)
+  const activeSnap = snapshot || snapshots[0] || ''
+  const grid = rows.filter((r) => r.snapshot_date === activeSnap)
 
   return (
     <div className="p-6">
@@ -55,14 +39,14 @@ export default function RatePage() {
         {snapshots.length > 0 && (
           <div>
             <label className="block text-[10px] mb-1" style={{ color: 'var(--text-dim)' }}>スナップショット日</label>
-            <select className="field px-3 py-1.5 text-sm" value={snapshot} onChange={(e) => setSnapshot(e.target.value)}>
+            <select className="field px-3 py-1.5 text-sm" value={activeSnap} onChange={(e) => setSnapshot(e.target.value)}>
               {snapshots.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
         )}
       </div>
 
-      {loading ? <Loading /> : rows.length === 0 ? (
+      {loading ? <Loading /> : error ? <LoadError message={error} /> : rows.length === 0 ? (
         <Empty message="レート表（レートチェック表 xlsx）を /upload からアップロードしてください" />
       ) : (
         <>

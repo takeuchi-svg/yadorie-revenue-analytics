@@ -4,38 +4,28 @@ import { useEffect, useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
+import { useFacilityData } from '@/lib/use-facility-data'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, Legend,
 } from 'recharts'
 import { fmtYen, fmtNum, pct, CHART_AXIS, chartTooltip, channelColor } from '@/lib/ui'
 import { PageHeader, Kpi, Loading, Empty, LoadError } from '@/components/page-bits'
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-interface OP { item_name: string | null; category: string | null; total: number | null; quantity: number | null; source_month: string | null; status: string | null }
-interface Pay { payment_method: string | null; amount: number | null; source_month: string | null }
-
+import type { OtherProductRow as OP, PaymentRow as Pay } from '@/lib/db-types'
 
 export default function FbPage() {
   const { current, currentFacility } = useFacility()
-  const [op, setOp] = useState<OP[]>([])
-  const [pay, setPay] = useState<Pay[]>([])
   const [month, setMonth] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
 
-  useEffect(() => {
-    if (!current) return
-    setLoading(true); setLoadError('')
-    Promise.all([
-      fetchAll(() => supabase.from('raw_other_product').select('item_name, category, total, quantity, source_month, status').eq('facility', current).order('id')),
-      fetchAll(() => supabase.from('raw_payment').select('payment_method, amount, source_month').eq('facility', current).order('id')),
-    ]).then(([o, p]) => {
-      setOp((o as OP[]) ?? [])
-      setPay((p as Pay[]) ?? [])
-    }).catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false))
-  }, [current])
+  const { data, loading, error: loadError } = useFacilityData<{ op: OP[]; pay: Pay[] }>(async (facility) => {
+    const [o, p] = await Promise.all([
+      fetchAll<OP>(() => supabase.from('raw_other_product').select('item_name, category, total, quantity, source_month, status').eq('facility', facility).order('id')),
+      fetchAll<Pay>(() => supabase.from('raw_payment').select('payment_method, amount, source_month').eq('facility', facility).order('id')),
+    ])
+    return { op: o, pay: p }
+  })
+  const op = useMemo(() => data?.op ?? [], [data])
+  const pay = useMemo(() => data?.pay ?? [], [data])
 
   const months = useMemo(() => [...new Set(op.map((r) => r.source_month).filter(Boolean))].sort().reverse() as string[], [op])
   useEffect(() => { if (months.length && !months.includes(month)) setMonth(months[0]) }, [months, month])

@@ -1,15 +1,14 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
+import { useFacilityData } from '@/lib/use-facility-data'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts'
 import { fmtNum, fmtYen, pct, CHART_AXIS, chartTooltip } from '@/lib/ui'
 import { Loading, Empty, LoadError } from '@/components/page-bits'
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-interface Ev { event_type: string; checkin: string | null; received_at: string | null; amount_gross: number | null; rooms: number | null; guests_total: number | null }
+import type { BookingEventRow as Ev } from '@/lib/db-types'
 
 
 const lt = (e: Ev) => {
@@ -28,19 +27,12 @@ const bucketOf = (d: number) => BUCKETS.find((b) => d >= b.lo && d <= b.hi)?.lab
 
 export default function CancelPage() {
   const { current, currentFacility } = useFacility()
-  const [events, setEvents] = useState<Ev[]>([])
   const [month, setMonth] = useState('all')
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
 
-  useEffect(() => {
-    if (!current) return
-    setLoading(true); setLoadError('')
-    fetchAll(() => supabase.from('raw_booking_event').select('event_type, checkin, received_at, amount_gross, rooms, guests_total').eq('facility', current).order('id'))
-      .then((d) => { setEvents(d as Ev[]) })
-      .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false))
-  }, [current])
+  const { data, loading, error: loadError } = useFacilityData<Ev[]>((facility) =>
+    fetchAll<Ev>(() => supabase.from('raw_booking_event')
+      .select('event_type, checkin, received_at, amount_gross, rooms, guests_total').eq('facility', facility).order('id')))
+  const events = useMemo(() => data ?? [], [data])
 
   const months = useMemo(() => [...new Set(events.map((e) => e.checkin?.slice(0, 7)).filter(Boolean))].sort().reverse() as string[], [events])
 
