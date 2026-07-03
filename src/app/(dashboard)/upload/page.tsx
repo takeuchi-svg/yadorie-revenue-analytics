@@ -12,7 +12,7 @@ import {
 } from '@/lib/etl'
 import type { DetectionResult, UploadPayload, UploadResult } from '@/lib/etl'
 import { parsePlCsv } from '@/lib/etl/pl-parser'
-import { parseAttendanceHtml } from '@/lib/etl/attendance-parser'
+import { parseAttendanceHtml, type FacilityMapping } from '@/lib/etl/attendance-parser'
 import { supabase } from '@/lib/supabase/client'
 
 interface PlEntry { name: string; fy: string; rows: number; status: 'processing' | 'done' | 'error'; error?: string }
@@ -44,6 +44,23 @@ export default function UploadPage() {
   const handleAttFiles = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return
     setAttUploading(true)
+    // 施設マッピングをDBから取得（データ駆動。施設追加はdim_facility_mappingに行追加で完結）
+    let mapping: FacilityMapping | undefined
+    try {
+      const { data } = await supabase.from('dim_facility_mapping').select('attendance_code, attendance_name, facility')
+      const rows = (data as { attendance_code: string; attendance_name: string | null; facility: string | null }[]) ?? []
+      if (rows.length) {
+        const code: Record<string, string> = {}
+        const name: [string, string][] = []
+        for (const r of rows) {
+          if (r.facility) {
+            code[r.attendance_code] = r.facility
+            if (r.attendance_name && r.facility !== 'HQ') name.push([r.attendance_name, r.facility])
+          }
+        }
+        mapping = { code, name }
+      }
+    } catch { /* 取得不可時はパーサー内蔵の既定マップにフォールバック */ }
     // ファイル名順（=日付順）で安定処理
     const list = Array.from(fileList).sort((a, b) => a.name.localeCompare(b.name))
     for (const file of list) {
@@ -52,7 +69,7 @@ export default function UploadPage() {
       const upd = (patch: Partial<AttEntry>) => setAttFiles((prev) => prev.map((p) => (p === entry ? { ...p, ...patch } : p)))
       try {
         const html = await file.text() // UTF-8
-        const { workDate, rows, staff } = parseAttendanceHtml(html, file.name)
+        const { workDate, rows, staff } = parseAttendanceHtml(html, file.name, mapping)
         if (!workDate || rows.length === 0) throw new Error('勤怠を解析できませんでした（フォーマット要確認）')
         // 従業員マスタ upsert（新規社員番号を追加）
         const staffPayload = staff.map((s) => ({ ...s, updated_at: new Date().toISOString() }))
@@ -72,6 +89,7 @@ export default function UploadPage() {
         upd({ status: 'error', error: err instanceof Error ? err.message : String(err) })
       }
     }
+    await refreshMarts()
     setAttUploading(false)
   }
 
@@ -101,8 +119,12 @@ export default function UploadPage() {
         upd({ status: 'error', error: err instanceof Error ? err.message : String(err) })
       }
     }
+    await refreshMarts()
     setPlUploading(false)
   }
+
+  // マテリアライズドビュー導入時、取込後に集計を更新（未導入＝関数なしなら無害にスキップ）
+  const refreshMarts = async () => { try { await supabase.rpc('refresh_all_marts') } catch { /* matview未導入時は無視 */ } }
 
   const loadFacilities = useCallback(async () => {
     const { data } = await supabase
@@ -298,6 +320,7 @@ export default function UploadPage() {
       )
     }
 
+    await refreshMarts()
     setUploading(false)
   }
 

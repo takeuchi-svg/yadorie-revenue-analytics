@@ -48,7 +48,14 @@ export interface AttendanceParseResult {
   facilityName: string | null        // 単一施設出力で検出した施設名
 }
 
+// 施設マッピング（dim_facility_mapping から与えると施設追加がデータのみで完結）
+export interface FacilityMapping {
+  code: Record<string, string>   // 勤怠所属コード → BI施設コード
+  name: [string, string][]        // 施設名 → BI施設コード（単一施設出力のタイトル判定用）
+}
+
 // 勤怠所属コード → BI施設コード（本社部門は 'HQ'）
+// ※ フォールバックの既定値。実運用は upload 側が dim_facility_mapping を渡す（データ駆動）
 const FACILITY_MAP: Record<string, string> = {
   '102': 'NS', '103': 'GZ', '104': 'MH', '105': 'KT', '106': 'OQ', '107': 'AP',
   '108': 'MI', '110': 'TR', '111': 'IK', '112': 'ON', '113': 'OY', '114': 'YZ',
@@ -96,19 +103,22 @@ const fileDate = (name: string): { y: number; mo: number; d: number } | null => 
 }
 
 // タイトル（表より前）から施設名→BIコードを判定
-const facilityFromTitle = (html: string): { fac: string | null; name: string | null } => {
+const facilityFromTitle = (html: string, nameFac: [string, string][]): { fac: string | null; name: string | null } => {
   const ti = html.search(/<table/i)
   const pre = (ti > 0 ? html.slice(0, ti) : html).replace(/<[^>]+>/g, ' ')
   const text = norm(pre)
   let bestFac: string | null = null, bestName: string | null = null, bestLen = 0
-  for (const [nm, fac] of NAME_FAC) {
+  for (const [nm, fac] of nameFac) {
     const key = norm(nm)
     if (text.includes(key) && key.length > bestLen) { bestFac = fac; bestName = nm; bestLen = key.length }
   }
   return { fac: bestFac, name: bestName }
 }
 
-export function parseAttendanceHtml(html: string, fileName: string): AttendanceParseResult {
+export function parseAttendanceHtml(html: string, fileName: string, mapping?: FacilityMapping): AttendanceParseResult {
+  // dim_facility_mapping が渡されれば優先（データ駆動）。未指定はTS既定値でフォールバック
+  const CODE: Record<string, string> = { ...FACILITY_MAP, ...(mapping?.code ?? {}) }
+  const NAMES: [string, string][] = (mapping?.name && mapping.name.length) ? mapping.name : NAME_FAC
   const doc = new DOMParser().parseFromString(html, 'text/html')
 
   // ---- ヘッダーを認識して列インデックスを特定 ----
@@ -129,7 +139,7 @@ export function parseAttendanceHtml(html: string, fileName: string): AttendanceP
 
   // 単一施設出力（所属列なし）はタイトルから施設を決定
   const perRow = iSosoku >= 0
-  const title = perRow ? { fac: null as string | null, name: null as string | null } : facilityFromTitle(html)
+  const title = perRow ? { fac: null as string | null, name: null as string | null } : facilityFromTitle(html, NAMES)
   if (!perRow && !title.fac) {
     throw new Error('施設を特定できません（単一施設出力のタイトルから施設名を読み取れませんでした）')
   }
@@ -160,12 +170,12 @@ export function parseAttendanceHtml(html: string, fileName: string): AttendanceP
       const so = at(c, iSosoku)
       if (so.includes('ヘルプ')) {
         const [homePart, helpPart] = so.split('ヘルプ')
-        homeDept = (leadingCode(homePart) && FACILITY_MAP[leadingCode(homePart)!]) || null
-        workFacility = (leadingCode(helpPart ?? '') && FACILITY_MAP[leadingCode(helpPart ?? '')!]) || null
+        homeDept = (leadingCode(homePart) && CODE[leadingCode(homePart)!]) || null
+        workFacility = (leadingCode(helpPart ?? '') && CODE[leadingCode(helpPart ?? '')!]) || null
         isHelp = true
       } else {
         const code = leadingCode(so)
-        workFacility = code ? FACILITY_MAP[code] ?? null : null
+        workFacility = code ? CODE[code] ?? null : null
         homeDept = workFacility
       }
     } else {

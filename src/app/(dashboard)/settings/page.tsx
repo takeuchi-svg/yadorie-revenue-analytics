@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
+import { FacilitySelect } from '@/components/facility-select'
 import UserAdmin from '@/components/user-admin'
 
 interface OtaRow {
@@ -253,11 +254,7 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-bold">Settings</h1>
         <div>
           <label className="block text-[10px] mb-1 tracking-wide" style={{ color: 'var(--text-dim)' }}>設定対象の施設</label>
-          <select className="field px-3 py-1.5 text-sm min-w-56" value={current} onChange={(e) => setCurrent(e.target.value)}>
-            {facilities.map((f) => (
-              <option key={f.facility} value={f.facility}>{f.name}</option>
-            ))}
-          </select>
+          <div className="min-w-56"><FacilitySelect options={facilities} value={current} onChange={setCurrent} /></div>
         </div>
       </div>
 

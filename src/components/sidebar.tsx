@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
+import { FacilitySelect } from '@/components/facility-select'
 
 const NAV_GROUPS: { group: string; items: { href: string; label: string }[] }[] = [
   {
@@ -98,17 +99,10 @@ export default function Sidebar() {
           <label className="block text-[10px] mb-1 tracking-wide" style={{ color: 'var(--text-dim)' }}>
             施設
           </label>
-          <select
-            className="field w-full px-2 py-1.5 text-sm"
-            value={current}
-            onChange={(e) => setCurrent(e.target.value)}
-          >
-            {facilities.map((f) => (
-              <option key={f.facility} value={f.facility}>
-                {f.name}
-              </option>
-            ))}
-          </select>
+          <FacilitySelect options={facilities} value={current} onChange={setCurrent} />
+          {facilities.length > 12 && (
+            <p className="mt-1 text-[10px]" style={{ color: 'var(--text-dim)' }}>{facilities.length}施設・検索可</p>
+          )}
         </div>
 
         <div className="space-y-0.5">
