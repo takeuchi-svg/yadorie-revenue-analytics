@@ -2,6 +2,7 @@
 // /api/chat（対話）と /api/insight（サマリ/課題のキャッシュ生成）が共用。
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
+import { buildFacilityContext } from '@/lib/ai/profile-context'
 
 const MODEL = process.env.CHAT_MODEL || 'claude-sonnet-4-6'
 
@@ -128,7 +129,9 @@ export async function runAgent(
 ): Promise<string> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
   const sb = makeSupabase()
-  const system = buildSystem(facility)
+  // 施設プロフィール（意図・方針・NG・繁閑理由・取組履歴）を分析の前提として注入
+  const profileCtx = facility ? await buildFacilityContext(sb, facility) : ''
+  const system = buildSystem(facility) + profileCtx
   const msgs: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }))
 
   for (let i = 0; i < 8; i++) {

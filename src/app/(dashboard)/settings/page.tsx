@@ -5,6 +5,7 @@ import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { FacilitySelect } from '@/components/facility-select'
 import UserAdmin from '@/components/user-admin'
+import FacilityProfile from '@/components/facility-profile'
 
 interface OtaRow {
   id?: number
@@ -280,6 +281,9 @@ export default function SettingsPage() {
           </button>
         </div>
       </section>
+
+      {/* 施設プロフィール（AIコンテキスト基盤） */}
+      <FacilityProfile />
 
       {/* OTA Marketing */}
       <section className="card p-6 mt-6">

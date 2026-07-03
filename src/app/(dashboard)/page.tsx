@@ -27,6 +27,15 @@ export default function OverviewPage() {
   const [aiIssueLoading, setAiIssueLoading] = useState(false)
   const [channels, setChannels] = useState<ChannelRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [initiativeMissing, setInitiativeMissing] = useState(false)
+
+  // 施設プロフィール: 当月の取組が未記録なら督促（テーブル未作成時は無視）
+  useEffect(() => {
+    if (!current) return
+    const ym = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
+    supabase.from('raw_facility_initiative').select('id').eq('facility', current).eq('year_month', ym).limit(1)
+      .then(({ data, error }) => setInitiativeMissing(!error && (data ?? []).length === 0))
+  }, [current])
 
   useEffect(() => {
     if (!current) return
@@ -145,6 +154,12 @@ export default function OverviewPage() {
         </div>
       ) : (
         <>
+          {initiativeMissing && (
+            <div className="card p-3 mb-4 text-xs flex items-center gap-2" style={{ borderColor: 'var(--yellow)' }}>
+              <span className="px-1.5 py-0.5 rounded text-white text-[10px]" style={{ background: 'var(--red)' }}>未記録</span>
+              <span style={{ color: 'var(--text-dim)' }}>今月の「取組履歴」が未記録です。月次会議の後に 設定 → 施設プロフィール から記録してください（AI分析の精度が上がります）。</span>
+            </div>
+          )}
           {/* KPI Cards (6, per UI spec) */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
             <KpiCard label="売上" value={fmtYen(latest?.revenue)} />

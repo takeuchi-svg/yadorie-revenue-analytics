@@ -3,12 +3,12 @@
 //   「課題の特定（なぜ改善候補か）」「解決策①②③（実施しやすい順）」をAIが生成。
 //   引用(evidence)は raw_feedback_topic に保存済みの実クチコミ引用から採用（捏造防止）。
 //   結果は raw_improvement_insight にキャッシュ（再生成は force=true）。
-// TODO(保留): 施設の基本情報（コンセプト等）を学習した状態での分析
-//   — ユーザーが要件定義を作成中。受領後にシステムプロンプトへ注入する。
+//   施設プロフィール（意図・NG・競合・取組履歴）を学習した状態で生成する（profile-context注入）。
 import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { requireUser, isAuthErr, facilityAllowed } from '@/lib/ai/auth'
+import { buildFacilityContext } from '@/lib/ai/profile-context'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -109,9 +109,12 @@ export async function POST(req: NextRequest) {
       quotes: t.rows.filter((r) => r.quote).map((r) => ({ sentiment: r.sentiment, quote: r.quote })).slice(0, 6),
       related_bodies: [...new Set(t.rows.filter((r) => r.source_table === 'raw_review').map((r) => revMeta[r.source_id]?.body).filter(Boolean))].slice(0, 4).map((b) => String(b).slice(0, 600)),
     }))
+    // 施設プロフィール（意図・NG・競合・取組履歴）を前提として注入
+    // → NGに反する解決策を出さない・既に実施済みの取組を「新規提案」しない
+    const profileCtx = await buildFacilityContext(sb, facility)
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
     const resp = await client.messages.create({
-      model: MODEL, max_tokens: 3500, system: SYSTEM,
+      model: MODEL, max_tokens: 3500, system: SYSTEM + profileCtx,
       messages: [{ role: 'user', content: `施設のクチコミ分析結果です。各トピックの改善レポートを作成してください。\n${JSON.stringify(payload)}` }],
     })
     const raw = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('')

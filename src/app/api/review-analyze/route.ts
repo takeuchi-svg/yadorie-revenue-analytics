@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { requireUser, isAuthErr, facilityAllowed } from '@/lib/ai/auth'
+import { buildFacilityContext } from '@/lib/ai/profile-context'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
@@ -68,11 +69,12 @@ export async function POST(req: NextRequest) {
     if (total === 0) return NextResponse.json({ analyzed: 0, remaining: 0 })
     const batch = items.slice(0, BATCH)
 
-    // 1回のLLM呼び出しでバッチ全件を分析
+    // 1回のLLM呼び出しでバッチ全件を分析（施設プロフィール=意図・方針を前提として注入）
+    const profileCtx = await buildFacilityContext(sb, facility)
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
     const user = `施設のクチコミ/アンケート自由記述です。各テキストのトピックを抽出してください。\n` +
       JSON.stringify(batch.map((b) => ({ key: b.key, text: b.text.slice(0, 1500) })), null, 0)
-    const resp = await client.messages.create({ model: MODEL, max_tokens: 3000, system: SYSTEM, messages: [{ role: 'user', content: user }] })
+    const resp = await client.messages.create({ model: MODEL, max_tokens: 3000, system: SYSTEM + profileCtx, messages: [{ role: 'user', content: user }] })
     const raw = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('')
     const jsonStr = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)
     const parsed = JSON.parse(jsonStr) as { results: { key: string; topics: { code: string; label: string; sentiment: string; quote?: string }[] }[] }
