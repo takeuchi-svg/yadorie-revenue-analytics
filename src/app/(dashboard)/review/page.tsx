@@ -52,8 +52,10 @@ export default function ReviewPage() {
   const [srcFilter, setSrcFilter] = useState<Set<string>>(new Set())  // 空=全て
   const [trendAxis, setTrendAxis] = useState('overall')
   const [openBody, setOpenBody] = useState<number | null>(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analyzeMsg, setAnalyzeMsg] = useState('')
 
-  const { data, loading, error } = useFacilityData<{
+  const { data, loading, error, reload } = useFacilityData<{
     reviews: ReviewRow[]; fb: FeedbackRow[]; fb3: FeedbackRow[]
     nps: NpsRow[]; topics: TopicRow[]; rakuten: SummaryRow[]; axisMap: AxisMap[]
   }>(async (f) => {
@@ -142,7 +144,7 @@ export default function ReviewPage() {
   const topicsWin = useMemo(() => {
     const acc: Record<string, { label: string; neg: number; pos: number; kinds: number }> = {}
     for (const t of (data?.topics ?? [])) {
-      if (!winSet.has(t.month)) continue
+      if (!winSet.has(t.month) || t.topic_code === '_none') continue
       const a = (acc[t.topic_code] ??= { label: t.topic_label ?? t.topic_code, neg: 0, pos: 0, kinds: 1 })
       a.neg += t.negative_mentions; a.pos += t.positive_mentions; a.kinds = Math.max(a.kinds, t.source_kinds)
     }
@@ -197,6 +199,28 @@ export default function ReviewPage() {
   }, [reviews, data, winSet, trendAxis, axisOf])
 
   const npsTrend = useMemo(() => (data?.nps ?? []).slice().sort((a, b) => a.month.localeCompare(b.month)).map((r) => ({ month: r.month.slice(2), nps: r.nps_score })), [data])
+
+  // AI定性分析（C4）: 未分析テキストが無くなるまでバッチAPIを繰り返し呼ぶ
+  const runAnalyze = async () => {
+    setAnalyzing(true); setAnalyzeMsg('分析中…')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const headers = { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) }
+      let doneCount = 0
+      for (let i = 0; i < 40; i++) {  // 8件/回 × 40 = 最大320テキスト/実行
+        const res = await fetch('/api/review-analyze', { method: 'POST', headers, body: JSON.stringify({ facility: current }) })
+        const d = await res.json()
+        if (!res.ok || d.error) throw new Error(d.error || '分析に失敗しました')
+        doneCount += d.analyzed
+        setAnalyzeMsg(`分析中… ${doneCount}件完了 / 残り${d.remaining}件`)
+        if (d.remaining === 0) break
+      }
+      setAnalyzeMsg(doneCount === 0 ? '未分析のテキストはありません（すべて分析済み）' : `完了: ${doneCount}件を分析しました`)
+      reload()
+    } catch (e) {
+      setAnalyzeMsg('Error: ' + (e instanceof Error ? e.message : String(e)))
+    } finally { setAnalyzing(false) }
+  }
 
   const modeLabel = mode === '1' ? '単月' : mode === '3' ? '3ヶ月' : '12ヶ月'
   const badge = (low: boolean) => low && <span className="ml-1 text-[9px] px-1 py-0.5 rounded" style={{ background: 'var(--yellow)', color: '#3d2b1f' }}>参考値</span>
@@ -334,7 +358,15 @@ export default function ReviewPage() {
 
             {/* 改善候補TOP3 */}
             <div className="card p-4">
-              <h2 className="text-sm font-semibold mb-2">改善候補 TOP3（{modeLabel}）</h2>
+              <div className="flex items-center justify-between mb-2">
+                <h2 className="text-sm font-semibold">改善候補 TOP3（{modeLabel}）</h2>
+                <button onClick={runAnalyze} disabled={analyzing}
+                  className="text-xs px-3 py-1 rounded-md hover:opacity-80 disabled:opacity-50"
+                  style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>
+                  {analyzing ? '分析中…' : '✦ AI分析を実行'}
+                </button>
+              </div>
+              {analyzeMsg && <p className="text-[11px] mb-2" style={{ color: analyzeMsg.startsWith('Error') ? 'var(--red)' : 'var(--text-dim)' }}>{analyzeMsg}</p>}
               {topicsWin.length ? (
                 <div className="space-y-2">
                   {topicsWin.slice(0, 3).map((t, i) => (
