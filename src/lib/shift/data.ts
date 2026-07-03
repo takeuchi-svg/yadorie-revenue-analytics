@@ -152,11 +152,41 @@ export async function savePlanContext(facility: string, work_date: string, patch
   if (error) throw error
 }
 
+// スポット要員を dim_staff に登録（is_spot=true / 時給）。staff_code は非KOT系で自動採番
+export async function createSpotStaff(facility: string, name: string, hourlyWage: number): Promise<string> {
+  const staff_code = `SP-${facility}-${Date.now().toString(36).toUpperCase()}`
+  const { error } = await supabase.from('dim_staff').insert({
+    staff_code, name, home_facility: facility, employment_type: 'スポット',
+    is_monthly_salary: false, wage_type: '時給', hourly_wage: hourlyWage, is_spot: true,
+    updated_at: new Date().toISOString(),
+  })
+  if (error) throw error
+  return staff_code
+}
+
+// スポット実働（実績）を raw_attendance_daily(source='manual') へ upsert。KOT行と staff_code が別系統で衝突しない
+export async function saveSpotActual(staff_code: string, work_facility: string, work_date: string, minutes: number): Promise<void> {
+  const { error } = await supabase.from('raw_attendance_daily').upsert({
+    staff_code, work_facility, work_date, total_work_min: minutes, source: 'manual',
+  }, { onConflict: 'staff_code,work_date,work_facility' })
+  if (error) throw error
+}
+export async function deleteSpotActual(staff_code: string, work_facility: string, work_date: string): Promise<void> {
+  const { error } = await supabase.from('raw_attendance_daily').delete()
+    .eq('staff_code', staff_code).eq('work_facility', work_facility).eq('work_date', work_date).eq('source', 'manual')
+  if (error) throw error
+}
+
+// 開始/終了/休憩（'HH:MM'）から実働(分)。日跨ぎ対応（end<=start は翌日扱い）
+export function segMinutes(start: string, end: string, breakMin: number): number {
+  const toMin = (t: string) => { const [h, m] = t.split(':'); return (+h) * 60 + (+m) }
+  let span = toMin(end) - toMin(start)
+  if (span <= 0) span += 24 * 60
+  return Math.max(0, span - (breakMin || 0))
+}
+
 // パターン既定の予定実働(分)を計算（日跨ぎ対応: end<=start は翌日扱い）
 export function patternMinutes(p: Pick<ShiftPattern, 'start_time' | 'end_time' | 'break_minutes' | 'pattern_type'>): number {
   if (p.pattern_type === '休日' || !p.start_time || !p.end_time) return 0
-  const toMin = (t: string) => { const [h, m] = t.split(':'); return (+h) * 60 + (+m) }
-  let span = toMin(p.end_time) - toMin(p.start_time)
-  if (span <= 0) span += 24 * 60 // 日跨ぎ（ナイト等）
-  return Math.max(0, span - (p.break_minutes || 0))
+  return segMinutes(p.start_time, p.end_time, p.break_minutes || 0)
 }
