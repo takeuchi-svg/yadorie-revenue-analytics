@@ -2,7 +2,7 @@
 
 // クチコミ・満足度分析（C3）
 // 仕様: docs/要件定義書_クチコミ満足度分析 §3。平滑化スコア主表示・n<5は参考値バッジ・データ0はフォールバック。
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
   BarChart, Bar, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Legend,
@@ -26,6 +26,11 @@ interface ReviewRow {
 interface FeedbackRow { month: string; channel: string; axis_code: string; n: number; raw_avg: number | null; smoothed_avg: number | null; is_low_sample: boolean }
 interface NpsRow { month: string; n: number; nps_score: number | null; promoters: number; passives: number; detractors: number }
 interface TopicRow { month: string; topic_code: string; topic_label: string | null; negative_mentions: number; positive_mentions: number; source_kinds: number }
+interface Insight {
+  topic_code: string; topic_label: string | null; problem: string | null
+  evidence: { quote: string; source: string; review_date: string | null; rating: number | null }[] | null
+  solutions: { title: string; detail: string; effort: string }[] | null
+}
 interface SummaryRow { month: string; review_count: number | null; overall_avg: number | null; axis_scores: Record<string, number> | null; area_ranking: string | null }
 interface AxisMap { source: string; source_key: string; axis_code: string }
 
@@ -54,6 +59,9 @@ export default function ReviewPage() {
   const [openBody, setOpenBody] = useState<number | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [analyzeMsg, setAnalyzeMsg] = useState('')
+  const [insights, setInsights] = useState<Insight[]>([])
+  const [insightBusy, setInsightBusy] = useState(false)
+  const [insightMsg, setInsightMsg] = useState('')
 
   const { data, loading, error, reload } = useFacilityData<{
     reviews: ReviewRow[]; fb: FeedbackRow[]; fb3: FeedbackRow[]
@@ -199,6 +207,34 @@ export default function ReviewPage() {
   }, [reviews, data, winSet, trendAxis, axisOf])
 
   const npsTrend = useMemo(() => (data?.nps ?? []).slice().sort((a, b) => a.month.localeCompare(b.month)).map((r) => ({ month: r.month.slice(2), nps: r.nps_score })), [data])
+
+  // 改善レポートのキャッシュ読込（施設×終端月×ウィンドウ）
+  useEffect(() => {
+    if (!current || !activeMonth) { setInsights([]); return }
+    supabase.from('raw_improvement_insight')
+      .select('topic_code, topic_label, problem, evidence, solutions')
+      .eq('facility', current).eq('month', activeMonth).eq('window_months', +mode)
+      .then(({ data }) => { setInsights((data as Insight[]) ?? []); setInsightMsg('') })
+  }, [current, activeMonth, mode])
+
+  // 改善レポート生成（課題の特定＋実引用＋解決策①②③）
+  const genInsight = async (force: boolean) => {
+    setInsightBusy(true); setInsightMsg('レポート生成中…（十数秒かかります）')
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      const res = await fetch('/api/review-insight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
+        body: JSON.stringify({ facility: current, month: activeMonth, window: +mode, force }),
+      })
+      const d = await res.json()
+      if (!res.ok || d.error) throw new Error(d.error || '生成に失敗しました')
+      setInsights(d.insights ?? [])
+      setInsightMsg(d.cached ? '' : '生成しました')
+    } catch (e) {
+      setInsightMsg('Error: ' + (e instanceof Error ? e.message : String(e)))
+    } finally { setInsightBusy(false) }
+  }
 
   // AI定性分析（C4）: 未分析テキストが無くなるまでバッチAPIを繰り返し呼ぶ
   const runAnalyze = async () => {
@@ -356,60 +392,131 @@ export default function ReviewPage() {
               <p className="text-[10px]" style={{ color: 'var(--text-dim)' }}>楽天は宿カルテ集計値（平滑化対象外）。アンケートとWEBのギャップ発見用。</p>
             </div>
 
-            {/* 改善候補TOP3 */}
+            {/* NPS内訳（アンケート） */}
             <div className="card p-4">
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm font-semibold">改善候補 TOP3（{modeLabel}）</h2>
-                <button onClick={runAnalyze} disabled={analyzing}
-                  className="text-xs px-3 py-1 rounded-md hover:opacity-80 disabled:opacity-50"
-                  style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>
-                  {analyzing ? '分析中…' : '✦ AI分析を実行'}
-                </button>
-              </div>
-              {analyzeMsg && <p className="text-[11px] mb-2" style={{ color: analyzeMsg.startsWith('Error') ? 'var(--red)' : 'var(--text-dim)' }}>{analyzeMsg}</p>}
-              {topicsWin.length ? (
-                <div className="space-y-2">
-                  {topicsWin.slice(0, 3).map((t, i) => (
-                    <div key={t.code} className="rounded-md p-3" style={{ background: 'var(--surface2)' }}>
-                      <div className="flex items-center gap-2">
-                        <span className="text-lg font-bold" style={{ color: 'var(--accent)' }}>{i + 1}</span>
-                        <span className="text-sm font-medium">{t.label}</span>
-                        {t.kinds >= 2 && <span className="text-[9px] px-1.5 py-0.5 rounded text-white" style={{ background: 'var(--green)' }}>確度高</span>}
-                        <span className="ml-auto text-xs" style={{ color: 'var(--red)' }}>ネガ {t.neg}</span>
-                        <span className="text-xs" style={{ color: 'var(--green)' }}>ポジ {t.pos}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm py-10 text-center" style={{ color: 'var(--text-dim)' }}>AI定性分析が未実行です（C4実装後に自動抽出されます）。</p>
-              )}
-            </div>
-          </div>
-
-          {/* NPS内訳 */}
-          <div className="card p-4 mb-4">
-            <h2 className="text-sm font-semibold mb-2">NPS内訳・推移（アンケート）</h2>
-            {npsAgg.n > 0 ? (
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-center">
-                <div>
-                  <div className="flex h-6 rounded overflow-hidden text-[10px] text-white">
+              <h2 className="text-sm font-semibold mb-2">NPS内訳・推移（アンケート）</h2>
+              {npsAgg.n > 0 ? (
+                <>
+                  <div className="flex h-6 rounded overflow-hidden text-[10px] text-white mb-1">
                     {npsAgg.pro > 0 && <div className="flex items-center justify-center" style={{ width: `${100 * npsAgg.pro / npsAgg.n}%`, background: 'var(--green)' }}>推奨{npsAgg.pro}</div>}
                     {npsAgg.pas > 0 && <div className="flex items-center justify-center" style={{ width: `${100 * npsAgg.pas / npsAgg.n}%`, background: '#B4B2A9' }}>中立{npsAgg.pas}</div>}
                     {npsAgg.det > 0 && <div className="flex items-center justify-center" style={{ width: `${100 * npsAgg.det / npsAgg.n}%`, background: 'var(--red)' }}>批判{npsAgg.det}</div>}
                   </div>
-                  <p className="text-[10px] mt-1" style={{ color: 'var(--text-dim)' }}>{modeLabel}・n={npsAgg.n}</p>
-                </div>
-                <ResponsiveContainer width="100%" height={120}>
-                  <LineChart data={npsTrend} margin={{ top: 6, right: 8, bottom: 0, left: -18 }}>
-                    <XAxis dataKey="month" {...CHART_AXIS} />
-                    <YAxis domain={[-100, 100]} {...CHART_AXIS} />
-                    <Tooltip {...chartTooltip} />
-                    <Line dataKey="nps" stroke="#D85A30" strokeWidth={2} dot={{ r: 2 }} />
-                  </LineChart>
-                </ResponsiveContainer>
+                  <p className="text-[10px] mb-2" style={{ color: 'var(--text-dim)' }}>{modeLabel}・n={npsAgg.n}</p>
+                  <ResponsiveContainer width="100%" height={140}>
+                    <LineChart data={npsTrend} margin={{ top: 6, right: 8, bottom: 0, left: -18 }}>
+                      <XAxis dataKey="month" {...CHART_AXIS} />
+                      <YAxis domain={[-100, 100]} {...CHART_AXIS} />
+                      <Tooltip {...chartTooltip} />
+                      <Line dataKey="nps" stroke="#D85A30" strokeWidth={2} dot={{ r: 2 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </>
+              ) : <p className="text-sm py-10 text-center" style={{ color: 'var(--text-dim)' }}>アンケートが未取込です（Googleフォーム運用開始後に表示されます）。</p>}
+            </div>
+          </div>
+
+          {/* 改善候補（課題の特定・実引用・解決策①②③） */}
+          <div className="card p-5 mb-4" style={{ borderColor: 'var(--accent)' }}>
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <h2 className="text-base font-bold">改善候補 TOP3（{modeLabel}）</h2>
+              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>実クチコミ引用に基づく</span>
+              <div className="ml-auto flex items-center gap-2">
+                <button onClick={runAnalyze} disabled={analyzing || insightBusy}
+                  className="text-xs px-3 py-1 rounded-md hover:opacity-80 disabled:opacity-50"
+                  style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}
+                  title="STEP1: クチコミからトピックを抽出（新着があるときに実行）">
+                  {analyzing ? '抽出中…' : '① トピック抽出'}
+                </button>
+                <button onClick={() => genInsight(insights.length > 0)} disabled={analyzing || insightBusy || topicsWin.length === 0}
+                  className="text-xs px-3 py-1 rounded-md text-white hover:opacity-90 disabled:opacity-50"
+                  style={{ background: 'var(--accent)' }}
+                  title="STEP2: 課題の特定と解決策①②③を生成">
+                  {insightBusy ? '生成中…' : insights.length ? '↻ レポート再生成' : '② 改善レポート生成'}
+                </button>
               </div>
-            ) : <p className="text-sm py-6 text-center" style={{ color: 'var(--text-dim)' }}>アンケートが未取込です（Googleフォーム運用開始後に表示されます）。</p>}
+            </div>
+            {(analyzeMsg || insightMsg) && (
+              <p className="text-[11px] mb-2" style={{ color: (analyzeMsg + insightMsg).startsWith('Error') ? 'var(--red)' : 'var(--text-dim)' }}>
+                {analyzeMsg}{analyzeMsg && insightMsg ? ' ／ ' : ''}{insightMsg}
+              </p>
+            )}
+
+            {insights.length > 0 ? (
+              <div className="space-y-4 mt-3">
+                {insights.map((ins, i) => {
+                  const t = topicsWin.find((x) => x.code === ins.topic_code)
+                  return (
+                    <div key={ins.topic_code} className="rounded-lg p-4" style={{ background: 'var(--surface2)' }}>
+                      {/* 見出し */}
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        <span className="w-7 h-7 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0" style={{ background: 'var(--accent)' }}>{i + 1}</span>
+                        <span className="text-base font-bold">{ins.topic_label ?? ins.topic_code}</span>
+                        {t && t.kinds >= 2 && <span className="text-[9px] px-1.5 py-0.5 rounded text-white" style={{ background: 'var(--green)' }}>確度高（WEB+アンケート）</span>}
+                        {t && <span className="ml-auto text-xs whitespace-nowrap"><span style={{ color: 'var(--red)' }}>ネガ {t.neg}</span>　<span style={{ color: 'var(--green)' }}>ポジ {t.pos}</span></span>}
+                      </div>
+                      {/* 課題の特定 */}
+                      {ins.problem && (
+                        <div className="mb-3">
+                          <div className="text-[11px] font-semibold mb-1" style={{ color: 'var(--accent)' }}>■ 課題</div>
+                          <p className="text-sm leading-relaxed">{ins.problem}</p>
+                        </div>
+                      )}
+                      {/* 実際のクチコミ引用 */}
+                      {(ins.evidence ?? []).length > 0 && (
+                        <div className="mb-3">
+                          <div className="text-[11px] font-semibold mb-1" style={{ color: 'var(--accent)' }}>■ 根拠（実際のクチコミ）</div>
+                          <div className="space-y-1.5">
+                            {(ins.evidence ?? []).map((ev, j) => (
+                              <div key={j} className="text-xs rounded-md px-3 py-2 flex items-start gap-2" style={{ background: 'var(--surface)', borderLeft: `3px solid ${SRC_COLOR[ev.source] ?? '#888780'}` }}>
+                                <span className="flex-1" style={{ color: 'var(--text)' }}>“{ev.quote}”</span>
+                                <span className="shrink-0 text-[10px]" style={{ color: 'var(--text-dim)' }}>
+                                  {SRC_LABEL[ev.source] ?? ev.source}{ev.review_date ? `・${ev.review_date}` : ''}{ev.rating != null ? `・総合${ev.rating}` : ''}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* 解決策①②③ */}
+                      {(ins.solutions ?? []).length > 0 && (
+                        <div>
+                          <div className="text-[11px] font-semibold mb-1" style={{ color: 'var(--accent)' }}>■ 解決策の候補（実施しやすい順）</div>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                            {(ins.solutions ?? []).map((s, j) => (
+                              <div key={j} className="rounded-md p-3" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                                <div className="flex items-center gap-1.5 mb-1">
+                                  <span className="text-sm font-bold" style={{ color: 'var(--accent)' }}>{['①', '②', '③'][j] ?? j + 1}</span>
+                                  <span className="text-xs font-semibold flex-1">{s.title}</span>
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded text-white shrink-0"
+                                    style={{ background: s.effort === '低' ? 'var(--green)' : s.effort === '中' ? '#BA7517' : 'var(--red)' }}>
+                                    負荷{s.effort}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--text-dim)' }}>{s.detail}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            ) : topicsWin.length > 0 ? (
+              <div className="mt-2">
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {topicsWin.slice(0, 3).map((t, i) => (
+                    <span key={t.code} className="text-xs px-2.5 py-1 rounded-full" style={{ background: 'var(--surface2)' }}>
+                      {i + 1}. {t.label}（<span style={{ color: 'var(--red)' }}>ネガ{t.neg}</span>）
+                    </span>
+                  ))}
+                </div>
+                <p className="text-sm" style={{ color: 'var(--text-dim)' }}>トピック抽出済み。「② 改善レポート生成」で課題の特定・実クチコミ引用・解決策①②③を作成します。</p>
+              </div>
+            ) : (
+              <p className="text-sm py-6 text-center" style={{ color: 'var(--text-dim)' }}>まず「① トピック抽出」を実行してください（クチコミ本文から課題トピックを抽出します）。</p>
+            )}
           </div>
 
           {/* 最新クチコミ一覧 */}
