@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "売上分析BI",
-  description: "Yadorie Revenue Analytics",
+  title: "YADORIE Core",
+  description: "旅館運営システム YADORIE Core — 宿の数だけ、ストーリー。",
 };
 
 export default function RootLayout({

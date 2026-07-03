@@ -157,7 +157,7 @@ export default function OverviewPage() {
           {initiativeMissing && (
             <div className="card p-3 mb-4 text-xs flex items-center gap-2" style={{ borderColor: 'var(--yellow)' }}>
               <span className="px-1.5 py-0.5 rounded text-white text-[10px]" style={{ background: 'var(--red)' }}>未記録</span>
-              <span style={{ color: 'var(--text-dim)' }}>今月の「取組履歴」が未記録です。月次会議の後に 設定 → 施設プロフィール から記録してください（AI分析の精度が上がります）。</span>
+              <span style={{ color: 'var(--text-dim)' }}>支配人、今月の「取組履歴」がまだのようです。小さなことでも記録しておくと、わたしの分析がもっとお役に立てます（設定 → 施設プロフィール）。— 灯</span>
             </div>
           )}
           {/* KPI Cards (6, per UI spec) */}
@@ -174,7 +174,7 @@ export default function OverviewPage() {
           <div className="card p-4 mb-6" style={{ background: 'linear-gradient(135deg, var(--surface), var(--surface2))', borderColor: 'var(--accent)' }}>
             <div className="flex items-center gap-2 mb-2">
               <SparkleIcon size={16} />
-              <h2 className="text-sm font-semibold">AI実績サマリ（{latest?.month}）</h2>
+              <h2 className="text-sm font-semibold">灯からの実績サマリ（{latest?.month}）</h2>
               <button
                 onClick={() => latest && genSummary(current, latest.month, true)}
                 disabled={aiLoading || !latest}
@@ -198,7 +198,7 @@ export default function OverviewPage() {
           <div className="card p-4 mb-6" style={{ borderColor: 'var(--border)' }}>
             <div className="flex items-center gap-2 mb-2">
               <SparkleIcon size={16} />
-              <h2 className="text-sm font-semibold">AI分析の課題と対策（参考）</h2>
+              <h2 className="text-sm font-semibold">灯からの課題と対策（参考）</h2>
               <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>仮説・参考</span>
               <button
                 onClick={() => latest && genIssue(current, latest.month, true)}

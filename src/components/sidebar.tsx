@@ -58,7 +58,7 @@ export default function Sidebar() {
           YADORIE
         </div>
         <div className="text-xs" style={{ color: 'var(--text-dim)' }}>
-          Revenue Analytics
+          Core — 宿の数だけ、ストーリー。
         </div>
       </div>
 

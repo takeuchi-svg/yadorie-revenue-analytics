@@ -106,8 +106,8 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
         <div className="flex items-center gap-2">
           <SparkleIcon />
           <div>
-            <div className="text-sm font-bold">AIアシスタント</div>
-            <div className="text-[10px]" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current} のデータを参照</div>
+            <div className="text-sm font-bold">灯（あかり）</div>
+            <div className="text-[10px]" style={{ color: 'var(--text-dim)' }}>YADORIE Coreの若女将 ・ {currentFacility?.name ?? current} のデータを参照</div>
           </div>
         </div>
         <button onClick={onClose} className="text-lg leading-none px-2 hover:opacity-70" style={{ color: 'var(--text-dim)' }}>✕</button>
@@ -118,7 +118,7 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
         {messages.length === 0 && (
           <div>
             <p className="text-sm mb-3" style={{ color: 'var(--text-dim)' }}>
-              データベースを参照して質問に答えます。例えば:
+              わたし、灯がお宿のデータを見ながら一緒に考えます。なんでも聞いてくださいね。例えば:
             </p>
             <div className="space-y-2">
               {SUGGESTIONS.map((s) => (

@@ -33,8 +33,8 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="card p-8">
           <div className="text-center mb-6">
-            <div className="text-xl font-bold tracking-wide">YADORIE</div>
-            <div className="text-xs" style={{ color: 'var(--text-dim)' }}>Revenue Analytics</div>
+            <div className="text-xl font-bold tracking-wide">YADORIE Core</div>
+            <div className="text-xs" style={{ color: 'var(--text-dim)' }}>宿の数だけ、ストーリー。</div>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">
