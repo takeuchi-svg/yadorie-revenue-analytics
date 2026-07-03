@@ -15,6 +15,7 @@ import { parsePlCsv } from '@/lib/etl/pl-parser'
 import { parseAttendanceHtml, type FacilityMapping } from '@/lib/etl/attendance-parser'
 import { parseReviewCsv, type ReviewInsert } from '@/lib/etl/review-parser'
 import { supabase } from '@/lib/supabase/client'
+import { useFacility } from '@/lib/facility-context'
 
 // Supabaseのエラーは Error インスタンスでないため、メッセージを確実に取り出す
 const errMsg = (e: unknown): string =>
@@ -37,6 +38,7 @@ interface FileEntry {
 }
 
 export default function UploadPage() {
+  const { facilities: allowedFacilities } = useFacility()  // 権限のある施設のみ（RLSと整合）
   const [files, setFiles] = useState<FileEntry[]>([])
   const [facilityList, setFacilityList] = useState<
     { facility: string; name: string; short_name: string | null; rooms_json: unknown }[]
@@ -205,9 +207,13 @@ export default function UploadPage() {
       .from('dim_facility')
       .select('facility, name, short_name, rooms_json')
       .order('facility')
-    if (data) setFacilityList(data)
-    return data ?? []
-  }, [])
+    // 権限のある施設のみ表示（memberが書込不可の施設を選んでRLSエラーになるのを防ぐ）
+    const allowed = new Set(allowedFacilities.map((f) => f.facility))
+    const list = ((data ?? []) as { facility: string; name: string; short_name: string | null; rooms_json: unknown }[])
+      .filter((f) => allowed.size === 0 || allowed.has(f.facility))
+    setFacilityList(list)
+    return list
+  }, [allowedFacilities])
 
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
