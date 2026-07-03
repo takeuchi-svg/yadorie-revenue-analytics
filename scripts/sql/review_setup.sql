@@ -176,8 +176,8 @@ with (security_invoker = on) as
 with review_axis as (
   select f.facility, to_char(f.review_date,'YYYY-MM') as month, 'web' as channel,
          m.axis_code, (kv.value)::numeric * 5.0 / f.rating_scale as score
-  from raw_review f,
-       lateral jsonb_each_text(f.sub_ratings) as kv(key,value)
+  from raw_review f
+  cross join lateral jsonb_each_text(f.sub_ratings) as kv(key,value)
   join dim_axis_mapping m on m.source = f.source and m.source_key = kv.key
   where kv.value ~ '^[0-9.]+$'
   union all
@@ -225,8 +225,8 @@ with (security_invoker = on) as
 with review_axis as (
   select f.facility, date_trunc('month', f.review_date)::date as mdate, 'web' as channel,
          m.axis_code, (kv.value)::numeric * 5.0 / f.rating_scale as score
-  from raw_review f,
-       lateral jsonb_each_text(f.sub_ratings) as kv(key,value)
+  from raw_review f
+  cross join lateral jsonb_each_text(f.sub_ratings) as kv(key,value)
   join dim_axis_mapping m on m.source = f.source and m.source_key = kv.key
   where kv.value ~ '^[0-9.]+$'
   union all
