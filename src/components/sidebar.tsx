@@ -25,6 +25,7 @@ const NAV_GROUPS: { group: string; items: { href: string; label: string }[] }[] 
       { href: '/yojitsu', label: '予実管理（PL）' },
       { href: '/productivity', label: '生産性' },
       { href: '/shift', label: 'シフト・労務' },
+      { href: '/review', label: 'クチコミ・満足度' },
     ],
   },
 ]

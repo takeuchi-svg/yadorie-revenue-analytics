@@ -16,6 +16,12 @@ import { parseAttendanceHtml, type FacilityMapping } from '@/lib/etl/attendance-
 import { parseReviewCsv, type ReviewInsert } from '@/lib/etl/review-parser'
 import { supabase } from '@/lib/supabase/client'
 
+// Supabaseのエラーは Error インスタンスでないため、メッセージを確実に取り出す
+const errMsg = (e: unknown): string =>
+  e instanceof Error ? e.message
+    : (e && typeof e === 'object' && 'message' in e) ? String((e as { message: unknown }).message)
+    : String(e)
+
 interface PlEntry { name: string; fy: string; rows: number; status: 'processing' | 'done' | 'error'; error?: string }
 interface AttEntry { name: string; workDate: string; rows: number; staff: number; skipped?: number; status: 'processing' | 'done' | 'error'; error?: string }
 // クチコミ: ドロップ→プレビュー(pending)→確定でUPSERT
@@ -64,7 +70,7 @@ export default function UploadPage() {
         const r = parseReviewCsv(text, facility)
         setRevFiles((prev) => [...prev, { name: file.name, source: r.source === 'jalan' ? 'じゃらん' : '一休', rows: r.rows, skipped: r.skipped, minDate: r.minDate, maxDate: r.maxDate, status: 'pending' }])
       } catch (err) {
-        setRevFiles((prev) => [...prev, { name: file.name, source: '不明', rows: [], skipped: 0, minDate: null, maxDate: null, status: 'error', error: err instanceof Error ? err.message : String(err) }])
+        setRevFiles((prev) => [...prev, { name: file.name, source: '不明', rows: [], skipped: 0, minDate: null, maxDate: null, status: 'error', error: errMsg(err) }])
       }
     }
   }
@@ -85,7 +91,7 @@ export default function UploadPage() {
         }
         upd({ status: 'done', inserted })
       } catch (err) {
-        upd({ status: 'error', error: err instanceof Error ? err.message : String(err) })
+        upd({ status: 'error', error: errMsg(err) })
       }
     }
     setRevUploading(false)
@@ -154,7 +160,7 @@ export default function UploadPage() {
         }
         upd({ workDate, rows: attPayload.length, staff: staff.length, skipped: unmapped, status: 'done' })
       } catch (err) {
-        upd({ status: 'error', error: err instanceof Error ? err.message : String(err) })
+        upd({ status: 'error', error: errMsg(err) })
       }
     }
     await refreshMarts()
@@ -184,7 +190,7 @@ export default function UploadPage() {
         }
         upd({ fy: fiscalYear, rows: payload.length, status: 'done' })
       } catch (err) {
-        upd({ status: 'error', error: err instanceof Error ? err.message : String(err) })
+        upd({ status: 'error', error: errMsg(err) })
       }
     }
     await refreshMarts()
