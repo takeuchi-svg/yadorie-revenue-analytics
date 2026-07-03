@@ -13,10 +13,13 @@ import {
 import type { DetectionResult, UploadPayload, UploadResult } from '@/lib/etl'
 import { parsePlCsv } from '@/lib/etl/pl-parser'
 import { parseAttendanceHtml, type FacilityMapping } from '@/lib/etl/attendance-parser'
+import { parseReviewCsv, type ReviewInsert } from '@/lib/etl/review-parser'
 import { supabase } from '@/lib/supabase/client'
 
 interface PlEntry { name: string; fy: string; rows: number; status: 'processing' | 'done' | 'error'; error?: string }
 interface AttEntry { name: string; workDate: string; rows: number; staff: number; skipped?: number; status: 'processing' | 'done' | 'error'; error?: string }
+// クチコミ: ドロップ→プレビュー(pending)→確定でUPSERT
+interface RevEntry { name: string; source: string; rows: ReviewInsert[]; skipped: number; minDate: string | null; maxDate: string | null; status: 'pending' | 'done' | 'error'; inserted?: number; error?: string }
 
 interface FileEntry {
   file: File
@@ -34,11 +37,76 @@ export default function UploadPage() {
   >([])
   const [uploading, setUploading] = useState(false)
   const [globalFacility, setGlobalFacility] = useState<string>('')
-  const [tab, setTab] = useState<'sales' | 'pl' | 'attendance'>('sales')
+  const [tab, setTab] = useState<'sales' | 'pl' | 'attendance' | 'review'>('sales')
   const [plFiles, setPlFiles] = useState<PlEntry[]>([])
   const [plUploading, setPlUploading] = useState(false)
   const [attFiles, setAttFiles] = useState<AttEntry[]>([])
   const [attUploading, setAttUploading] = useState(false)
+  // クチコミ取込
+  const [revFiles, setRevFiles] = useState<RevEntry[]>([])
+  const [revUploading, setRevUploading] = useState(false)
+  // 楽天 集計値フォーム（宿カルテ転記）
+  const [rkMonth, setRkMonth] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` })
+  const [rkCount, setRkCount] = useState<number | ''>('')
+  const [rkAvg, setRkAvg] = useState<number | ''>('')
+  const [rkAxes, setRkAxes] = useState<Record<string, number | ''>>({ 'サービス': '', '立地': '', '部屋': '', '設備・アメニティ': '', '風呂': '', '食事': '' })
+  const [rkRanking, setRkRanking] = useState('')
+  const [rkMsg, setRkMsg] = useState('')
+
+  // クチコミCSV: ドロップ時にパースしてプレビュー（確定までDBに書かない）
+  const handleRevFiles = async (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return
+    const facility = globalFacility
+    if (!facility) { alert('上部の「デフォルト施設」を選択してください（クチコミの帰属施設）'); return }
+    for (const file of Array.from(fileList)) {
+      try {
+        const text = decodeCp932(await file.arrayBuffer())
+        const r = parseReviewCsv(text, facility)
+        setRevFiles((prev) => [...prev, { name: file.name, source: r.source === 'jalan' ? 'じゃらん' : '一休', rows: r.rows, skipped: r.skipped, minDate: r.minDate, maxDate: r.maxDate, status: 'pending' }])
+      } catch (err) {
+        setRevFiles((prev) => [...prev, { name: file.name, source: '不明', rows: [], skipped: 0, minDate: null, maxDate: null, status: 'error', error: err instanceof Error ? err.message : String(err) }])
+      }
+    }
+  }
+
+  // プレビュー確定 → UPSERT（facility,source,source_review_id で重複排除）
+  const commitReviews = async () => {
+    setRevUploading(true)
+    for (const entry of revFiles) {
+      if (entry.status !== 'pending' || entry.rows.length === 0) continue
+      const upd = (patch: Partial<RevEntry>) => setRevFiles((prev) => prev.map((p) => (p === entry ? { ...p, ...patch } : p)))
+      try {
+        let inserted = 0
+        for (let i = 0; i < entry.rows.length; i += 200) {
+          const { error, count } = await supabase.from('raw_review')
+            .upsert(entry.rows.slice(i, i + 200), { onConflict: 'facility,source,source_review_id', count: 'exact' })
+          if (error) throw error
+          inserted += count ?? 0
+        }
+        upd({ status: 'done', inserted })
+      } catch (err) {
+        upd({ status: 'error', error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+    setRevUploading(false)
+  }
+
+  // 楽天 集計値の保存
+  const saveRakuten = async () => {
+    const facility = globalFacility
+    if (!facility) { setRkMsg('デフォルト施設を選択してください'); return }
+    if (!rkMonth) { setRkMsg('対象月を選択してください'); return }
+    const axis: Record<string, number> = {}
+    for (const [k, v] of Object.entries(rkAxes)) if (v !== '') axis[k] = Number(v)
+    const { error } = await supabase.from('raw_review_summary').upsert({
+      facility, source: 'rakuten', month: rkMonth,
+      review_count: rkCount === '' ? null : Number(rkCount),
+      overall_avg: rkAvg === '' ? null : Number(rkAvg),
+      axis_scores: Object.keys(axis).length ? axis : null,
+      area_ranking: rkRanking || null,
+    }, { onConflict: 'facility,source,month' })
+    setRkMsg(error ? `Error: ${error.message}` : `楽天集計値を保存しました（${rkMonth}）`)
+  }
 
   // 勤怠CSV（Touch On Time / HTML）取込: 全施設一括。施設選択は不要。
   const handleAttFiles = async (fileList: FileList | null) => {
@@ -335,7 +403,7 @@ export default function UploadPage() {
 
         {/* Tabs */}
         <div className="flex gap-1 mb-5">
-          {([['sales', '売上データ'], ['pl', 'PL実績'], ['attendance', '勤怠']] as const).map(([k, label]) => (
+          {([['sales', '売上データ'], ['pl', 'PL実績'], ['attendance', '勤怠'], ['review', 'クチコミ']] as const).map(([k, label]) => (
             <button key={k} onClick={() => setTab(k)} className="px-4 py-1.5 rounded-md text-sm"
               style={{ background: tab === k ? 'var(--accent)' : 'var(--surface)', color: tab === k ? '#fff' : 'var(--text-dim)', border: '1px solid var(--border)' }}>
               {label}
@@ -564,6 +632,101 @@ export default function UploadPage() {
               </div>
             )}
             {attUploading && <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>アップロード中...</p>}
+          </>
+        )}
+
+        {tab === 'review' && (
+          <>
+            <p className="text-sm mb-3" style={{ color: 'var(--text-dim)' }}>
+              じゃらん・一休のクチコミCSVを取り込みます（ファイル内容から自動判別）。
+              <strong>ドロップ→プレビュー確認→「取込確定」</strong>の順。同一クチコミは上書き（重複しません）。
+              帰属施設は上部の「デフォルト施設」です。
+            </p>
+            <label
+              className="border-2 border-dashed rounded-lg p-10 text-center transition-colors card block cursor-pointer"
+              style={{ borderColor: 'var(--border)' }}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => { e.preventDefault(); handleRevFiles(e.dataTransfer.files) }}
+            >
+              <p className="mb-2">クチコミCSVをドロップ / クリックして選択（複数可）</p>
+              <p className="text-sm" style={{ color: 'var(--text-dim)' }}>じゃらん=クチコミ/アンケート結果DL ・ 一休=クチコミダウンロード</p>
+              <input type="file" className="hidden" multiple accept=".csv" onChange={(e) => { handleRevFiles(e.target.files); e.target.value = '' }} />
+            </label>
+
+            {revFiles.length > 0 && (
+              <div className="mt-5 space-y-2">
+                {revFiles.map((p, i) => (
+                  <div key={i} className={`border rounded-lg p-3 flex items-center gap-3 ${p.status === 'done' ? 'bg-green-500/10 border-green-500/40' : p.status === 'error' ? 'bg-red-500/10 border-red-500/40' : 'bg-[var(--surface)] border-[var(--border)]'}`}>
+                    <div className="w-6 flex-shrink-0">
+                      {p.status === 'done' && <span className="text-green-500">&#10003;</span>}
+                      {p.status === 'error' && <span className="text-red-500">&#10007;</span>}
+                      {p.status === 'pending' && <span style={{ color: 'var(--yellow)' }}>◎</span>}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{p.name}
+                        <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>{p.source}</span>
+                      </p>
+                      <div className="text-xs mt-0.5" style={{ color: 'var(--text-dim)' }}>
+                        {p.status === 'pending' && `プレビュー: ${p.rows.length}件（${p.minDate ?? '-'} 〜 ${p.maxDate ?? '-'}）`}
+                        {p.status === 'pending' && p.skipped > 0 && <span style={{ color: 'var(--yellow)' }}>　⚠ NG {p.skipped}行（ID/投稿日なし）</span>}
+                        {p.status === 'done' && `${p.inserted}件 取込（UPSERT）`}
+                        {p.status === 'error' && <span style={{ color: 'var(--red)' }}>{p.error}</span>}
+                      </div>
+                    </div>
+                    {p.status === 'pending' && (
+                      <button className="text-sm hover:opacity-70" style={{ color: 'var(--text-dim)' }}
+                        onClick={() => setRevFiles((prev) => prev.filter((_, idx) => idx !== i))}>&#10005;</button>
+                    )}
+                  </div>
+                ))}
+                {revFiles.some((p) => p.status === 'pending') && (
+                  <button onClick={commitReviews} disabled={revUploading}
+                    className="w-full py-3 text-white rounded-lg font-medium hover:opacity-90 disabled:opacity-50"
+                    style={{ background: 'var(--accent)' }}>
+                    {revUploading ? '取込中...' : `プレビュー ${revFiles.filter((p) => p.status === 'pending').reduce((s, p) => s + p.rows.length, 0)}件を取込確定`}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* 楽天: 宿カルテ集計値の月次転記（個別DL不可のため） */}
+            <div className="card p-5 mt-6">
+              <h3 className="text-sm font-semibold mb-1">楽天トラベル 集計値（宿カルテ転記・月次）</h3>
+              <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>
+                楽天は個別クチコミのDLができないため、宿カルテ「口コミ分析」の集計値を月1回転記します（同月は上書き）。
+              </p>
+              <div className="flex items-end gap-3 flex-wrap mb-3">
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: 'var(--text-dim)' }}>対象月</label>
+                  <input type="month" className="field px-3 py-1.5 text-sm" value={rkMonth} onChange={(e) => setRkMonth(e.target.value)} />
+                </div>
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: 'var(--text-dim)' }}>当月件数</label>
+                  <input type="number" min={0} className="field px-3 py-1.5 text-sm w-24" value={rkCount} onChange={(e) => setRkCount(e.target.value === '' ? '' : Number(e.target.value))} />
+                </div>
+                <div>
+                  <label className="block text-xs mb-1" style={{ color: 'var(--text-dim)' }}>総合評価</label>
+                  <input type="number" min={0} max={5} step="0.01" className="field px-3 py-1.5 text-sm w-24" value={rkAvg} onChange={(e) => setRkAvg(e.target.value === '' ? '' : Number(e.target.value))} />
+                </div>
+                <div className="flex-1 min-w-40">
+                  <label className="block text-xs mb-1" style={{ color: 'var(--text-dim)' }}>エリア順位（任意）</label>
+                  <input type="text" className="field px-3 py-1.5 text-sm w-full" placeholder="例: 54位/104施設" value={rkRanking} onChange={(e) => setRkRanking(e.target.value)} />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-3">
+                {Object.keys(rkAxes).map((k) => (
+                  <div key={k}>
+                    <label className="block text-xs mb-1" style={{ color: 'var(--text-dim)' }}>{k}</label>
+                    <input type="number" min={0} max={5} step="0.1" className="field px-2 py-1.5 text-sm w-full"
+                      value={rkAxes[k]} onChange={(e) => setRkAxes((prev) => ({ ...prev, [k]: e.target.value === '' ? '' : Number(e.target.value) }))} />
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center gap-3">
+                <button onClick={saveRakuten} className="px-4 py-2 text-white rounded-md text-sm hover:opacity-90" style={{ background: 'var(--accent)' }}>保存</button>
+                {rkMsg && <span className="text-xs" style={{ color: rkMsg.startsWith('Error') ? 'var(--red)' : 'var(--green)' }}>{rkMsg}</span>}
+              </div>
+            </div>
           </>
         )}
       </div>
