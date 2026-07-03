@@ -121,10 +121,12 @@ export interface UploadPayload {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: any[]
   sourceMonth?: string
+  skipped?: number // 変換で読めずに除外した行数（silent drop可視化）
 }
 
 export interface UploadResult {
   table: string
   inserted: number
+  skipped?: number
   error?: string
 }

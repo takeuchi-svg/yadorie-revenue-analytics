@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     const action = body.action
 
     if (action === 'list') {
-      const { data: users } = await sb.from('app_user').select('user_id, email, role').order('email')
+      const { data: users } = await sb.from('app_user').select('user_id, email, role, can_view_wage').order('email')
       const { data: ufs } = await sb.from('user_facility').select('user_id, facility')
       const byUser: Record<string, string[]> = {}
       ;(ufs ?? []).forEach((r: { user_id: string; facility: string }) => { (byUser[r.user_id] ??= []).push(r.facility) })
@@ -58,6 +58,12 @@ export async function POST(req: NextRequest) {
     if (action === 'setRole') {
       const { user_id, role } = body as { user_id: string; role: string }
       await sb.from('app_user').update({ role: role === 'admin' ? 'admin' : 'member' }).eq('user_id', user_id)
+      return NextResponse.json({ ok: true })
+    }
+
+    if (action === 'setWagePerm') {
+      const { user_id, can_view_wage } = body as { user_id: string; can_view_wage: boolean }
+      await sb.from('app_user').update({ can_view_wage: !!can_view_wage }).eq('user_id', user_id)
       return NextResponse.json({ ok: true })
     }
 

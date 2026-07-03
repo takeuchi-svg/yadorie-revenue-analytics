@@ -1,9 +1,21 @@
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 
+// 文字コード自動判定: 正しいUTF-8ならUTF-8、そうでなければCP932(Shift_JIS)。
+// 従来はCP932固定で、UTF-8ファイルを黙って文字化け→全行スキップさせていたのを防ぐ。
 export function decodeCp932(buffer: ArrayBuffer): string {
-  const decoder = new TextDecoder('shift_jis')
-  return decoder.decode(buffer)
+  try {
+    // CP932の日本語テキストが偶然「妥当なUTF-8」になることはほぼ無い
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer)
+  } catch {
+    const text = new TextDecoder('shift_jis').decode(buffer)
+    // 双方で解釈不能（別エンコーディング/バイナリ）の検出
+    const bad = (text.match(/�/g) ?? []).length
+    if (bad > 5 && bad > text.length * 0.001) {
+      throw new Error('文字コードを認識できません（UTF-8/Shift_JIS以外の可能性）。ファイルを確認してください')
+    }
+    return text
+  }
 }
 
 export function parseCsv(text: string): Record<string, string>[] {

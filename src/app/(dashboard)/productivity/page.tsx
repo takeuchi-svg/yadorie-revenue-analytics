@@ -8,13 +8,15 @@ import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { fmtNum, fmtYen, pct, CHART_AXIS, chartTooltip } from '@/lib/ui'
-import { Loading, Empty } from '@/components/page-bits'
+import { Loading, Empty, LoadError } from '@/components/page-bits'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface LaborRow { month: string; staff_count_monthly: number | null; parttime_count: number | null; total_work_hours: number | null; total_overtime_hours: number | null }
 interface KpiRow { month: string; revenue: number | null; guests: number | null; rooms_sold: number | null }
 interface ActRow { month: string; item_code: string; item_name: string; actual: number | null }
-interface ManualRow { month: string; deemed_overtime_excess_pay: number | null; dispatch_work_hours: number | null }
+// T13: みなし残業超残業代・派遣時間は手入力(dim_productivity_manual)から
+// 勤怠×賃金の自動算出(mart_labor_cost_monthly)へ切替済み
+interface LaborCostRow { month: string; deemed_ot_excess_pay: number | null; spot_hours: number | null }
 
 // 人件費 = 以下のitem_name合計（+ 外注費（人材） or 実績合算「外注費」）
 const LABOR_NAMES = ['給料手当', '賞与', '通勤費', '法定福利費', '福利厚生費', '雑給']
@@ -34,7 +36,7 @@ type Agg = {
   workHours: number; overtime: number          // 勤怠（労働月のみ）
   staffSum: number; parttimeSum: number; n: number
   pRevenue: number; pGross: number; pRooms: number; pGuests: number // 労働月のみ（mart由来）
-  dispatchHours: number; deemedPay: number      // 手動（全月）
+  dispatchHours: number; deemedPay: number      // 勤怠×賃金から自動算出(mart_labor_cost_monthly)
 }
 const ZERO: Agg = { laborCost: 0, plSales: 0, workHours: 0, overtime: 0, staffSum: 0, parttimeSum: 0, n: 0, pRevenue: 0, pGross: 0, pRooms: 0, pGuests: 0, dispatchHours: 0, deemedPay: 0 }
 
@@ -95,10 +97,11 @@ export default function ProductivityPage() {
   const [labor, setLabor] = useState<LaborRow[]>([])
   const [kpi, setKpi] = useState<KpiRow[]>([])
   const [actual, setActual] = useState<ActRow[]>([])
-  const [manual, setManual] = useState<ManualRow[]>([])
+  const [laborCost, setLaborCost] = useState<LaborCostRow[]>([])
   const [fy, setFy] = useState<number | null>(null)
   const [month, setMonth] = useState('')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     if (!current) return
@@ -107,20 +110,20 @@ export default function ProductivityPage() {
       fetchAll(() => supabase.from('mart_labor_monthly').select('month, staff_count_monthly, parttime_count, total_work_hours, total_overtime_hours').eq('facility', current)),
       fetchAll(() => supabase.from('mart_monthly_kpi').select('month, revenue, guests, rooms_sold').eq('facility', current)),
       fetchAll(() => supabase.from('actual_monthly').select('month, item_code, item_name, actual').eq('facility', current).order('id')),
-      supabase.from('dim_productivity_manual').select('month, deemed_overtime_excess_pay, dispatch_work_hours').eq('facility', current).then((r) => r),
+      supabase.from('mart_labor_cost_monthly').select('month, deemed_ot_excess_pay, spot_hours').eq('facility', current).then((r) => r),
     ]).then(([l, k, a, m]: any[]) => {
       setLabor((l as LaborRow[]) ?? [])
       setKpi((k as KpiRow[]) ?? [])
       setActual((a as ActRow[]) ?? [])
-      setManual(((m?.data as ManualRow[]) ?? []))
-      setLoading(false)
-    })
+      setLaborCost(((m?.data as LaborCostRow[]) ?? []))
+    }).catch((e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false))
   }, [current])
 
   // ルックアップ
   const laborMap = useMemo(() => { const o: Record<string, LaborRow> = {}; labor.forEach((r) => { o[r.month] = r }); return o }, [labor])
   const kpiMap = useMemo(() => { const o: Record<string, KpiRow> = {}; kpi.forEach((r) => { o[r.month] = r }); return o }, [kpi])
-  const manualMap = useMemo(() => { const o: Record<string, ManualRow> = {}; manual.forEach((r) => { o[r.month] = r }); return o }, [manual])
+  const costMap = useMemo(() => { const o: Record<string, LaborCostRow> = {}; laborCost.forEach((r) => { o[r.month] = r }); return o }, [laborCost])
   // actual: month → {byName, byCode}
   const actMap = useMemo(() => {
     const o: Record<string, { name: Record<string, number>; code: Record<string, number> }> = {}
@@ -155,9 +158,9 @@ export default function ProductivityPage() {
       a.pRooms = km?.rooms_sold ?? 0
       a.pGuests = km?.guests ?? 0
     }
-    const mm = manualMap[ym]
-    a.dispatchHours = mm?.dispatch_work_hours ?? 0
-    a.deemedPay = mm?.deemed_overtime_excess_pay ?? 0
+    const cm = costMap[ym]  // T13: 勤怠×賃金からの自動算出値
+    a.dispatchHours = cm?.spot_hours ?? 0
+    a.deemedPay = cm?.deemed_ot_excess_pay ?? 0
     return a
   }
 
@@ -232,7 +235,7 @@ export default function ProductivityPage() {
         </div>
       </div>
 
-      {loading ? <Loading /> : allMonths.length === 0 ? (
+      {loading ? <Loading /> : loadError ? <LoadError message={loadError} /> : allMonths.length === 0 ? (
         <Empty message="データがありません。勤怠CSV・PL・売上を取り込んでください。" />
       ) : (
         <>

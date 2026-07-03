@@ -5,7 +5,7 @@ import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { fmtNum, pct } from '@/lib/ui'
-import { Loading, Empty } from '@/components/page-bits'
+import { Loading, Empty, LoadError } from '@/components/page-bits'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface BRow { fiscal_year: string; month: string; category: string | null; item_code: string; item_name: string; amount: number | null; sort_order: number | null }
@@ -120,6 +120,7 @@ export default function YojitsuPage() {
   const [yCmp, setYCmp] = useState<'予算差異' | '予算比' | '昨対比'>('予算差異')
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
 
   const totalRooms = currentFacility?.total_rooms ?? null
 
@@ -140,8 +141,8 @@ export default function YojitsuPage() {
       const m: Record<string, number> = {}
       ;((od?.data as { month: string; days: number | null }[]) ?? []).forEach((r) => { if (r.days != null) m[r.month] = r.days })
       setOpDays(m)
-      setLoading(false)
-    })
+    }).catch((e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false))
   }, [current])
 
   const fys = useMemo(() => [...new Set(budget.map((b) => b.fiscal_year))].sort().reverse(), [budget])
@@ -328,7 +329,7 @@ export default function YojitsuPage() {
         </div>
       </div>
 
-      {loading ? <Loading /> : budget.length === 0 ? (
+      {loading ? <Loading /> : loadError ? <LoadError message={loadError} /> : budget.length === 0 ? (
         <Empty message="予算データが未取込です。計画スプレッドシートから取り込んでください。" />
       ) : (
         <>

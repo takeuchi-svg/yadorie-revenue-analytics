@@ -5,7 +5,7 @@ import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { fmtNum, fmtYen, pct } from '@/lib/ui'
-import { Loading, Empty } from '@/components/page-bits'
+import { Loading, Empty, LoadError } from '@/components/page-bits'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 
 const DOW = ['日', '月', '火', '水', '木', '金', '土']
@@ -69,6 +69,7 @@ export default function DailyPage() {
   const [to, setTo] = useState('')
   const [rates, setRates] = useState<RateRow[]>([])
   const [loadingBase, setLoadingBase] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [loadingRange, setLoadingRange] = useState(false)
 
   // KPI 表示制御
@@ -116,8 +117,8 @@ export default function DailyPage() {
         const latest = dates[dates.length - 1].slice(0, 7)
         setFrom(`${latest}-01`); setTo(lastDayOfMonth(latest))
       }
-      setLoadingBase(false)
-    })
+    }).catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoadingBase(false))
   }, [current, totalRooms])
 
   // 2) 範囲のレートランク（全件ページネーション）
@@ -126,7 +127,9 @@ export default function DailyPage() {
     setLoadingRange(true)
     fetchAll(() => supabase.from('raw_rate_snapshot').select('snapshot_date, stay_date, rate_rank')
       .eq('facility', current).eq('scope', 'total').gte('stay_date', from).lte('stay_date', to).order('id'))
-      .then((data) => { setRates(data as RateRow[]); setLoadingRange(false) })
+      .then((data) => { setRates(data as RateRow[]) })
+      .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoadingRange(false))
   }, [current, from, to])
 
   const metricsFor = useMemo(() => (d: string): Metrics | null => {
@@ -223,7 +226,7 @@ export default function DailyPage() {
         </div>
       </div>
 
-      {loadingBase ? <Loading /> : Object.keys(soldMap).length === 0 ? (
+      {loadingBase ? <Loading /> : loadError ? <LoadError message={loadError} /> : Object.keys(soldMap).length === 0 ? (
         <Empty message="販売数集計表を /upload からアップロードしてください" />
       ) : !model || model.rows.length === 0 ? (
         <p style={{ color: 'var(--text-dim)' }}>範囲を選択してください</p>

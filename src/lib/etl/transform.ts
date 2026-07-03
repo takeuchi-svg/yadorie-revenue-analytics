@@ -344,20 +344,30 @@ export function transformByType(
   facility: string,
   fileName: string
 ): UploadPayload {
-  switch (type) {
-    case 'staysee_reservation':
-      return transformReservation(rows, facility, fileName)
-    case 'staysee_basic':
-      return transformBasicProduct(rows, facility, fileName)
-    case 'staysee_other':
-      return transformOtherProduct(rows, facility, fileName)
-    case 'staysee_payment':
-      return transformPayment(rows, facility, fileName)
-    case 'staysee_room_sales':
-      return transformRoomSales(rows, facility, fileName)
-    case 'lincoln':
-      return transformLincoln(rows, facility, fileName)
-    default:
-      throw new Error(`Unknown file type: ${type}`)
+  const dispatch = (): UploadPayload => {
+    switch (type) {
+      case 'staysee_reservation':
+        return transformReservation(rows, facility, fileName)
+      case 'staysee_basic':
+        return transformBasicProduct(rows, facility, fileName)
+      case 'staysee_other':
+        return transformOtherProduct(rows, facility, fileName)
+      case 'staysee_payment':
+        return transformPayment(rows, facility, fileName)
+      case 'staysee_room_sales':
+        return transformRoomSales(rows, facility, fileName)
+      case 'lincoln':
+        return transformLincoln(rows, facility, fileName)
+      default:
+        throw new Error(`Unknown file type: ${type}`)
+    }
   }
+  const payload = dispatch()
+  // スキップ行の可視化: 入力行数−投入行数（読めない行のsilent dropを検知させる）
+  // room_sales はマトリクス形式（行→セル展開）のため件数比較の対象外
+  if (type !== 'staysee_room_sales') {
+    const skipped = rows.length - payload.data.length
+    if (skipped > 0) payload.skipped = skipped
+  }
+  return payload
 }

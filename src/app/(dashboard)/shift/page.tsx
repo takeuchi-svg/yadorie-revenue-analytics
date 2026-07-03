@@ -362,7 +362,7 @@ export default function ShiftPage() {
 
           <div className="grid grid-cols-3 gap-3 mt-4">
             <div className="card p-4"><div className="text-xs" style={{ color: 'var(--text-dim)' }}>月次 労働時間 合計</div><div className="text-xl font-bold">{fmtNum(summary.totalH)} h</div></div>
-            <div className="card p-4"><div className="text-xs" style={{ color: 'var(--text-dim)' }}>月次 人件費 合計（計画）</div><div className="text-xl font-bold">{fmtYen(summary.totalCost)}</div></div>
+            <div className="card p-4"><div className="text-xs" style={{ color: 'var(--text-dim)' }}>月次 人件費 合計（計画）</div><div className="text-xl font-bold">{staff.some((s) => s.wage_type != null || s.hourly_wage != null || s.monthly_salary != null) ? fmtYen(summary.totalCost) : '-'}</div>{!staff.some((s) => s.wage_type != null || s.hourly_wage != null || s.monthly_salary != null) && <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-dim)' }}>給与閲覧権限または賃金設定が必要</div>}</div>
             <div className="card p-4"><div className="text-xs" style={{ color: 'var(--text-dim)' }}>うち 派遣・その他 時間</div><div className="text-xl font-bold">{fmtNum(summary.spotH)} h</div></div>
           </div>
 

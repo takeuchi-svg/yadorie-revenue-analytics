@@ -9,7 +9,7 @@ import {
   PieChart, Pie, Cell, Legend,
 } from 'recharts'
 import { fmtYen, fmtNum, pct, CHART_AXIS, chartTooltip, channelColor } from '@/lib/ui'
-import { PageHeader, Kpi, Loading, Empty } from '@/components/page-bits'
+import { PageHeader, Kpi, Loading, Empty, LoadError } from '@/components/page-bits'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface OP { item_name: string | null; category: string | null; total: number | null; quantity: number | null; source_month: string | null; status: string | null }
@@ -22,18 +22,19 @@ export default function FbPage() {
   const [pay, setPay] = useState<Pay[]>([])
   const [month, setMonth] = useState('')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     if (!current) return
-    setLoading(true)
+    setLoading(true); setLoadError('')
     Promise.all([
       fetchAll(() => supabase.from('raw_other_product').select('item_name, category, total, quantity, source_month, status').eq('facility', current).order('id')),
       fetchAll(() => supabase.from('raw_payment').select('payment_method, amount, source_month').eq('facility', current).order('id')),
     ]).then(([o, p]) => {
       setOp((o as OP[]) ?? [])
       setPay((p as Pay[]) ?? [])
-      setLoading(false)
-    })
+    }).catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false))
   }, [current])
 
   const months = useMemo(() => [...new Set(op.map((r) => r.source_month).filter(Boolean))].sort().reverse() as string[], [op])
@@ -64,7 +65,7 @@ export default function FbPage() {
   return (
     <div className="p-6">
       <PageHeader title="料飲分析" subtitle={currentFacility?.name ?? current} month={month} months={months} onMonth={setMonth} />
-      {loading ? <Loading /> : op.length === 0 ? (
+      {loading ? <Loading /> : loadError ? <LoadError message={loadError} /> : op.length === 0 ? (
         <Empty message="その他商品情報を /upload からアップロードしてください" />
       ) : (
         <>

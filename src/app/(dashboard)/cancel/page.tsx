@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts'
 import { fmtNum, fmtYen, pct, CHART_AXIS, chartTooltip } from '@/lib/ui'
-import { Loading, Empty } from '@/components/page-bits'
+import { Loading, Empty, LoadError } from '@/components/page-bits'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface Ev { event_type: string; checkin: string | null; received_at: string | null; amount_gross: number | null; rooms: number | null; guests_total: number | null }
@@ -31,12 +31,15 @@ export default function CancelPage() {
   const [events, setEvents] = useState<Ev[]>([])
   const [month, setMonth] = useState('all')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
 
   useEffect(() => {
     if (!current) return
-    setLoading(true)
+    setLoading(true); setLoadError('')
     fetchAll(() => supabase.from('raw_booking_event').select('event_type, checkin, received_at, amount_gross, rooms, guests_total').eq('facility', current).order('id'))
-      .then((d) => { setEvents(d as Ev[]); setLoading(false) })
+      .then((d) => { setEvents(d as Ev[]) })
+      .catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false))
   }, [current])
 
   const months = useMemo(() => [...new Set(events.map((e) => e.checkin?.slice(0, 7)).filter(Boolean))].sort().reverse() as string[], [events])
@@ -98,7 +101,7 @@ export default function CancelPage() {
         </select>
       </div>
 
-      {loading ? <Loading /> : events.length === 0 ? (
+      {loading ? <Loading /> : loadError ? <LoadError message={loadError} /> : events.length === 0 ? (
         <Empty message="Lincoln予約検索CSVを /upload からアップロードしてください" />
       ) : (
         <>

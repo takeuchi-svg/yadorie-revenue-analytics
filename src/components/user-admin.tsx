@@ -5,7 +5,7 @@ import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-interface UserRow { user_id: string; email: string; role: string; facilities: string[] }
+interface UserRow { user_id: string; email: string; role: string; can_view_wage?: boolean; facilities: string[] }
 
 export default function UserAdmin() {
   const { facilities } = useFacility()
@@ -96,6 +96,13 @@ export default function UserAdmin() {
                 <option value="member">一般</option>
                 <option value="admin">管理者</option>
               </select>
+              {u.role !== 'admin' && (
+                <label className="flex items-center gap-1 text-xs cursor-pointer" style={{ color: 'var(--text-dim)' }} title="ON: 割当施設の従業員の賃金・個人別人件費を閲覧/編集できる">
+                  <input type="checkbox" checked={!!u.can_view_wage}
+                    onChange={async (e) => { await call('setWagePerm', { user_id: u.user_id, can_view_wage: e.target.checked }); reload() }} />
+                  給与閲覧
+                </label>
+              )}
               <button onClick={async () => { if (confirm(`${u.email} を削除しますか？`)) { await call('delete', { user_id: u.user_id }); reload() } }}
                 className="ml-auto text-xs px-2 py-1 rounded-md" style={{ color: 'var(--red)', border: '1px solid var(--border)' }}>削除</button>
             </div>

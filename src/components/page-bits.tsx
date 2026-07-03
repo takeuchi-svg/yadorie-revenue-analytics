@@ -48,6 +48,17 @@ export function Empty({ message }: { message?: string }) {
   )
 }
 
+// 取得エラー表示（「データ未登録」と区別する。再試行はリロードで）
+export function LoadError({ message }: { message: string }) {
+  return (
+    <div className="card p-6 text-center" style={{ borderColor: 'var(--red)' }}>
+      <p className="font-medium" style={{ color: 'var(--red)' }}>データ取得エラー</p>
+      <p className="text-sm mt-1" style={{ color: 'var(--text-dim)' }}>{message}</p>
+      <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>通信状況を確認し、ページを再読み込みしてください（データ未登録とは異なります）。</p>
+    </div>
+  )
+}
+
 export function NotConnected({ message }: { message: string }) {
   return (
     <div className="card p-6 text-center" style={{ borderColor: 'var(--border)' }}>

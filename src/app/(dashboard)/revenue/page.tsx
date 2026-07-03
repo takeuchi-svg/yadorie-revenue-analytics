@@ -9,7 +9,7 @@ import {
   ComposedChart, Line, Legend,
 } from 'recharts'
 import { fmtYen, fmtNum, pct, CHART_AXIS, chartTooltip, channelColor } from '@/lib/ui'
-import { Loading, Empty } from '@/components/page-bits'
+import { Loading, Empty, LoadError } from '@/components/page-bits'
 
 const TABS = ['チャネル', '客室', '居住地', 'プラン', '曜日', '喫食', 'GS', 'ADR帯'] as const
 type Tab = (typeof TABS)[number]
@@ -38,6 +38,7 @@ export default function RevenuePage() {
   const [basis, setBasis] = useState<'ci' | 'booking'>('ci')
   const [month, setMonth] = useState('')
   const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
   const [data, setData] = useState<Record<string, any[]>>({})
   const [events, setEvents] = useState<Ev[]>([])
   const [resv, setResv] = useState<Resv[]>([])
@@ -64,8 +65,8 @@ export default function RevenuePage() {
       const cap: Record<string, number> = {}
       ;(rsType as any[]).forEach((r) => { cap[r.room_type] = Math.max(cap[r.room_type] || 0, Number(r.sold) || 0) })
       setCapByType(cap)
-      setLoading(false)
-    })
+    }).catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false))
   }, [current])
 
   const isLincoln = LINCOLN_TABS.includes(tab)
@@ -141,7 +142,7 @@ export default function RevenuePage() {
           : 'CI日（チェックイン月）ベース・PMS予約データ（このタブは日付基準の切替なし）'}
       </p>
 
-      {loading ? <Loading /> : (
+      {loading ? <Loading /> : loadError ? <LoadError message={loadError} /> : (
         <>
           {tab === 'チャネル' && <ChannelTab rows={pmsRows(data.channel, month, 'channel')} />}
           {tab === '客室' && <RoomTab rooms={pmsRows(data.room, month, 'room')} types={pmsRows(data.rtype, month, 'room_type')} typeMonthly={data.rtype ?? []} capByType={capByType} />}

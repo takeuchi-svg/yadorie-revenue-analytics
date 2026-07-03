@@ -31,7 +31,10 @@
 
 ## 人件費・残業
 - 時給者: `実働時間×hourly_wage`。月給者: `monthly_salary + max(0, 月労働−contracted_monthly_hours−deemed_ot_hours)×(monthly_salary/contracted_monthly_hours×1.25)`。スポットは時給扱い。
-- **割増は1.25のみ**（深夜・法定休日割増は実装しない）。賃金はv1では `dim_staff` の現行値（履歴化はv2）。
+- **割増は1.25のみ**（深夜・法定休日割増は実装しない）。賃金の履歴化はv2。
+- **賃金は `dim_staff_wage`（別テーブル）**: 給与閲覧権限（`app_user.can_view_wage`、adminは常に可）を行RLSで強制するため、賃金列は dim_staff から分離済み（scripts/sql/wage_permission.sql）。dim_staff には is_spot 等の非機微情報のみ。
+- 月給の base は**本務施設(home_facility)にのみ計上**、残業判定は従業員×月の全施設合計時間（クロス施設の二重計上防止）。
+- 個人別人件費ビュー(mart_labor_cost_actual/plan)=給与権限者のみ。施設×月合計(mart_labor_cost_monthly)=施設メンバー可（invoker=off・ビュー内ゲート。security_invoker一括設定から除外すること）。
 
 ## スポット（派遣/タイミー）
 - `dim_staff` に `is_spot=true`＋`hourly_wage` で登録（KOTコードなし）。実働はシフト画面から手入力→`raw_attendance_daily`(`source='manual'`)。**スポット判定は `dim_staff.is_spot`**（attendanceにis_spot列は持たない）。既存KOT行は `source='KOT'`。

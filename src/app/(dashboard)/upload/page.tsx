@@ -16,7 +16,7 @@ import { parseAttendanceHtml } from '@/lib/etl/attendance-parser'
 import { supabase } from '@/lib/supabase/client'
 
 interface PlEntry { name: string; fy: string; rows: number; status: 'processing' | 'done' | 'error'; error?: string }
-interface AttEntry { name: string; workDate: string; rows: number; staff: number; status: 'processing' | 'done' | 'error'; error?: string }
+interface AttEntry { name: string; workDate: string; rows: number; staff: number; skipped?: number; status: 'processing' | 'done' | 'error'; error?: string }
 
 interface FileEntry {
   file: File
@@ -62,11 +62,12 @@ export default function UploadPage() {
         }
         // 日次勤怠 upsert（未マッピング施設=nullの行は除外。同日同施設は上書き）
         const attPayload = rows.filter((r) => r.work_facility != null)
+        const unmapped = rows.length - attPayload.length
         for (let i = 0; i < attPayload.length; i += 500) {
           const { error } = await supabase.from('raw_attendance_daily').upsert(attPayload.slice(i, i + 500), { onConflict: 'staff_code,work_date,work_facility' })
           if (error) throw error
         }
-        upd({ workDate, rows: attPayload.length, staff: staff.length, status: 'done' })
+        upd({ workDate, rows: attPayload.length, staff: staff.length, skipped: unmapped, status: 'done' })
       } catch (err) {
         upd({ status: 'error', error: err instanceof Error ? err.message : String(err) })
       }
@@ -248,9 +249,11 @@ export default function UploadPage() {
               }
             } else {
               const sourceMonth = (data[0] as Record<string, unknown>).source_month as string
-              if (sourceMonth) {
-                await supabase.from(table).delete().eq('facility', facility).eq('source_month', sourceMonth)
+              if (!sourceMonth) {
+                // source_month はファイル名から抽出。無いと既存分を消せず再取込のたびに明細が倍加するため中止する
+                throw new Error('ファイル名から対象年月を特定できないため取込を中止しました（重複防止）。ファイル名に「2026_05」等の年月を含めてください')
               }
+              await supabase.from(table).delete().eq('facility', facility).eq('source_month', sourceMonth)
             }
           }
 
@@ -270,7 +273,7 @@ export default function UploadPage() {
               totalInserted += count ?? batch.length
             }
           }
-          results.push({ table, inserted: totalInserted })
+          results.push({ table, inserted: totalInserted, skipped: payload.skipped })
         } catch (err) {
           const message = err instanceof Error ? err.message
             : (err && typeof err === 'object' && 'message' in err) ? String((err as { message: unknown }).message)
@@ -400,6 +403,11 @@ export default function UploadPage() {
                       {entry.result && (
                         <span>{entry.result.inserted}件 投入</span>
                       )}
+                      {entry.result?.skipped ? (
+                        <span style={{ color: 'var(--yellow)' }} title="ヘッダー不一致・必須項目欠落等で変換できなかった行。件数が多い場合はフォーマットを確認してください">
+                          ⚠ {entry.result.skipped}行スキップ
+                        </span>
+                      ) : null}
                       {entry.error && (
                         <span className="truncate" style={{ color: 'var(--red)' }}>{entry.error}</span>
                       )}
@@ -520,7 +528,10 @@ export default function UploadPage() {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{p.name}</p>
                       <div className="text-xs mt-0.5" style={{ color: 'var(--text-dim)' }}>
-                        {p.status === 'done' && `${p.workDate} ・ ${p.rows}件投入 ・ 従業員${p.staff}名`}
+                        {p.status === 'done' && (<>
+                          {p.workDate} ・ {p.rows}件投入 ・ 従業員{p.staff}名
+                          {p.skipped ? <span style={{ color: 'var(--yellow)' }}>　⚠ 未マッピング所属 {p.skipped}行スキップ（新施設/新部署の可能性。要マッピング追加）</span> : null}
+                        </>)}
                         {p.status === 'error' && <span style={{ color: 'var(--red)' }}>{p.error}</span>}
                         {p.status === 'processing' && '処理中...'}
                       </div>

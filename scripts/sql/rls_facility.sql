@@ -121,10 +121,12 @@ begin
 end $$;
 
 -- ---- mart_ ビューを security_invoker 化（閲覧者の権限でRLS評価） ----
+--   mart_labor_cost_monthly は除外（wage_permission.sql でビュー内に自前ゲートを持つため invoker=off が正）
 do $$
 declare v record;
 begin
-  for v in select viewname from pg_views where schemaname = 'public' and viewname like 'mart_%' loop
+  for v in select viewname from pg_views where schemaname = 'public'
+             and viewname like 'mart_%' and viewname <> 'mart_labor_cost_monthly' loop
     execute format('alter view %I set (security_invoker = on)', v.viewname);
   end loop;
 end $$;

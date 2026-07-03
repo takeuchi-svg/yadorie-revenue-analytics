@@ -18,12 +18,13 @@ interface StaffWage {
   staff_code: string
   name: string | null
   employment_type: string | null
+  is_spot: boolean | null
+  // 賃金（dim_staff_wage。給与閲覧権限がないと読めない）
   wage_type: string | null
   hourly_wage: number | null
   monthly_salary: number | null
   deemed_ot_hours: number | null
   contracted_monthly_hours: number | null
-  is_spot: boolean | null
 }
 
 const OTA_LIST = ['楽天トラベル', 'じゃらん', '一休', 'Booking.com', 'Expedia', '自社HP'] as const
@@ -59,13 +60,12 @@ export default function SettingsPage() {
   const [opDays, setOpDays] = useState<Record<string, number | ''>>({})
   // 従業員 賃金設定（シフト・労務）
   const [staffWages, setStaffWages] = useState<StaffWage[]>([])
+  const [wagePermitted, setWagePermitted] = useState(true)
   // 生産性手動入力
   const [prodMonth, setProdMonth] = useState(() => {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   })
-  const [deemedPay, setDeemedPay] = useState<number | ''>('')
-  const [dispatchHours, setDispatchHours] = useState<number | ''>('')
   const [dispatchNotes, setDispatchNotes] = useState('')
 
   useEffect(() => {
@@ -127,25 +127,49 @@ export default function SettingsPage() {
     setSaving(false)
   }
 
-  // 生産性手動入力: 選択施設×月の値を読み込み
+  // 生産性メモ: 選択施設×月の値を読み込み
+  // ※「みなし残業超の残業代」「派遣・その他の労働時間」の手入力はT13で廃止
+  //   （勤怠・賃金から mart_labor_cost_monthly で自動算出。二重計上防止のため入力欄は撤去）
   useEffect(() => {
     if (!current || !prodMonth) return
-    supabase.from('dim_productivity_manual').select('*').eq('facility', current).eq('month', prodMonth).maybeSingle()
+    supabase.from('dim_productivity_manual').select('dispatch_other_notes').eq('facility', current).eq('month', prodMonth).maybeSingle()
       .then(({ data }) => {
-        const r = data as { deemed_overtime_excess_pay: number | null; dispatch_work_hours: number | null; dispatch_other_notes: string | null } | null
-        setDeemedPay(r?.deemed_overtime_excess_pay ?? '')
-        setDispatchHours(r?.dispatch_work_hours ?? '')
-        setDispatchNotes(r?.dispatch_other_notes ?? '')
+        setDispatchNotes((data as { dispatch_other_notes: string | null } | null)?.dispatch_other_notes ?? '')
       })
   }, [current, prodMonth])
 
-  // 従業員 賃金設定: 選択施設(home_facility)の従業員を読み込み
+  // 従業員 賃金設定: 従業員(dim_staff) + 賃金(dim_staff_wage・給与権限者のみ読める) をマージ
   useEffect(() => {
     if (!current) return
-    supabase.from('dim_staff')
-      .select('staff_code, name, employment_type, wage_type, hourly_wage, monthly_salary, deemed_ot_hours, contracted_monthly_hours, is_spot')
-      .eq('home_facility', current).order('staff_code')
-      .then(({ data }) => setStaffWages(((data as StaffWage[]) ?? [])))
+    ;(async () => {
+      // 自分の給与閲覧権限（app_userは本人行のみ読める）
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: au } = await supabase.from('app_user').select('role, can_view_wage').eq('user_id', user.id).maybeSingle()
+          setWagePermitted(au?.role === 'admin' || !!au?.can_view_wage)
+        }
+      } catch { /* 判定不能時はUI表示のみ許可（DB側RLSが実防御） */ }
+      const { data: staff } = await supabase.from('dim_staff')
+        .select('staff_code, name, employment_type, is_spot')
+        .eq('home_facility', current).order('staff_code')
+      const codes = ((staff as { staff_code: string }[]) ?? []).map((s) => s.staff_code)
+      const wageMap: Record<string, Partial<StaffWage>> = {}
+      if (codes.length) {
+        const { data: wages } = await supabase.from('dim_staff_wage')
+          .select('staff_code, wage_type, hourly_wage, monthly_salary, deemed_ot_hours, contracted_monthly_hours')
+          .in('staff_code', codes)
+        ;((wages as StaffWage[]) ?? []).forEach((w) => { wageMap[w.staff_code] = w })
+      }
+      setStaffWages((((staff as StaffWage[]) ?? [])).map((s) => ({
+        ...s,
+        wage_type: wageMap[s.staff_code]?.wage_type ?? null,
+        hourly_wage: wageMap[s.staff_code]?.hourly_wage ?? null,
+        monthly_salary: wageMap[s.staff_code]?.monthly_salary ?? null,
+        deemed_ot_hours: wageMap[s.staff_code]?.deemed_ot_hours ?? null,
+        contracted_monthly_hours: wageMap[s.staff_code]?.contracted_monthly_hours ?? null,
+      })))
+    })()
   }, [current])
 
   const updateWage = (code: string, patch: Partial<StaffWage>) =>
@@ -153,18 +177,21 @@ export default function SettingsPage() {
 
   const saveStaffWages = async () => {
     setSaving(true); setMessage('')
-    const rows = staffWages.map((s) => ({
+    // 賃金 → dim_staff_wage / スポットフラグ → dim_staff
+    const wageRows = staffWages.map((s) => ({
       staff_code: s.staff_code,
       wage_type: s.wage_type || null,
       hourly_wage: s.hourly_wage,
       monthly_salary: s.monthly_salary,
       deemed_ot_hours: s.deemed_ot_hours ?? 0,
       contracted_monthly_hours: s.contracted_monthly_hours,
-      is_spot: !!s.is_spot,
       updated_at: new Date().toISOString(),
     }))
-    const { error } = await supabase.from('dim_staff').upsert(rows, { onConflict: 'staff_code' })
-    setMessage(error ? `Error: ${error.message}` : `賃金設定を保存しました（${rows.length}名）`)
+    const spotRows = staffWages.map((s) => ({ staff_code: s.staff_code, is_spot: !!s.is_spot, updated_at: new Date().toISOString() }))
+    const { error } = await supabase.from('dim_staff_wage').upsert(wageRows, { onConflict: 'staff_code' })
+    const { error: e2 } = await supabase.from('dim_staff').upsert(spotRows, { onConflict: 'staff_code' })
+    const err = error ?? e2
+    setMessage(err ? `Error: ${err.message}` : `賃金設定を保存しました（${wageRows.length}名）`)
     setSaving(false)
   }
 
@@ -172,12 +199,10 @@ export default function SettingsPage() {
     setSaving(true); setMessage('')
     const { error } = await supabase.from('dim_productivity_manual').upsert({
       facility: current, month: prodMonth,
-      deemed_overtime_excess_pay: deemedPay === '' ? 0 : Number(deemedPay),
-      dispatch_work_hours: dispatchHours === '' ? 0 : Number(dispatchHours),
       dispatch_other_notes: dispatchNotes || null,
       updated_at: new Date().toISOString(),
     }, { onConflict: 'facility,month' })
-    setMessage(error ? `Error: ${error.message}` : '生産性手動入力を保存しました')
+    setMessage(error ? `Error: ${error.message}` : 'メモを保存しました')
     setSaving(false)
   }
 
@@ -351,6 +376,11 @@ export default function SettingsPage() {
           人件費・残業の計算に使用（{currentFacility?.name ?? current} 所属 {staffWages.length}名）。
           <strong>月給者</strong>は月所定・見込み残業が必須（残業単価=月給÷月所定×1.25、見込み超過分のみ残業代）。時給者は時給のみ。
         </p>
+        {!wagePermitted && (
+          <p className="text-sm mb-3 p-3 rounded-md" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>
+            給与閲覧権限がないため賃金は表示されません（管理者がユーザー管理の「給与閲覧」で付与できます）。
+          </p>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm whitespace-nowrap">
             <thead>
@@ -413,33 +443,23 @@ export default function SettingsPage() {
         </div>
       </section>
 
-      {/* 生産性手動入力 */}
+      {/* 生産性メモ（旧: 手動入力。2項目はT13で自動算出に切替済み） */}
       <section className="card p-6 mt-6">
         <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-          <h2 className="text-lg font-semibold">生産性 手動入力（月別）</h2>
+          <h2 className="text-lg font-semibold">生産性 メモ（月別）</h2>
           <div className="flex items-center gap-2">
             <input type="month" className="field px-3 py-1.5 text-sm" value={prodMonth} onChange={(e) => setProdMonth(e.target.value)} />
             <button onClick={saveProd} disabled={saving}
               className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50">保存</button>
           </div>
         </div>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>生産性ページのKPIに反映します（勤怠CSVからは算出できない指標）。</p>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>みなし残業超の残業代（円）</label>
-            <input type="number" min={0} className="field px-3 py-2 text-sm w-full"
-              value={deemedPay} onChange={(e) => setDeemedPay(e.target.value === '' ? '' : Number(e.target.value))} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>派遣・その他の労働時間（時間）</label>
-            <input type="number" min={0} step="0.1" className="field px-3 py-2 text-sm w-full"
-              value={dispatchHours} onChange={(e) => setDispatchHours(e.target.value === '' ? '' : Number(e.target.value))} />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>備考</label>
-            <input type="text" className="field px-3 py-2 text-sm w-full"
-              value={dispatchNotes} onChange={(e) => setDispatchNotes(e.target.value)} />
-          </div>
+        <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>
+          「みなし残業超の残業代」「派遣・その他の労働時間」は、勤怠実績と賃金設定から<strong>自動算出</strong>に切り替わりました（手入力は廃止・二重計上防止）。ここでは補足メモのみ残せます。
+        </p>
+        <div>
+          <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>備考（派遣・その他に関するメモ）</label>
+          <input type="text" className="field px-3 py-2 text-sm w-full"
+            value={dispatchNotes} onChange={(e) => setDispatchNotes(e.target.value)} />
         </div>
       </section>
 

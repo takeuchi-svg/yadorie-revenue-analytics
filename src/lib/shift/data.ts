@@ -49,9 +49,9 @@ export interface StaffLite {
   staff_code: string
   name: string | null
   employment_type: string | null
-  wage_type: string | null
   is_spot: boolean | null
-  // 月次人件費合計のライブ計算用（個人別金額はUI非表示）
+  // 賃金（dim_staff_wage。給与閲覧権限がないユーザーには null のまま＝人件費タイルは「-」表示）
+  wage_type: string | null
   hourly_wage: number | null
   monthly_salary: number | null
   deemed_ot_hours: number | null
@@ -79,9 +79,21 @@ export async function loadMasters(facility: string): Promise<{ roles: Role[]; pa
 // 施設所属の従業員（フラット表示用）
 export async function loadStaff(facility: string): Promise<StaffLite[]> {
   const { data } = await supabase.from('dim_staff')
-    .select('staff_code, name, employment_type, wage_type, is_spot, hourly_wage, monthly_salary, deemed_ot_hours, contracted_monthly_hours')
+    .select('staff_code, name, employment_type, is_spot')
     .eq('home_facility', facility).order('staff_code')
-  return (data as StaffLite[]) ?? []
+  const staff = ((data as StaffLite[]) ?? []).map((s) => ({
+    ...s, wage_type: null, hourly_wage: null, monthly_salary: null, deemed_ot_hours: null, contracted_monthly_hours: null,
+  }))
+  // 賃金は別テーブル（給与閲覧権限がないとRLSで0行＝nullのまま）
+  if (staff.length) {
+    const { data: wages } = await supabase.from('dim_staff_wage')
+      .select('staff_code, wage_type, hourly_wage, monthly_salary, deemed_ot_hours, contracted_monthly_hours')
+      .in('staff_code', staff.map((s) => s.staff_code))
+    const m: Record<string, Partial<StaffLite>> = {}
+    ;((wages as StaffLite[]) ?? []).forEach((w) => { m[w.staff_code] = w })
+    for (const s of staff) Object.assign(s, m[s.staff_code] ?? {})
+  }
+  return staff
 }
 
 // 施設×月のシフト計画・セグメント・稼働前提を一括ロード
@@ -152,15 +164,20 @@ export async function savePlanContext(facility: string, work_date: string, patch
   if (error) throw error
 }
 
-// スポット要員を dim_staff に登録（is_spot=true / 時給）。staff_code は非KOT系で自動採番
+// スポット要員を登録（dim_staff: is_spot / dim_staff_wage: 時給）。staff_code は非KOT系で自動採番
 export async function createSpotStaff(facility: string, name: string, hourlyWage: number): Promise<string> {
   const staff_code = `SP-${facility}-${Date.now().toString(36).toUpperCase()}`
   const { error } = await supabase.from('dim_staff').insert({
     staff_code, name, home_facility: facility, employment_type: 'スポット',
-    is_monthly_salary: false, wage_type: '時給', hourly_wage: hourlyWage, is_spot: true,
+    is_monthly_salary: false, is_spot: true,
     updated_at: new Date().toISOString(),
   })
   if (error) throw error
+  // 賃金はINSERTのみ施設メンバーに許可（読み返し・変更は給与閲覧権限が必要）
+  const { error: wErr } = await supabase.from('dim_staff_wage').insert({
+    staff_code, wage_type: '時給', hourly_wage: hourlyWage, updated_at: new Date().toISOString(),
+  })
+  if (wErr) throw wErr
   return staff_code
 }
 
