@@ -137,8 +137,8 @@ export default function OverviewPage() {
   const latestOcc = latest ? occByMonth[latest.month] ?? null : null
   const latestCap = latest ? capByMonth[latest.month] ?? null : null
   // REVPAR = 売上 ÷ 利用可能室数（総室数×営業日数）。予算入力なしで自動算出。
-  const latestRevpar = latest && latest.revenue && latestCap ? latest.revenue / latestCap : latest?.revpar ?? null
-  const latestBudget = latest ? budgetByMonth[latest.month] ?? latest.revenue_budget ?? null : null
+  const latestRevpar = latest && latest.revenue && latestCap ? latest.revenue / latestCap : null
+  const latestBudget = latest ? budgetByMonth[latest.month] ?? null : null
   const budgetRate = latest && latest.revenue && latestBudget
     ? latest.revenue / latestBudget : null
 
@@ -296,8 +296,8 @@ export default function OverviewPage() {
                   <th className="px-4 py-3">月</th>
                   <th className="px-4 py-3 text-right">売上</th>
                   <th className="px-4 py-3 text-right">予算</th>
-                  <th className="px-4 py-3 text-right">室数</th>
-                  <th className="px-4 py-3 text-right">客数</th>
+                  <th className="px-4 py-3 text-right">室泊数</th>
+                  <th className="px-4 py-3 text-right">人泊数</th>
                   <th className="px-4 py-3 text-right">OCC</th>
                   <th className="px-4 py-3 text-right">ADR</th>
                   <th className="px-4 py-3 text-right">客単価</th>
@@ -308,7 +308,7 @@ export default function OverviewPage() {
                   <tr key={row.month} style={{ borderTop: '1px solid var(--border)' }}>
                     <td className="px-4 py-2 font-medium">{row.month}</td>
                     <td className="px-4 py-2 text-right">{fmtNum(row.revenue)}</td>
-                    <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{fmtNum(row.revenue_budget)}</td>
+                    <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{fmtNum(budgetByMonth[row.month] ?? null)}</td>
                     <td className="px-4 py-2 text-right">{fmtNum(row.rooms_sold)}</td>
                     <td className="px-4 py-2 text-right">{fmtNum(row.guests)}</td>
                     <td className="px-4 py-2 text-right">{pct(occByMonth[row.month] ?? null)}</td>
@@ -320,7 +320,7 @@ export default function OverviewPage() {
             </table>
           </div>
           <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
-            ※ OCC（稼働率）は販売数集計表（確定販売室数）ベース。室数・売上はPMS予約ベース。
+            ※ OCC（稼働率）は販売数集計表（確定販売室数）ベース。室泊・売上はPMS予約ベース（チェックイン月に計上＝freee計上基準）。客単価は人泊単価（売上÷人泊数）。
           </p>
         </>
       )}

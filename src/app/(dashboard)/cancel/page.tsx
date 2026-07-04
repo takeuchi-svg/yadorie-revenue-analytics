@@ -29,10 +29,18 @@ export default function CancelPage() {
   const { current, currentFacility } = useFacility()
   const [month, setMonth] = useState('all')
 
-  const { data, loading, error: loadError } = useFacilityData<Ev[]>((facility) =>
-    fetchAll<Ev>(() => supabase.from('raw_booking_event')
-      .select('event_type, checkin, received_at, amount_gross, rooms, guests_total').eq('facility', facility).order('id')))
+  const { data, loading, error: loadError } = useFacilityData<Ev[]>((facility) => {
+    // 直近24ヶ月（チェックイン基準）に制限。全履歴フェッチは施設の運用年数とともに際限なく重くなるため
+    const cut = new Date(); cut.setMonth(cut.getMonth() - 24)
+    const cutoff = cut.toISOString().slice(0, 10)
+    return fetchAll<Ev>(() => supabase.from('raw_booking_event')
+      .select('event_type, checkin, received_at, amount_gross, rooms, guests_total, nights')
+      .eq('facility', facility).gte('checkin', cutoff).order('id'))
+  })
   const events = useMemo(() => data ?? [], [data])
+  // 室泊・人泊（泊数を掛ける。ADR・客単価を1泊あたりに揃える）
+  const rn = (e: Ev) => (e.rooms || 0) * Math.max(e.nights ?? 1, 1)
+  const gn = (e: Ev) => (e.guests_total || 0) * Math.max(e.nights ?? 1, 1)
 
   const months = useMemo(() => [...new Set(events.map((e) => e.checkin?.slice(0, 7)).filter(Boolean))].sort().reverse() as string[], [events])
 
@@ -41,18 +49,19 @@ export default function CancelPage() {
   const cancels = scope.filter((e) => e.event_type === '取消')
 
   const bk = bookings.length, cx = cancels.length
-  const cxlRate = bk + cx > 0 ? cx / (bk + cx) : null
+  // 取消率 = 取消 ÷ 全予約（取消された予約も予約としてカウント済み）
+  const cxlRate = bk > 0 ? cx / bk : null
   const cxlAmount = cancels.reduce((s, e) => s + (e.amount_gross || 0), 0)
   const netBookings = bk - cx
 
-  // LT分析テーブル（予約ベース） + 取消
-  const totalRooms = bookings.reduce((s, e) => s + (e.rooms || 0), 0)
+  // LT分析テーブル（予約ベース） + 取消。室数・人数は室泊・人泊
+  const totalRooms = bookings.reduce((s, e) => s + rn(e), 0)
   const ltTable = BUCKETS.map((b) => {
     const bb = bookings.filter((e) => { const d = lt(e); return d != null && d >= b.lo && d <= b.hi })
     const cc = cancels.filter((e) => { const d = lt(e); return d != null && d >= b.lo && d <= b.hi })
     const revenue = bb.reduce((s, e) => s + (e.amount_gross || 0), 0)
-    const rooms = bb.reduce((s, e) => s + (e.rooms || 0), 0)
-    const guests = bb.reduce((s, e) => s + (e.guests_total || 0), 0)
+    const rooms = bb.reduce((s, e) => s + rn(e), 0)
+    const guests = bb.reduce((s, e) => s + gn(e), 0)
     return {
       label: b.label, bookings: bb.length, revenue, rooms, guests,
       roomShare: totalRooms > 0 ? rooms / totalRooms : null,
@@ -60,7 +69,7 @@ export default function CancelPage() {
       guestUnit: guests > 0 ? Math.round(revenue / guests) : null,
       companion: rooms > 0 ? guests / rooms : null,
       cancels: cc.length,
-      cxlRate: bb.length + cc.length > 0 ? cc.length / (bb.length + cc.length) : null,
+      cxlRate: bb.length > 0 ? cc.length / bb.length : null,
     }
   })
 
@@ -128,8 +137,8 @@ export default function CancelPage() {
                   <th className="px-3 py-3">リードタイム</th>
                   <th className="px-3 py-3 text-right">予約数</th>
                   <th className="px-3 py-3 text-right">売上</th>
-                  <th className="px-3 py-3 text-right">室数</th>
-                  <th className="px-3 py-3 text-right">室数シェア</th>
+                  <th className="px-3 py-3 text-right">室泊数</th>
+                  <th className="px-3 py-3 text-right">室泊シェア</th>
                   <th className="px-3 py-3 text-right">室単価</th>
                   <th className="px-3 py-3 text-right">人泊数</th>
                   <th className="px-3 py-3 text-right">客単価</th>
@@ -158,7 +167,7 @@ export default function CancelPage() {
             </table>
           </div>
           <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
-            リードタイム=チェックイン日−予約受信日。予約・取消はLincoln通知ベース。
+            リードタイム=チェックイン日−予約受信日。予約・取消はLincoln通知ベース（直近24ヶ月）。取消率=取消÷全予約。室単価・客単価は室泊・人泊あたり。
           </p>
         </>
       )}

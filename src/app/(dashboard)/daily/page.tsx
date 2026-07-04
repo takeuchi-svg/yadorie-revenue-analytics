@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
@@ -60,6 +60,8 @@ interface RateRow { snapshot_date: string; stay_date: string; rate_rank: number 
 export default function DailyPage() {
   const { current, currentFacility } = useFacility()
   const totalRooms = currentFacility?.total_rooms ?? 0
+  const [roomsByMonth, setRoomsByMonth] = useState<Record<string, number>>({})  // 月別客室数の上書き（改装等）
+  const roomsFor = useCallback((d: string) => roomsByMonth[d.slice(0, 7)] ?? totalRooms, [roomsByMonth, totalRooms])
 
   const [soldMap, setSoldMap] = useState<Record<string, number>>({})
   const [revMap, setRevMap] = useState<Record<string, number>>({})
@@ -86,7 +88,12 @@ export default function DailyPage() {
       fetchAll(() => supabase.from('mart_occupancy_daily').select('date, rooms_sold').eq('facility', current).order('date')),
       fetchAll(() => supabase.from('raw_reservation').select('checkin, nights, revenue_settled, guests_total').eq('facility', current).eq('status', 'C/O').order('id')),
       fetchAll(() => supabase.from('budget_daily').select('date, rooms_sold, occ, companion, guests, guest_unit, room_unit, total_revenue').eq('facility', current).order('date')),
-    ]).then(([sales, res, bud]) => {
+      supabase.from('dim_operating_days').select('month, rooms').eq('facility', current).then((r) => r),
+    ]).then(([sales, res, bud, od]) => {
+      const rbm: Record<string, number> = {}
+      ;(((od as any)?.data as { month: string; rooms: number | null }[]) ?? []).forEach((r) => { if (r.rooms != null) rbm[r.month] = r.rooms })
+      setRoomsByMonth(rbm)
+      const roomsAt = (d: string) => rbm[d.slice(0, 7)] ?? totalRooms
       const sMap: Record<string, number> = {}
       for (const r of sales as any[]) sMap[r.date] = r.rooms_sold ?? 0
       const rMap: Record<string, number> = {}; const gMap: Record<string, number> = {}
@@ -105,10 +112,10 @@ export default function DailyPage() {
         bMap[b.date] = {
           sold, revenue: Math.round(rev), guests,
           guestUnit: b.guest_unit != null ? Math.round(Number(b.guest_unit)) : (guests > 0 ? Math.round(rev / guests) : null),
-          occ: b.occ != null ? Number(b.occ) : (totalRooms > 0 ? sold / totalRooms : null),
+          occ: b.occ != null ? Number(b.occ) : (roomsAt(b.date) > 0 ? sold / roomsAt(b.date) : null),
           adr: b.room_unit != null ? Math.round(Number(b.room_unit)) : (sold > 0 ? Math.round(rev / sold) : null),
           companion: b.companion != null ? Number(b.companion) : (sold > 0 ? guests / sold : null),
-          revpar: totalRooms > 0 ? Math.round(rev / totalRooms) : null,
+          revpar: roomsAt(b.date) > 0 ? Math.round(rev / roomsAt(b.date)) : null,
         }
       }
       setSoldMap(sMap); setRevMap(rMap); setGuestMap(gMap); setBudgetMap(bMap)
@@ -136,15 +143,16 @@ export default function DailyPage() {
     const has = d in soldMap || d in revMap
     if (!has) return null
     const sold = soldMap[d] ?? 0, revenue = Math.round(revMap[d] ?? 0), guests = guestMap[d] ?? 0
+    const rooms = roomsFor(d)
     return {
       sold, revenue, guests,
       guestUnit: guests > 0 ? Math.round(revenue / guests) : null,
-      occ: totalRooms > 0 ? sold / totalRooms : null,
+      occ: rooms > 0 ? sold / rooms : null,
       adr: sold > 0 ? Math.round(revenue / sold) : null,
       companion: sold > 0 ? guests / sold : null,
-      revpar: totalRooms > 0 ? Math.round(revenue / totalRooms) : null,
+      revpar: rooms > 0 ? Math.round(revenue / rooms) : null,
     }
-  }, [soldMap, revMap, guestMap, totalRooms])
+  }, [soldMap, revMap, guestMap, roomsFor])
 
   const model = useMemo(() => {
     if (!from || !to || from > to) return null
@@ -160,7 +168,7 @@ export default function DailyPage() {
     const sumSold = rows.reduce((s, r) => s + r.m.sold, 0)
     const sumRev = rows.reduce((s, r) => s + r.m.revenue, 0)
     const sumGuests = rows.reduce((s, r) => s + r.m.guests, 0)
-    const cap = totalRooms * rows.length
+    const cap = dates.reduce((s, d) => s + roomsFor(d), 0)  // 月別客室数を日ごとに反映
     const total: Metrics = {
       sold: sumSold, revenue: sumRev, guests: sumGuests,
       guestUnit: sumGuests > 0 ? Math.round(sumRev / sumGuests) : null,
@@ -170,7 +178,7 @@ export default function DailyPage() {
       revpar: cap > 0 ? Math.round(sumRev / cap) : null,
     }
     return { dates, rows, snapshots, rankMap, total }
-  }, [from, to, metricsFor, rates, totalRooms])
+  }, [from, to, metricsFor, rates, roomsFor])
 
   // 折れ線グラフ用データ（KPIごとに期間内最大=100で正規化、ツールチップは実値）
   const chart = useMemo(() => {

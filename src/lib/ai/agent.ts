@@ -17,7 +17,7 @@ const ALLOWED_TABLES = new Set([
 ])
 
 const SCHEMA = `参照可能なテーブル/ビュー（列）:
-- mart_monthly_kpi(facility, month 'YYYY-MM', revenue 売上, rooms_sold 室数(室泊), guests 客数, occ 稼働率(0-1), adr, guest_unit 客単価, revpar, companion 同伴, revenue_budget, total_inventory)
+- mart_monthly_kpi(facility, month 'YYYY-MM', revenue 売上, rooms_sold 室泊数, guests 人泊数, adr 室単価(1室1泊), guest_unit 客単価(人泊単価=1人1泊), companion 同伴係数(人泊÷室泊)) ※チェックイン月に計上(freee計上基準)。稼働率はmart_occupancy_monthlyを使うこと
 - mart_occupancy_monthly(facility, month, rooms_sold 販売室数, operating_days, total_rooms, occ) ※稼働率の正データ(販売数集計表由来)
 - mart_occupancy_daily(facility, date 'YYYY-MM-DD', rooms_sold, total_rooms, occ)
 - mart_channel_monthly(facility, month, channel チャネル, revenue, rooms, guests, adr, guest_unit)
@@ -27,7 +27,7 @@ const SCHEMA = `参照可能なテーブル/ビュー（列）:
 - mart_plan_monthly(facility, month, plan, bookings, revenue, rooms_total, guests, adr)
 - mart_adr_band_monthly(facility, month, band ADR帯, bookings, revenue, rooms_total, adr)
 - mart_gs_monthly(facility, month, group_size, bookings, revenue, rooms_total, adr)
-- mart_cxl_summary(facility, month, channel, bookings, cancels, cancel_revenue, cxl_rate)
+- mart_cxl_summary(facility, month, channel, bookings, cancels, cancel_revenue, cxl_rate 取消率=取消÷全予約) ※rooms/guests系列は室泊・人泊
 - budget_monthly(facility, fiscal_year '2025'/'2026', month, category, item_code, item_name, amount) ※予算P&L。item_code='sales_total'が売上予算, 'operating_income'が営業損益, 'cogs_total'原価, 'sga_total'販管費
 - actual_monthly(facility, fiscal_year, month, item_code, item_name, actual 実績, prior_amount 昨年)
 - mart_budget_revenue_monthly(facility, month, revenue_budget)

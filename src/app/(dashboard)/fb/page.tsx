@@ -115,7 +115,7 @@ export default function FbPage() {
                       <td className="px-4 py-2 font-medium">{i + 1}. {it.name}</td>
                       <td className="px-4 py-2" style={{ color: 'var(--text-dim)' }}>{cat}</td>
                       <td className="px-4 py-2 text-right">{fmtNum(it.qty)}</td>
-                      <td className="px-4 py-2 text-right">{fmtNum(it.total)}</td>
+                      <td className="px-4 py-2 text-right">{fmtYen(it.total)}</td>
                       <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{total > 0 ? pct(it.total / total) : '-'}</td>
                     </tr>
                   )

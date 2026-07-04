@@ -23,6 +23,7 @@ export interface BookingEventRow {
   rooms: number | null
   guests_total: number | null
   amount_gross: number | null
+  nights?: number | null
 }
 export interface RateSnapshotRow {
   snapshot_date: string
@@ -88,15 +89,11 @@ export interface MonthlyKpiRow {
   facility?: string
   month: string
   revenue: number | null
-  rooms_sold: number | null
-  guests: number | null
-  occ: number | null
+  rooms_sold: number | null   // 室泊
+  guests: number | null       // 人泊
   adr: number | null
-  guest_unit: number | null
-  revpar: number | null
-  companion: number | null
-  revenue_budget: number | null
-  total_inventory: number | null
+  guest_unit: number | null   // 人泊単価
+  companion: number | null    // 人泊÷室泊
 }
 export interface OccupancyMonthlyRow {
   month: string

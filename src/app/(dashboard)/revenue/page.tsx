@@ -22,7 +22,7 @@ const GS_ORDER = ['1名', '2名', '3名', '4名', '5名以上']
 const BAND_ORDER = ['〜¥30,000', '¥30,000–50,000', '¥50,000–70,000', '¥70,000–100,000', '¥100,000〜']
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-interface Ev { checkin: string | null; received_at: string | null; plan: string | null; rooms: number | null; guests_total: number | null; amount_gross: number | null }
+interface Ev { checkin: string | null; received_at: string | null; plan: string | null; rooms: number | null; guests_total: number | null; amount_gross: number | null; nights: number | null }
 interface Resv { checkin: string | null; prefecture: string | null; revenue_settled: number | null; nights: number | null; guests_total: number | null }
 interface Row { name: string; revenue: number; rooms: number; guests: number; count?: number }
 
@@ -52,7 +52,7 @@ export default function RevenuePage() {
       supabase.from('mart_room_monthly').select('*').eq('facility', current),
       supabase.from('mart_room_type_monthly').select('*').eq('facility', current),
       supabase.from('mart_meal_monthly').select('*').eq('facility', current),
-      fetchAll(() => supabase.from('raw_booking_event').select('checkin, received_at, plan, rooms, guests_total, amount_gross')
+      fetchAll(() => supabase.from('raw_booking_event').select('checkin, received_at, plan, rooms, guests_total, amount_gross, nights')
         .eq('facility', current).eq('event_type', '予約').order('id')),
       fetchAll(() => supabase.from('raw_reservation').select('checkin, prefecture, revenue_settled, nights, guests_total')
         .eq('facility', current).eq('status', 'C/O').order('id')),
@@ -98,7 +98,9 @@ export default function RevenuePage() {
       if (r.checkin?.slice(0, 7) !== month) continue
       const k = r.prefecture || '不明'
       const g = m.get(k) ?? { name: k, revenue: 0, rooms: 0, guests: 0 }
-      g.revenue += r.revenue_settled || 0; g.rooms += r.nights || 0; g.guests += r.guests_total || 0
+      // rooms=室泊(1予約行=1部屋×泊数), guests=人泊
+      g.revenue += r.revenue_settled || 0; g.rooms += r.nights || 0
+      g.guests += (r.guests_total || 0) * Math.max(r.nights ?? 1, 1)
       m.set(k, g)
     }
     return [...m.values()].sort((a, b) => b.revenue - a.revenue)
@@ -172,7 +174,9 @@ function aggEvents(events: Ev[], keyFn: (e: Ev) => string | null): Row[] {
   for (const e of events) {
     const k = keyFn(e); if (k == null) continue
     const g = m.get(k) ?? { name: k, revenue: 0, rooms: 0, guests: 0, count: 0 }
-    g.revenue += e.amount_gross || 0; g.rooms += e.rooms || 0; g.guests += e.guests_total || 0; g.count! += 1
+    // rooms=室泊(部屋数×泊数), guests=人泊。ADR・客単価を1泊あたりに揃える
+    const n = Math.max(e.nights ?? 1, 1)
+    g.revenue += e.amount_gross || 0; g.rooms += (e.rooms || 0) * n; g.guests += (e.guests_total || 0) * n; g.count! += 1
     m.set(k, g)
   }
   return [...m.values()]
@@ -184,7 +188,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 function KpiTable({ dim, rows, countLabel }: { dim: string; rows: Row[]; countLabel?: string }) {
   const total = rows.reduce((s, r) => s + (r.revenue || 0), 0)
-  const headers = [dim, ...(countLabel ? [countLabel] : []), '売上', '構成比', '室数', '客数', 'ADR', '客単価', 'GS']
+  const headers = [dim, ...(countLabel ? [countLabel] : []), '売上', '構成比', '室泊数', '人泊数', 'ADR', '客単価', 'GS']
   return (
     <div className="card overflow-x-auto">
       <table className="w-full text-sm">
@@ -504,7 +508,8 @@ function GsTab({ events }: { events: Ev[] }) {
 /* ---- ADR帯（1円単位）---- */
 function AdrBandTab({ events }: { events: Ev[] }) {
   if (events.length === 0) return <Empty message="この月のデータがありません" />
-  const by = aggEvents(events.filter((e) => (e.rooms || 0) > 0), (e) => bandLabel((e.amount_gross || 0) / (e.rooms || 1)))
+  const by = aggEvents(events.filter((e) => (e.rooms || 0) > 0),
+    (e) => bandLabel((e.amount_gross || 0) / ((e.rooms || 1) * Math.max(e.nights ?? 1, 1))))  // ADR=1室1泊あたり
   const rows: Row[] = BAND_ORDER.map((b) => by.find((x) => x.name === b)).filter(Boolean) as Row[]
   const chart = rows.map((r) => ({ name: r.name, count: r.count || 0, adr: r.rooms > 0 ? Math.round(r.revenue / r.rooms) : 0 }))
   return (

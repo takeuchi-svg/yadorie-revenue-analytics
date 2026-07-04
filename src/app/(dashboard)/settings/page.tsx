@@ -58,6 +58,7 @@ export default function SettingsPage() {
   const [opFys, setOpFys] = useState<string[]>([])
   const [opFy, setOpFy] = useState('')
   const [opDays, setOpDays] = useState<Record<string, number | ''>>({})
+  const [opRooms, setOpRooms] = useState<Record<string, number | ''>>({})  // 月別客室数の上書き（改装等。空欄=総客室数を使用）
   // 従業員 賃金設定（シフト・労務）
   const [staffWages, setStaffWages] = useState<StaffWage[]>([])
   const [wagePermitted, setWagePermitted] = useState(true)
@@ -102,20 +103,30 @@ export default function SettingsPage() {
   useEffect(() => {
     if (!current || !opFy) return
     const months = fyMonths(opFy)
-    supabase.from('dim_operating_days').select('month, days').eq('facility', current).in('month', months)
+    supabase.from('dim_operating_days').select('month, days, rooms').eq('facility', current).in('month', months)
       .then(({ data }) => {
         const map: Record<string, number | ''> = {}
-        months.forEach((m) => { map[m] = '' })
-        ;((data as { month: string; days: number | null }[]) ?? []).forEach((r) => { map[r.month] = r.days ?? '' })
+        const rmap: Record<string, number | ''> = {}
+        months.forEach((m) => { map[m] = ''; rmap[m] = '' })
+        ;((data as { month: string; days: number | null; rooms: number | null }[]) ?? []).forEach((r) => {
+          map[r.month] = r.days ?? ''
+          rmap[r.month] = r.rooms ?? ''
+        })
         setOpDays(map)
+        setOpRooms(rmap)
       })
   }, [current, opFy])
 
   const saveOpDays = async () => {
     setSaving(true); setMessage('')
-    const rows = Object.entries(opDays)
-      .filter(([, v]) => v !== '' && v != null)
-      .map(([month, days]) => ({ facility: current, month, days: Number(days) }))
+    const months = [...new Set([...Object.keys(opDays), ...Object.keys(opRooms)])]
+    const rows = months
+      .filter((m) => (opDays[m] !== '' && opDays[m] != null) || (opRooms[m] !== '' && opRooms[m] != null))
+      .map((m) => ({
+        facility: current, month: m,
+        days: opDays[m] === '' || opDays[m] == null ? null : Number(opDays[m]),
+        rooms: opRooms[m] === '' || opRooms[m] == null ? null : Number(opRooms[m]),
+      }))
     if (rows.length === 0) { setMessage('稼働日数が未入力です'); setSaving(false); return }
     const { error } = await supabase.from('dim_operating_days').upsert(rows, { onConflict: 'facility,month' })
     setMessage(error ? `Error: ${error.message}` : '稼働日数を保存しました')
@@ -303,7 +314,7 @@ export default function SettingsPage() {
       {/* 稼働日数 */}
       <section className="card p-6 mt-6">
         <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-          <h2 className="text-lg font-semibold">稼働日数（月別）</h2>
+          <h2 className="text-lg font-semibold">稼働日数・客室数（月別）</h2>
           <div className="flex items-center gap-2">
             {opFys.length > 0 && (
               <select className="field px-3 py-1.5 text-sm" value={opFy} onChange={(e) => setOpFy(e.target.value)}>
@@ -314,14 +325,21 @@ export default function SettingsPage() {
               className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50">保存</button>
           </div>
         </div>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>予実管理の在庫数（＝総客室数 {currentFacility?.total_rooms ?? '-'} × 稼働日数）の算出に使用します。</p>
+        <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>
+          稼働率・在庫数（＝客室数 × 稼働日数）の算出に使用します。客室数は改装等で変わる月のみ入力（空欄=総客室数 {currentFacility?.total_rooms ?? '-'} を使用）。
+        </p>
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
           {fyMonths(opFy).map((m) => (
             <div key={m}>
               <label className="block text-xs mb-1" style={{ color: 'var(--text-dim)' }}>{m.slice(5)}月（{m.slice(0, 4)}）</label>
               <input type="number" min={0} max={31} className="field px-2 py-1.5 text-sm w-full"
+                placeholder="日数"
                 value={opDays[m] ?? ''}
                 onChange={(e) => setOpDays((p) => ({ ...p, [m]: e.target.value === '' ? '' : Number(e.target.value) }))} />
+              <input type="number" min={0} className="field px-2 py-1.5 text-sm w-full mt-1"
+                placeholder={`室数(${currentFacility?.total_rooms ?? '-'})`}
+                value={opRooms[m] ?? ''}
+                onChange={(e) => setOpRooms((p) => ({ ...p, [m]: e.target.value === '' ? '' : Number(e.target.value) }))} />
             </div>
           ))}
         </div>

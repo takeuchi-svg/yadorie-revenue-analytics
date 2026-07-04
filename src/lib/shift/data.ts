@@ -2,6 +2,7 @@
 // 施設×月のシフト読み書き。既存 supabase クライアント（認証済み）を再利用。
 // キー: (staff_code, work_facility, work_date)。時間は分(整数)。
 import { supabase } from '@/lib/supabase/client'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 
 export interface ShiftPattern {
   pattern_id: number
@@ -101,17 +102,17 @@ export async function loadShiftMonth(facility: string, month: string): Promise<{
   plans: ShiftPlan[]; segments: ShiftSegment[]; context: PlanContext[]
 }> {
   const { start, end } = monthRange(month)
-  const planRes = await supabase.from('raw_shift_plan')
+  // ページング必須: 素の select は1000行で無警告に切り捨てられる（スタッフ数×日数で超えうる）
+  const plans = await fetchAll<ShiftPlan>(() => supabase.from('raw_shift_plan')
     .select('shift_id, staff_code, work_facility, work_date, pattern_id, planned_minutes, note')
-    .eq('work_facility', facility).gte('work_date', start).lte('work_date', end)
-  const plans = (planRes.data as ShiftPlan[]) ?? []
+    .eq('work_facility', facility).gte('work_date', start).lte('work_date', end).order('shift_id'))
   const ids = plans.map((p) => p.shift_id).filter((x): x is number => x != null)
   let segments: ShiftSegment[] = []
   if (ids.length) {
-    const segRes = await supabase.from('raw_shift_segment')
+    segments = await fetchAll<ShiftSegment>(() => supabase.from('raw_shift_segment')
       .select('segment_id, shift_id, seq, role_id, start_time, end_time, break_minutes, work_minutes')
-      .in('shift_id', ids).order('seq')
-    segments = (segRes.data as ShiftSegment[]) ?? []
+      .in('shift_id', ids).order('segment_id'))
+    segments.sort((a, b) => ((a.shift_id ?? 0) - (b.shift_id ?? 0)) || (a.seq - b.seq))
   }
   const ctxRes = await supabase.from('mart_daily_plan_context')
     .select('facility, work_date, budget_rooms, budget_guests, onhand_rooms, forecast_rooms, memo')
