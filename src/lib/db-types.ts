@@ -12,6 +12,10 @@ export interface ReservationRow {
   guests_total: number | null
   prefecture: string | null
   status?: string | null
+  booking_date?: string | null
+  channel?: string | null
+  plan?: string | null
+  room_count?: number | null
 }
 export interface BookingEventRow {
   notify_no?: string
