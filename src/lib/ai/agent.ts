@@ -14,6 +14,7 @@ const ALLOWED_TABLES = new Set([
   'mart_booking_lt', 'budget_monthly', 'actual_monthly', 'mart_budget_revenue_monthly',
   'dim_facility', 'raw_other_product', 'raw_room_sales',
   'mart_labor_monthly', 'dim_productivity_manual',
+  'mart_onhand_monthly', 'mart_budget_daily_monthly',
 ])
 
 const SCHEMA = `参照可能なテーブル/ビュー（列）:
@@ -31,6 +32,8 @@ const SCHEMA = `参照可能なテーブル/ビュー（列）:
 - budget_monthly(facility, fiscal_year '2025'/'2026', month, category, item_code, item_name, amount) ※予算P&L。item_code='sales_total'が売上予算, 'operating_income'が営業損益, 'cogs_total'原価, 'sga_total'販管費
 - actual_monthly(facility, fiscal_year, month, item_code, item_name, actual 実績, prior_amount 昨年)
 - mart_budget_revenue_monthly(facility, month, revenue_budget)
+- mart_onhand_monthly(facility, month, room_nights オンハンド室泊, room_nights_stayed 宿泊済(C/O), room_nights_confirmed 確定, room_nights_tentative 未確認, guest_nights 人泊, revenue, adr) ※現時点の予約の入り具合(キャンセル除く)。将来月＝ブッキングペース。最新スナップショット
+- mart_budget_daily_monthly(facility, month, rooms_budget 予算室泊, revenue_budget 予算売上, inventory_budget 予算在庫) ※日次予算の月ロールアップ。オンハンドの比較相手
 - raw_other_product(facility, item_name 商品, category, total, quantity, source_month) ※料飲/物販の明細(売れ筋)
 - dim_facility(facility, name, total_rooms)
 - mart_labor_monthly(facility, month, staff_count_monthly 月給社員数, parttime_count アルバイト数, total_work_hours 総労働時間, total_overtime_hours 総残業時間, own_work_hours 自施設, help_work_hours ヘルプ, operating_days) ※勤怠由来。本社(HQ)は除外済み。未取込の月は行が無い

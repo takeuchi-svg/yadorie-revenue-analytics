@@ -43,6 +43,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: 'onhand', label: 'オンハンド',
     items: [
+      { href: '/onhand', label: '予約状況（オンハンド）' },
       { href: '/rate', label: 'レートコントロール' },
       { href: '/ota', label: 'OTA分析' },
     ],
