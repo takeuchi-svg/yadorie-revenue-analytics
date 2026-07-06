@@ -35,16 +35,6 @@ const OTA_METRICS = [
   { key: 'coupon', label: 'クーポン負担' },
 ] as const
 
-// 年度(4月開始)の12ヶ月 'YYYY-MM' を返す
-function fyMonths(fy: string): string[] {
-  const y = Number(fy)
-  if (!y) return []
-  const out: string[] = []
-  for (let m = 4; m <= 12; m++) out.push(`${y}-${String(m).padStart(2, '0')}`)
-  for (let m = 1; m <= 3; m++) out.push(`${y + 1}-${String(m).padStart(2, '0')}`)
-  return out
-}
-
 export default function SettingsPage() {
   const { current, currentFacility, isAdmin, facilities, setCurrent } = useFacility()
   const [otaData, setOtaData] = useState<OtaRow[]>([])
@@ -54,10 +44,6 @@ export default function SettingsPage() {
   })
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
-  // 月別客室数（改装等での上書き。稼働日数は実績から自動算出のため手入力なし）
-  const [opFys, setOpFys] = useState<string[]>([])
-  const [opFy, setOpFy] = useState('')
-  const [opRooms, setOpRooms] = useState<Record<string, number | ''>>({})  // 月別客室数の上書き（空欄=総客室数を使用）
   // 従業員 賃金設定（シフト・労務）
   const [staffWages, setStaffWages] = useState<StaffWage[]>([])
   const [wagePermitted, setWagePermitted] = useState(true)
@@ -87,40 +73,6 @@ export default function SettingsPage() {
         setOtaData(full)
       })
   }, [current, otaMonth])
-
-  // 稼働日数: 利用可能な年度を budget_monthly から取得
-  useEffect(() => {
-    if (!current) return
-    supabase.from('budget_monthly').select('fiscal_year').eq('facility', current).then(({ data }) => {
-      const fys = [...new Set(((data as { fiscal_year: string }[]) ?? []).map((r) => r.fiscal_year))].sort().reverse()
-      setOpFys(fys)
-      setOpFy((prev) => (fys.includes(prev) ? prev : fys[0] ?? ''))
-    })
-  }, [current])
-
-  // 稼働日数: 選択年度の値を読み込み
-  useEffect(() => {
-    if (!current || !opFy) return
-    const months = fyMonths(opFy)
-    supabase.from('dim_operating_days').select('month, rooms').eq('facility', current).in('month', months)
-      .then(({ data }) => {
-        const rmap: Record<string, number | ''> = {}
-        months.forEach((m) => { rmap[m] = '' })
-        ;((data as { month: string; rooms: number | null }[]) ?? []).forEach((r) => { rmap[r.month] = r.rooms ?? '' })
-        setOpRooms(rmap)
-      })
-  }, [current, opFy])
-
-  const saveOpRooms = async () => {
-    setSaving(true); setMessage('')
-    const rows = Object.entries(opRooms)
-      .filter(([, v]) => v !== '' && v != null)
-      .map(([month, rooms]) => ({ facility: current, month, rooms: Number(rooms) }))
-    if (rows.length === 0) { setMessage('客室数の上書きが未入力です（空欄なら総客室数を使用）'); setSaving(false); return }
-    const { error } = await supabase.from('dim_operating_days').upsert(rows, { onConflict: 'facility,month' })
-    setMessage(error ? `Error: ${error.message}` : '月別客室数を保存しました')
-    setSaving(false)
-  }
 
   // 生産性メモ: 選択施設×月の値を読み込み
   // ※「みなし残業超の残業代」「派遣・その他の労働時間」の手入力はT13で廃止
@@ -297,37 +249,6 @@ export default function SettingsPage() {
               ))}
             </tbody>
           </table>
-        </div>
-      </section>
-
-      {/* 月別客室数（改装時のみ上書き） */}
-      <section className="card p-6 mt-6">
-        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-          <h2 className="text-lg font-semibold">月別客室数（改装時のみ）</h2>
-          <div className="flex items-center gap-2">
-            {opFys.length > 0 && (
-              <select className="field px-3 py-1.5 text-sm" value={opFy} onChange={(e) => setOpFy(e.target.value)}>
-                {opFys.map((y) => <option key={y} value={y}>{y}年度</option>)}
-              </select>
-            )}
-            <button onClick={saveOpRooms} disabled={saving}
-              className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50">保存</button>
-          </div>
-        </div>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>
-          稼働率・在庫数の分母に使う客室数。改装等で部屋数が変わる月だけ入力してください（空欄=総客室数 {currentFacility?.total_rooms ?? '-'} を使用）。
-          稼働日数は販売実績のある日数から自動算出されるため、入力は不要です。
-        </p>
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-          {fyMonths(opFy).map((m) => (
-            <div key={m}>
-              <label className="block text-xs mb-1" style={{ color: 'var(--text-dim)' }}>{m.slice(5)}月（{m.slice(0, 4)}）</label>
-              <input type="number" min={0} className="field px-2 py-1.5 text-sm w-full"
-                placeholder={`${currentFacility?.total_rooms ?? '-'}室`}
-                value={opRooms[m] ?? ''}
-                onChange={(e) => setOpRooms((p) => ({ ...p, [m]: e.target.value === '' ? '' : Number(e.target.value) }))} />
-            </div>
-          ))}
         </div>
       </section>
 

@@ -18,6 +18,14 @@ const CAT_COLOR: Record<string, string> = {
   '価格': '#BA7517', 'オペレーション': '#888780', 'その他': '#B4B2A9',
 }
 const thisMonth = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
+// 年度(4月開始)の12ヶ月 'YYYY-MM'
+function fyMonths(fy: string): string[] {
+  const y = Number(fy); if (!y) return []
+  const out: string[] = []
+  for (let m = 4; m <= 12; m++) out.push(`${y}-${String(m).padStart(2, '0')}`)
+  for (let m = 1; m <= 3; m++) out.push(`${y + 1}-${String(m).padStart(2, '0')}`)
+  return out
+}
 
 function Gauge({ text }: { text: string }) {
   const { score, label } = concreteness(text)
@@ -38,6 +46,9 @@ export default function FacilityProfile() {
   const { current, currentFacility } = useFacility()
   const [profile, setProfile] = useState<Record<string, any>>({})
   const [totalRooms, setTotalRooms] = useState<number | ''>('')  // dim_facility.total_rooms（旧・設定/施設マスタから統合）
+  const [opRooms, setOpRooms] = useState<Record<string, number | ''>>({})  // 月別客室数の上書き（改装時のみ・旧設定から統合）
+  const [opFy, setOpFy] = useState('')
+  const [opFys, setOpFys] = useState<string[]>([])
   const [dirty, setDirty] = useState(false)
   const [openSec, setOpenSec] = useState<Set<number>>(new Set([0]))
   const [seasonal, setSeasonal] = useState<Record<number, string>>({})
@@ -70,6 +81,26 @@ export default function FacilityProfile() {
   useEffect(() => { reload() }, [reload])
   useEffect(() => { setTotalRooms(currentFacility?.total_rooms ?? '') }, [currentFacility])
 
+  // 月別客室数: 年度候補と選択年度の値を読み込み
+  useEffect(() => {
+    if (!current) return
+    supabase.from('budget_monthly').select('fiscal_year').eq('facility', current).then(({ data }) => {
+      const fys = [...new Set(((data as { fiscal_year: string }[]) ?? []).map((r) => r.fiscal_year))].sort().reverse()
+      setOpFys(fys)
+      setOpFy((prev) => (fys.includes(prev) ? prev : fys[0] ?? ''))
+    })
+  }, [current])
+  useEffect(() => {
+    if (!current || !opFy) return
+    const months = fyMonths(opFy)
+    supabase.from('dim_operating_days').select('month, rooms').eq('facility', current).in('month', months).then(({ data }) => {
+      const rmap: Record<string, number | ''> = {}
+      months.forEach((m) => { rmap[m] = '' })
+      ;((data as { month: string; rooms: number | null }[]) ?? []).forEach((r) => { rmap[r.month] = r.rooms ?? '' })
+      setOpRooms(rmap)
+    })
+  }, [current, opFy])
+
   const setField = (k: string, v: any) => { setProfile((prev) => ({ ...prev, [k]: v })); setDirty(true) }
 
   const saveProfile = async () => {
@@ -84,7 +115,18 @@ export default function FacilityProfile() {
     const { error: e2 } = await supabase.from('dim_facility')
       .update({ total_rooms: totalRooms === '' ? null : Number(totalRooms), updated_at: new Date().toISOString() })
       .eq('facility', current)
-    const err = error ?? e2
+    // 月別客室数の上書き（改装時のみ）。選択年度の全月を value-or-null で upsert（空欄化にも対応）
+    let e3: { message: string } | null = null
+    if (opFy) {
+      const roomRows = fyMonths(opFy).map((m) => ({
+        facility: current, month: m,
+        rooms: opRooms[m] === '' || opRooms[m] == null ? null : Number(opRooms[m]),
+        updated_at: new Date().toISOString(),
+      }))
+      const r = await supabase.from('dim_operating_days').upsert(roomRows, { onConflict: 'facility,month' })
+      e3 = r.error
+    }
+    const err = error ?? e2 ?? e3
     setMsg(err ? `Error: ${err.message}` : 'プロフィールを保存しました')
     if (!err) setDirty(false)
     setSaving(false)
@@ -175,23 +217,48 @@ export default function FacilityProfile() {
                   </div>
                 ))}
                 {si === 0 && (
-                  <div className="flex gap-4 flex-wrap">
-                    <div>
-                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-dim)' }}>総客室数（予実の在庫数等に使用）</label>
-                      <input type="number" min={0} className="field px-3 py-1.5 text-sm w-32"
-                        value={totalRooms} onChange={(e) => { setTotalRooms(e.target.value === '' ? '' : Number(e.target.value)); setDirty(true) }} />
+                  <>
+                    <div className="flex gap-4 flex-wrap">
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-dim)' }}>総客室数（稼働率・予実の在庫数に使用）</label>
+                        <input type="number" min={0} className="field px-3 py-1.5 text-sm w-32"
+                          value={totalRooms} onChange={(e) => { setTotalRooms(e.target.value === '' ? '' : Number(e.target.value)); setDirty(true) }} />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-dim)' }}>最低価格帯（1泊2食・円）</label>
+                        <input type="number" min={0} className="field px-3 py-1.5 text-sm w-32"
+                          value={profile.price_min ?? ''} onChange={(e) => setField('price_min', e.target.value === '' ? null : Number(e.target.value))} />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-dim)' }}>最高ランク（1泊2食・円）</label>
+                        <input type="number" min={0} className="field px-3 py-1.5 text-sm w-32"
+                          value={profile.price_max ?? ''} onChange={(e) => setField('price_max', e.target.value === '' ? null : Number(e.target.value))} />
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-dim)' }}>最低価格帯（1泊2食・円）</label>
-                      <input type="number" min={0} className="field px-3 py-1.5 text-sm w-32"
-                        value={profile.price_min ?? ''} onChange={(e) => setField('price_min', e.target.value === '' ? null : Number(e.target.value))} />
+                    {/* 月別客室数の上書き（改装時のみ・旧設定から統合） */}
+                    <div className="mt-4 rounded-md p-3" style={{ border: '1px solid var(--border)' }}>
+                      <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
+                        <label className="text-xs font-medium" style={{ color: 'var(--text-dim)' }}>月別客室数（改装時のみ・空欄=総客室数 {totalRooms || '-'} を使用）</label>
+                        {opFys.length > 0 && (
+                          <select className="field px-2 py-1 text-xs" value={opFy} onChange={(e) => setOpFy(e.target.value)}>
+                            {opFys.map((y) => <option key={y} value={y}>{y}年度</option>)}
+                          </select>
+                        )}
+                      </div>
+                      <p className="text-[10px] mb-2" style={{ color: 'var(--text-dim)' }}>改装等で部屋数が変わる月だけ入力。稼働日数は販売実績のある日数から自動算出のため入力不要です。</p>
+                      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                        {fyMonths(opFy).map((m) => (
+                          <div key={m}>
+                            <span className="block text-[10px] mb-0.5" style={{ color: 'var(--text-dim)' }}>{m.slice(5)}月（{m.slice(0, 4)}）</span>
+                            <input type="number" min={0} className="field px-2 py-1 text-xs w-full"
+                              placeholder={`${totalRooms || '-'}室`}
+                              value={opRooms[m] ?? ''}
+                              onChange={(e) => { setOpRooms((p) => ({ ...p, [m]: e.target.value === '' ? '' : Number(e.target.value) })); setDirty(true) }} />
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-dim)' }}>最高ランク（1泊2食・円）</label>
-                      <input type="number" min={0} className="field px-3 py-1.5 text-sm w-32"
-                        value={profile.price_max ?? ''} onChange={(e) => setField('price_max', e.target.value === '' ? null : Number(e.target.value))} />
-                    </div>
-                  </div>
+                  </>
                 )}
               </div>
             )}
