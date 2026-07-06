@@ -328,7 +328,6 @@ export default function UploadPage() {
       const BATCH_SIZE = 500
       const UPSERT_KEYS: Record<string, string> = {
         raw_reservation: 'facility,pms_id',
-        raw_booking_event: 'facility,notify_no',
       }
 
       const results: UploadResult[] = []
@@ -458,7 +457,7 @@ export default function UploadPage() {
             </svg>
           </div>
           <p className="mb-2">CSVファイル / Excelファイルをドラッグ＆ドロップ</p>
-          <p className="text-sm mb-4" style={{ color: 'var(--text-dim)' }}>PMS 5本 + Lincoln 2本 + レート表 1本</p>
+          <p className="text-sm mb-4" style={{ color: 'var(--text-dim)' }}>ステイシー（PMS）各種 + レート表</p>
           <label className="cursor-pointer inline-block px-4 py-2 text-white rounded-md text-sm hover:opacity-90" style={{ background: 'var(--accent)' }}>
             ファイルを選択
             <input type="file" className="hidden" multiple accept=".csv,.xlsx" onChange={handleFileInput} />

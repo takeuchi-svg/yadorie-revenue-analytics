@@ -4,10 +4,7 @@ export type FileType =
   | 'staysee_other'
   | 'staysee_payment'
   | 'staysee_room_sales'
-  | 'lincoln'
   | 'rate_sheet'
-
-export type LincolnSubType = 'lincoln_ci' | 'lincoln_rcv'
 
 export interface DetectionResult {
   type: FileType
@@ -69,25 +66,6 @@ export interface RawPayment {
   payment_method: string | null
   amount: number
   source_month: string | null
-}
-
-export interface RawBookingEvent {
-  facility: string
-  notify_no: number
-  event_type: string
-  booking_no: string | null
-  channel: string | null
-  received_at: string | null
-  checkin: string
-  checkout: string | null
-  nights: number
-  guests_total: number
-  rooms: number
-  amount_gross: number
-  plan: string | null
-  address: string | null
-  meal_condition: string | null
-  source_csv: string | null
 }
 
 export interface RawRateSnapshot {

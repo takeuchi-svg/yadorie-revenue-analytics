@@ -1,19 +1,19 @@
 'use client'
 
-// CXL＆LT分析。データ元をステイシー(PMS予約情報)／リンカーン(サイトコントローラ)で切替可能。
-// ステイシー一本化への安全移行(並走)期間用。両ソースの取消率を並べて確認できる。
-import { useEffect, useMemo, useState } from 'react'
+// CXL＆LT分析（ステイシー予約情報ベース）。取消率=取消÷全予約、LT=checkin−予約日。
+import { useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
+import { useFacilityData } from '@/lib/use-facility-data'
 import {
   BarChart, Bar, ComposedChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid,
 } from 'recharts'
 import { fmtNum, fmtYen, pct, CHART_AXIS, chartTooltip, channelColor } from '@/lib/ui'
 import { Loading, Empty, LoadError } from '@/components/page-bits'
-import type { BookingEventRow as Ev, ReservationRow as Resv } from '@/lib/db-types'
+import type { ReservationRow as Resv } from '@/lib/db-types'
 
-// 正規化イベント（両ソース共通）。isBooking=全予約(取消含む), isCancel=取消
+// 正規化イベント。isBooking=全予約(取消含む), isCancel=取消
 type CxlEv = { isBooking: boolean; isCancel: boolean; checkin: string | null; lt: number | null; channel: string; plan: string; revenue: number; rooms: number; guests: number }
 
 const daysBetween = (checkin: string | null, other: string | null): number | null => {
@@ -46,31 +46,17 @@ function cxlBy(evs: CxlEv[], keyOf: (e: CxlEv) => string): Agg[] {
 export default function CancelPage() {
   const { current, currentFacility } = useFacility()
   const [month, setMonth] = useState('all')
-  const [src, setSrc] = useState<'staysee' | 'lincoln'>('staysee')
-  const [resv, setResv] = useState<Resv[]>([])
-  const [events, setEvents] = useState<Ev[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
 
-  useEffect(() => {
-    if (!current) return
-    setLoading(true); setLoadError('')
+  const { data, loading, error: loadError } = useFacilityData<Resv[]>((facility) => {
     const cut = new Date(); cut.setMonth(cut.getMonth() - 24)
     const cutoff = cut.toISOString().slice(0, 10)
-    Promise.all([
-      fetchAll<Resv>(() => supabase.from('raw_reservation')
-        .select('status, checkin, booking_date, channel, plan, revenue_settled, guests_total, nights, room_count')
-        .eq('facility', current).gte('checkin', cutoff).order('id')),
-      fetchAll<Ev>(() => supabase.from('raw_booking_event')
-        .select('event_type, channel, plan, checkin, received_at, amount_gross, rooms, guests_total, nights')
-        .eq('facility', current).gte('checkin', cutoff).order('id')),
-    ]).then(([rv, ev]) => { setResv((rv as Resv[]) ?? []); setEvents((ev as Ev[]) ?? []) })
-      .catch((e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false))
-  }, [current])
+    return fetchAll<Resv>(() => supabase.from('raw_reservation')
+      .select('status, checkin, booking_date, channel, plan, revenue_settled, guests_total, nights, room_count')
+      .eq('facility', facility).gte('checkin', cutoff).order('id'))
+  })
+  const resv = useMemo(() => data ?? [], [data])
 
-  // 両ソースを正規化
-  const stayseeEv = useMemo<CxlEv[]>(() => resv
+  const all = useMemo<CxlEv[]>(() => resv
     .filter((r) => !EXCLUDE_STATUS.has(r.status ?? ''))
     .map((r) => {
       const n = Math.max(r.nights ?? 1, 1)
@@ -81,30 +67,9 @@ export default function CancelPage() {
         revenue: r.revenue_settled || 0, rooms: (r.room_count ?? 1) * n, guests: (r.guests_total || 0) * n,
       }
     }), [resv])
-  const lincolnEv = useMemo<CxlEv[]>(() => events
-    .filter((e) => e.event_type === '予約' || e.event_type === '取消')
-    .map((e) => {
-      const n = Math.max(e.nights ?? 1, 1)
-      return {
-        isBooking: e.event_type === '予約', isCancel: e.event_type === '取消', checkin: e.checkin,
-        lt: daysBetween(e.checkin, e.received_at ?? null),
-        channel: e.channel || '不明', plan: e.plan || '不明',
-        revenue: e.amount_gross || 0, rooms: (e.rooms || 0) * n, guests: (e.guests_total || 0) * n,
-      }
-    }), [events])
 
-  const all = src === 'staysee' ? stayseeEv : lincolnEv
   const months = useMemo(() => [...new Set(all.map((e) => e.checkin?.slice(0, 7)).filter(Boolean))].sort().reverse() as string[], [all])
-  const inMonth = (e: CxlEv) => month === 'all' || e.checkin?.slice(0, 7) === month
-  const scope = useMemo(() => all.filter(inMonth), [all, month])
-
-  // 並走確認: 両ソースの取消率（同じ月スコープ）
-  const rateOf = (evs: CxlEv[]) => {
-    const s = evs.filter(inMonth); const bk = s.filter((e) => e.isBooking).length; const cx = s.filter((e) => e.isCancel).length
-    return bk > 0 ? cx / bk : null
-  }
-  const rateStaysee = useMemo(() => rateOf(stayseeEv), [stayseeEv, month])
-  const rateLincoln = useMemo(() => rateOf(lincolnEv), [lincolnEv, month])
+  const scope = useMemo(() => all.filter((e) => month === 'all' || e.checkin?.slice(0, 7) === month), [all, month])
 
   const bookings = scope.filter((e) => e.isBooking)
   const cancels = scope.filter((e) => e.isCancel)
@@ -152,49 +117,21 @@ export default function CancelPage() {
     return arr
   }, [scope])
 
-  const srcLabel = src === 'staysee' ? 'ステイシー（PMS予約情報）' : 'リンカーン（サイトコントローラ）'
-  const ltBasis = src === 'staysee' ? '予約日' : '予約受信日'
-
   return (
     <div className="p-6">
-      <div className="flex items-end justify-between mb-3 flex-wrap gap-3">
+      <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold mb-1">CXL ＆ LT分析</h1>
-          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current}・チェックイン{month === 'all' ? '全期間' : month}・{srcLabel}</p>
+          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current}・チェックイン{month === 'all' ? '全期間' : month}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-            {(['staysee', 'lincoln'] as const).map((s) => (
-              <button key={s} onClick={() => setSrc(s)}
-                className="px-3 py-1.5 text-xs"
-                style={{ background: src === s ? 'var(--accent)' : 'transparent', color: src === s ? '#fff' : 'var(--text-dim)' }}>
-                {s === 'staysee' ? 'ステイシー' : 'リンカーン(旧)'}
-              </button>
-            ))}
-          </div>
-          <select className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)}>
-            <option value="all">全期間</option>
-            {months.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </div>
-      </div>
-
-      {/* 並走確認バッジ */}
-      <div className="flex items-center gap-3 mb-5 text-xs flex-wrap">
-        <span style={{ color: 'var(--text-dim)' }}>取消率 並走確認（{month === 'all' ? '全期間' : month}）:</span>
-        <span className="px-2 py-1 rounded-md" style={{ background: src === 'staysee' ? 'var(--accent)' : 'var(--surface)', color: src === 'staysee' ? '#fff' : 'var(--text)', border: '1px solid var(--border)' }}>
-          ステイシー <strong>{pct(rateStaysee)}</strong>
-        </span>
-        <span className="px-2 py-1 rounded-md" style={{ background: src === 'lincoln' ? 'var(--accent)' : 'var(--surface)', color: src === 'lincoln' ? '#fff' : 'var(--text)', border: '1px solid var(--border)' }}>
-          リンカーン <strong>{pct(rateLincoln)}</strong>
-        </span>
-        {rateStaysee != null && rateLincoln != null && (
-          <span style={{ color: 'var(--text-dim)' }}>差 {((rateStaysee - rateLincoln) * 100).toFixed(1)}pt</span>
-        )}
+        <select className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)}>
+          <option value="all">全期間</option>
+          {months.map((m) => <option key={m} value={m}>{m}</option>)}
+        </select>
       </div>
 
       {loading ? <Loading /> : loadError ? <LoadError message={loadError} /> : all.length === 0 ? (
-        <Empty message={src === 'staysee' ? 'ステイシー予約情報CSVを /upload からアップロードしてください' : 'Lincoln予約検索CSVを /upload からアップロードしてください'} />
+        <Empty message="ステイシー予約情報CSVを /upload からアップロードしてください" />
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
@@ -206,7 +143,7 @@ export default function CancelPage() {
 
           <div className="card p-4 mb-6">
             <h2 className="text-sm font-semibold mb-1">取消率の月次推移（全期間・チェックイン月）</h2>
-            <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>棒＝予約数(青)・取消数(橙)、折れ線＝取消率。データ元＝{srcLabel}。</p>
+            <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>棒＝予約数(青)・取消数(橙)、折れ線＝取消率。月選択に関わらず全期間を表示。</p>
             <ResponsiveContainer width="100%" height={300}>
               <ComposedChart data={trend} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
                 <CartesianGrid stroke="#e7dac6" vertical={false} />
@@ -279,10 +216,8 @@ export default function CancelPage() {
             </table>
           </div>
           <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
-            リードタイム=チェックイン日−{ltBasis}。取消率=取消÷全予約。室単価・客単価は室泊・人泊あたり。
-            {src === 'staysee'
-              ? 'ステイシーは全チャネル（直予約・電話・エージェント含む）を捕捉。予約=キャンセル含む全予約（販売不可・空部屋は除外）。'
-              : 'リンカーンはOTA通知ベース（直予約・電話の取消は捕捉されません）。'}
+            リードタイム=チェックイン日−予約日。取消率=取消÷全予約（販売不可・空部屋は除外）。室単価・客単価は室泊・人泊あたり。
+            ステイシー予約情報ベース（全チャネル＝直予約・電話・エージェント含む・直近24ヶ月）。
           </p>
         </>
       )}

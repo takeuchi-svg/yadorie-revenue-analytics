@@ -36,12 +36,10 @@ export default function RevenuePage() {
   const { current, currentFacility } = useFacility()
   const [tab, setTab] = useState<Tab>('チャネル')
   const [basis, setBasis] = useState<'ci' | 'booking'>('ci')
-  const [evSrc, setEvSrc] = useState<'staysee' | 'lincoln'>('staysee')  // プラン/曜日/GS/ADR帯のデータ元
   const [month, setMonth] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [data, setData] = useState<Record<string, any[]>>({})
-  const [events, setEvents] = useState<Ev[]>([])
   const [resv, setResv] = useState<Resv[]>([])
   const [capByType, setCapByType] = useState<Record<string, number>>({})
 
@@ -53,14 +51,11 @@ export default function RevenuePage() {
       supabase.from('mart_room_monthly').select('*').eq('facility', current),
       supabase.from('mart_room_type_monthly').select('*').eq('facility', current),
       supabase.from('mart_meal_monthly').select('*').eq('facility', current),
-      fetchAll(() => supabase.from('raw_booking_event').select('checkin, received_at, plan, rooms, guests_total, amount_gross, nights')
-        .eq('facility', current).eq('event_type', '予約').order('id')),
       fetchAll(() => supabase.from('raw_reservation').select('checkin, prefecture, revenue_settled, nights, guests_total, plan, room_count, booking_date')
         .eq('facility', current).eq('status', 'C/O').order('id')),
       fetchAll(() => supabase.from('raw_room_sales').select('room_type, sold, stay_date').eq('facility', current).eq('scope', 'type').order('id')),
-    ]).then(([ch, room, rtype, meal, ev, rv, rsType]) => {
+    ]).then(([ch, room, rtype, meal, rv, rsType]) => {
       setData({ channel: ch.data ?? [], room: room.data ?? [], rtype: rtype.data ?? [], meal: meal.data ?? [] })
-      setEvents((ev as Ev[]) ?? [])
       setResv((rv as Resv[]) ?? [])
       // 部屋タイプ別 室数（=日次最大販売室数の推定）
       const cap: Record<string, number> = {}
@@ -70,20 +65,19 @@ export default function RevenuePage() {
       .finally(() => setLoading(false))
   }, [current])
 
-  const isLincoln = LINCOLN_TABS.includes(tab)
+  const isLincoln = LINCOLN_TABS.includes(tab)  // ステイシー由来のプラン/曜日/GS/ADR帯タブ（日付基準の切替あり）
   const dateField: keyof Ev = basis === 'ci' ? 'checkin' : 'received_at'
 
-  // ステイシー(C/O予約)を Lincoln の Ev 形に正規化（received_at←予約日, amount_gross←精算額）。既存集計にそのまま流せる
+  // ステイシー(C/O予約)を Ev 形に正規化（received_at←予約日, amount_gross←精算額＝freee計上基準）
   const stayseeEv = useMemo<Ev[]>(() => resv.map((r) => ({
     checkin: r.checkin, received_at: r.booking_date ?? null, plan: r.plan ?? null,
     rooms: r.room_count ?? 1, guests_total: r.guests_total, amount_gross: r.revenue_settled, nights: r.nights,
   })), [resv])
-  const activeEv = evSrc === 'staysee' ? stayseeEv : events
 
   const months = useMemo(() => {
     let ms: string[]
     if (isLincoln) {
-      ms = activeEv.map((e) => (e[dateField] as string | null)?.slice(0, 7)).filter(Boolean) as string[]
+      ms = stayseeEv.map((e) => (e[dateField] as string | null)?.slice(0, 7)).filter(Boolean) as string[]
     } else {
       // PMS系タブは全ソースの月を統合
       ms = [
@@ -92,13 +86,13 @@ export default function RevenuePage() {
       ms = ms.concat(resv.map((r) => r.checkin?.slice(0, 7)).filter(Boolean) as string[])
     }
     return [...new Set(ms)].sort().reverse()
-  }, [isLincoln, dateField, activeEv, data, resv])
+  }, [isLincoln, dateField, stayseeEv, data, resv])
 
   useEffect(() => { if (months.length > 0 && !months.includes(month)) setMonth(months[0]) }, [months, month])
 
   const monthEvents = useMemo(
-    () => activeEv.filter((e) => (e[dateField] as string | null)?.slice(0, 7) === month),
-    [activeEv, dateField, month]
+    () => stayseeEv.filter((e) => (e[dateField] as string | null)?.slice(0, 7) === month),
+    [stayseeEv, dateField, month]
   )
   const residenceRows = useMemo(() => {
     const m = new Map<string, Row>()
@@ -122,16 +116,6 @@ export default function RevenuePage() {
           <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current}</p>
         </div>
         <div className="flex items-center gap-3">
-          {isLincoln && (
-            <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }} title="データ元（安全移行の並走確認用）">
-              {(['staysee', 'lincoln'] as const).map((s) => (
-                <button key={s} onClick={() => setEvSrc(s)} className="px-3 py-1.5 text-xs"
-                  style={{ background: evSrc === s ? 'var(--accent)' : 'var(--surface)', color: evSrc === s ? '#fff' : 'var(--text-dim)' }}>
-                  {s === 'staysee' ? 'ステイシー' : 'リンカーン(旧)'}
-                </button>
-              ))}
-            </div>
-          )}
           <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)', opacity: isLincoln ? 1 : 0.4 }}>
             {(['ci', 'booking'] as const).map((b) => (
               <button key={b} disabled={!isLincoln} onClick={() => setBasis(b)} className="px-3 py-1.5 text-xs"
@@ -158,7 +142,7 @@ export default function RevenuePage() {
       </div>
       <p className="text-xs mb-4" style={{ color: 'var(--text-dim)' }}>
         {isLincoln
-          ? `${basis === 'ci' ? 'CI日（チェックイン月）' : '予約日（受信月）'}ベース・${evSrc === 'staysee' ? 'ステイシー（PMS・C/O確定＝freee計上基準の精算額）' : 'リンカーン（サイトコントローラ・予約総額）'}`
+          ? `${basis === 'ci' ? 'CI日（チェックイン月）' : '予約日'}ベース・ステイシー（PMS・C/O確定＝freee計上基準の精算額）`
           : 'CI日（チェックイン月）ベース・PMS予約データ（このタブは日付基準の切替なし）'}
       </p>
 

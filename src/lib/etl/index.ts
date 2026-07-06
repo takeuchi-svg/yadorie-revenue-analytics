@@ -1,6 +1,6 @@
 export { detectFileType, estimateFacility } from './detector'
 export { parseFileToRows, parseXlsx, decodeCp932, parseCsv, extractSourceMonth } from './parser'
-export { transformByType, detectLincolnSubType } from './transform'
+export { transformByType } from './transform'
 export { parseRateSheet } from './rate-parser'
 export type {
   FileType,
@@ -11,7 +11,6 @@ export type {
   RawBasicProduct,
   RawOtherProduct,
   RawPayment,
-  RawBookingEvent,
   RawRateSnapshot,
   RawRoomSales,
 } from './types'

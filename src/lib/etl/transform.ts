@@ -3,9 +3,7 @@ import type {
   RawBasicProduct,
   RawOtherProduct,
   RawPayment,
-  RawBookingEvent,
   RawRoomSales,
-  LincolnSubType,
   UploadPayload,
 } from './types'
 import { parseInt10, parseNum, parseDate, extractSourceMonth } from './parser'
@@ -209,81 +207,8 @@ export function transformPayment(
   return { table: 'raw_payment', data: data as RawPayment[], sourceMonth: sourceMonth ?? undefined }
 }
 
-// ============================================================
-// Lincoln 予約検索 → raw_booking_event
-// ============================================================
-
-export function transformLincoln(
-  rows: Record<string, string>[],
-  facility: string,
-  fileName: string
-): UploadPayload {
-  const sourceMonth = extractSourceMonth(fileName)
-
-  const data: RawBookingEvent[] = rows
-    .map((r) => {
-      const notifyNo = parseInt10(findCol(r, '通知番号', '通知No', 'No'))
-      if (!notifyNo) return null
-
-      const checkin = parseDate(findCol(r, 'チェックイン日', 'チェックイン', 'CI日', 'CI'))
-      if (!checkin) return null
-
-      return {
-        facility,
-        notify_no: notifyNo,
-        event_type: findCol(r, '通知種別', '種別', '区分') || '予約',
-        booking_no: findCol(r, '販売先予約番号', '予約番号', '連携番号') || null,
-        channel: findCol(r, '販売先名', '予約経路', 'サイト名', 'サイト', 'OTA', 'チャネル') || null,
-        received_at: parseDate(findCol(r, '予約受信日', '受信日', '受信日時', '通知日')),
-        checkin,
-        checkout: parseDate(findCol(r, 'チェックアウト日', 'チェックアウト', 'CO日', 'CO')),
-        nights: parseInt10(findCol(r, '泊数', '宿泊数')) || 1,
-        guests_total: parseInt10(findCol(r, 'お客様総合計人数', '人数', '合計人数', '利用人数')),
-        rooms: parseInt10(findCol(r, '利用客室合計数', '室数', '部屋数')) || 1,
-        amount_gross: parseInt10(findCol(r, '合計宿泊料金(総額)', '金額', '合計金額', '宿泊料金', '総額')),
-        plan: findCol(r, 'プラン名', 'プラン') || null,
-        address: findCol(r, '団体または代表者住所', '住所', '都道府県') || null,
-        meal_condition: findCol(r, '泊食条件', '食事条件', '食事') || null,
-        source_csv: null,
-      }
-    })
-    .filter((r): r is NonNullable<typeof r> => r !== null)
-
-  // Deduplicate by notify_no (keep last occurrence)
-  const deduped = new Map<number, RawBookingEvent>()
-  for (const d of data) {
-    deduped.set(d.notify_no, d)
-  }
-  const uniqueData = Array.from(deduped.values())
-
-  // Detect lincoln subtype: CI-based vs received-date-based
-  const subType = detectLincolnSubType(uniqueData)
-  const csvLabel = subType === 'lincoln_ci'
-    ? `lincoln_ci_${sourceMonth ?? 'unknown'}`
-    : `lincoln_rcv_${sourceMonth ?? 'unknown'}`
-  for (const d of uniqueData) {
-    d.source_csv = csvLabel
-  }
-
-  return { table: 'raw_booking_event', data: uniqueData as RawBookingEvent[], sourceMonth: sourceMonth ?? undefined }
-}
-
-export function detectLincolnSubType(events: RawBookingEvent[]): LincolnSubType {
-  if (events.length === 0) return 'lincoln_ci'
-
-  const checkins = events
-    .map((e) => new Date(e.checkin).getTime())
-    .filter((t) => !isNaN(t))
-
-  if (checkins.length === 0) return 'lincoln_ci'
-
-  const minCI = Math.min(...checkins)
-  const maxCI = Math.max(...checkins)
-  const rangeDays = (maxCI - minCI) / (1000 * 60 * 60 * 24)
-
-  // <= 35 days range → CI-based, > 35 days → received-date-based
-  return rangeDays <= 35 ? 'lincoln_ci' : 'lincoln_rcv'
-}
+// ※ リンカーン(予約検索→raw_booking_event)取込は2026-07廃止（ステイシー予約情報へ一本化）。
+//    transformLincoln / detectLincolnSubType は削除。
 
 // ============================================================
 // Staysee 販売数集計表 → raw_room_sales
@@ -356,8 +281,6 @@ export function transformByType(
         return transformPayment(rows, facility, fileName)
       case 'staysee_room_sales':
         return transformRoomSales(rows, facility, fileName)
-      case 'lincoln':
-        return transformLincoln(rows, facility, fileName)
       default:
         throw new Error(`Unknown file type: ${type}`)
     }
