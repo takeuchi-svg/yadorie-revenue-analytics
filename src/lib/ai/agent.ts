@@ -4,7 +4,8 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { buildFacilityContext } from '@/lib/ai/profile-context'
 
-const MODEL = process.env.CHAT_MODEL || 'claude-sonnet-4-6'
+// 既定は現行の有効なモデルID。CHAT_MODEL 環境変数で上書き可（例: claude-opus-4-8）
+const MODEL = process.env.CHAT_MODEL || 'claude-sonnet-5'
 
 const ALLOWED_TABLES = new Set([
   'mart_monthly_kpi', 'mart_occupancy_monthly', 'mart_occupancy_daily',
