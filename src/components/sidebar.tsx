@@ -17,8 +17,8 @@ const NAV_GROUPS: NavGroup[] = [
   {
     key: 'view', label: 'ビュー',
     items: [
-      { href: '/profile', label: '施設プロフィール' },
       { href: '/', label: '概要' },
+      { href: '/profile', label: '施設プロフィール' },
     ],
   },
   {
@@ -76,14 +76,14 @@ export default function Sidebar() {
       className="flex flex-col h-screen shrink-0"
       style={{ width: 220, background: 'var(--surface)', borderRight: '1px solid var(--border)' }}
     >
-      {/* Logo */}
-      <div className="px-4 py-4" style={{ borderBottom: '1px solid var(--border)' }}>
+      {/* Logo（クリックで概要トップへ） */}
+      <Link href="/" onMouseEnter={() => setOpenGroup(null)} className="block px-4 py-4 hover:opacity-80 transition-opacity" style={{ borderBottom: '1px solid var(--border)' }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/yadorie-logo.png" alt="YADORIE宿GROUP" style={{ height: 30, width: 'auto' }} />
         <div className="text-[10px] mt-1.5 tracking-wide" style={{ color: 'var(--text-dim)' }}>
           Core — 宿の数だけ、ストーリー。
         </div>
-      </div>
+      </Link>
 
       {/* Nav（グループ＋フライアウト） */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-visible" onMouseLeave={() => setOpenGroup(null)}>

@@ -42,13 +42,23 @@ export default function UserAdmin() {
   useEffect(() => { reload() }, [reload])
 
   const create = async () => {
-    if (!email || !password) { setMsg('メールとパスワードを入力してください'); return }
+    if (!email) { setMsg('メールアドレスを入力してください'); return }
     setBusy(true); setMsg('')
-    const r = await call('create', { email, password, role, facilities: [...newFacs] })
+    // パスワード空欄＝招待メール送信（本人がリンクからパスワード設定）。入力時＝即時発行
+    const r = password
+      ? await call('create', { email, password, role, facilities: [...newFacs] })
+      : await call('invite', { email, role, facilities: [...newFacs], redirectTo: `${window.location.origin}/reset-password` })
     setBusy(false)
     if (r.error) { setMsg('エラー: ' + r.error); return }
-    setMsg('発行しました'); setEmail(''); setPassword(''); setRole('member'); setNewFacs(new Set())
+    setMsg(password ? '発行しました' : '招待メールを送信しました'); setEmail(''); setPassword(''); setRole('member'); setNewFacs(new Set())
     reload()
+  }
+
+  const sendReset = async (targetEmail: string) => {
+    setBusy(true); setMsg('')
+    const r = await call('sendReset', { email: targetEmail, redirectTo: `${window.location.origin}/reset-password` })
+    setBusy(false)
+    setMsg(r.error ? 'エラー: ' + r.error : `${targetEmail} に再設定メールを送信しました`)
   }
 
   const toggle = (set: Set<string>, f: string) => { const n = new Set(set); n.has(f) ? n.delete(f) : n.add(f); return n }
@@ -60,15 +70,20 @@ export default function UserAdmin() {
       {/* 新規発行 */}
       <div className="mb-6 rounded-md p-4" style={{ background: 'var(--surface2)' }}>
         <h3 className="text-sm font-semibold mb-3">アカウント発行</h3>
-        <div className="flex flex-wrap gap-2 mb-3">
+        <div className="flex flex-wrap gap-2 mb-1">
           <input className="field px-3 py-1.5 text-sm" placeholder="メールアドレス" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className="field px-3 py-1.5 text-sm" placeholder="初期パスワード" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input className="field px-3 py-1.5 text-sm" placeholder="初期パスワード（空欄で招待メール）" value={password} onChange={(e) => setPassword(e.target.value)} />
           <select className="field px-3 py-1.5 text-sm" value={role} onChange={(e) => setRole(e.target.value)}>
             <option value="member">一般（指定施設のみ）</option>
             <option value="admin">管理者（全施設＋ユーザー管理）</option>
           </select>
-          <button onClick={create} disabled={busy} className="px-4 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>発行</button>
+          <button onClick={create} disabled={busy} className="px-4 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>
+            {password ? '発行' : '招待メール送信'}
+          </button>
         </div>
+        <p className="text-[11px] mb-3" style={{ color: 'var(--text-dim)' }}>
+          パスワードを空欄にすると、本人宛に招待メールが届き、リンクから自分でパスワードを設定できます。入力した場合は即時発行（メールなし）。
+        </p>
         {role === 'member' && (
           <div>
             <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>閲覧できる施設を選択:</p>
@@ -103,8 +118,11 @@ export default function UserAdmin() {
                   給与閲覧
                 </label>
               )}
+              <button onClick={() => sendReset(u.email)} disabled={busy}
+                className="ml-auto text-xs px-2 py-1 rounded-md disabled:opacity-50" style={{ color: 'var(--text-dim)', border: '1px solid var(--border)' }}
+                title="このユーザーにパスワード再設定メールを送信">再設定メール</button>
               <button onClick={async () => { if (confirm(`${u.email} を削除しますか？`)) { await call('delete', { user_id: u.user_id }); reload() } }}
-                className="ml-auto text-xs px-2 py-1 rounded-md" style={{ color: 'var(--red)', border: '1px solid var(--border)' }}>削除</button>
+                className="text-xs px-2 py-1 rounded-md" style={{ color: 'var(--red)', border: '1px solid var(--border)' }}>削除</button>
             </div>
             {u.role !== 'admin' && (
               <div>

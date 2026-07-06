@@ -48,6 +48,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true })
     }
 
+    // 招待メール送信（本人がリンクからパスワードを設定）
+    if (action === 'invite') {
+      const { email, role, facilities, redirectTo } = body as { email: string; role: string; facilities: string[]; redirectTo?: string }
+      if (!email) return NextResponse.json({ error: 'メールアドレスは必須です' }, { status: 400 })
+      const { data: inv, error: iErr } = await sb.auth.admin.inviteUserByEmail(email, redirectTo ? { redirectTo } : undefined)
+      if (iErr) return NextResponse.json({ error: iErr.message }, { status: 400 })
+      const uid = inv.user.id
+      await sb.from('app_user').upsert({ user_id: uid, email, role: role === 'admin' ? 'admin' : 'member' }, { onConflict: 'user_id' })
+      if ((facilities ?? []).length) await sb.from('user_facility').insert(facilities.map((f) => ({ user_id: uid, facility: f })))
+      return NextResponse.json({ ok: true })
+    }
+
+    // 既存ユーザーへパスワード再設定メールを送る（管理者操作）
+    if (action === 'sendReset') {
+      const { email, redirectTo } = body as { email: string; redirectTo?: string }
+      if (!email) return NextResponse.json({ error: 'メールアドレスが必要です' }, { status: 400 })
+      const { error: rErr } = await sb.auth.resetPasswordForEmail(email, redirectTo ? { redirectTo } : undefined)
+      if (rErr) return NextResponse.json({ error: rErr.message }, { status: 400 })
+      return NextResponse.json({ ok: true })
+    }
+
     if (action === 'setFacilities') {
       const { user_id, facilities } = body as { user_id: string; facilities: string[] }
       await sb.from('user_facility').delete().eq('user_id', user_id)
