@@ -168,7 +168,7 @@ export default function CancelPage() {
               <button key={s} onClick={() => setSrc(s)}
                 className="px-3 py-1.5 text-xs"
                 style={{ background: src === s ? 'var(--accent)' : 'transparent', color: src === s ? '#fff' : 'var(--text-dim)' }}>
-                {s === 'staysee' ? 'ステイシー' : 'リンカーン'}
+                {s === 'staysee' ? 'ステイシー' : 'リンカーン(旧)'}
               </button>
             ))}
           </div>

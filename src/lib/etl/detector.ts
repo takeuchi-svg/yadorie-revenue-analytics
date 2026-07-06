@@ -6,7 +6,8 @@ const DETECTION_RULES: { keyword: string; ext: string; type: FileType }[] = [
   { keyword: '基本商品情報', ext: '.csv', type: 'staysee_basic' },
   { keyword: '予約情報', ext: '.csv', type: 'staysee_reservation' },
   { keyword: '入金情報', ext: '.csv', type: 'staysee_payment' },
-  { keyword: '予約検索', ext: '.csv', type: 'lincoln' },
+  // リンカーン（予約検索）は2026-07廃止＝ステイシー予約情報へ一本化。取込判定から除外。
+  //   既存の raw_booking_event データはDBに残置（履歴閲覧用）。誤取込防止のため下でエラー表示。
   { keyword: 'レートチェック', ext: '.xlsx', type: 'rate_sheet' },
 ]
 

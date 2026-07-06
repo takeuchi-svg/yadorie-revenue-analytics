@@ -282,9 +282,12 @@ export default function UploadPage() {
       const entry = files[i]
       if (entry.status !== 'pending' && entry.status !== 'processing') continue
       if (!entry.detection || !entry.facility) {
+        const isLincoln = entry.file.name.includes('予約検索')
         setFiles((prev) =>
           prev.map((f, idx) =>
-            idx === i ? { ...f, status: 'error', error: '施設またはファイル種別が未設定' } : f
+            idx === i ? { ...f, status: 'error', error: isLincoln
+              ? 'リンカーン（予約検索）は廃止されました。ステイシーの「予約情報」CSVをご利用ください'
+              : '施設またはファイル種別が未設定' } : f
           )
         )
         continue

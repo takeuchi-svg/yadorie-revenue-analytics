@@ -25,10 +25,12 @@ const SCHEMA = `参照可能なテーブル/ビュー（列）:
 - mart_room_type_monthly(facility, month, room_type 部屋タイプ, revenue, rooms_sold, guests, adr)
 - mart_meal_monthly(facility, month, meal_type 喫食(2食付/朝食付/素泊り等), reservations 予約数, revenue, rooms, guests)
 - mart_residence_monthly(facility, month, prefecture 都道府県/国, region, bookings, guests, revenue, guest_unit, rooms)
-- mart_plan_monthly(facility, month, plan, bookings, revenue, rooms_total, guests, adr)
-- mart_adr_band_monthly(facility, month, band ADR帯, bookings, revenue, rooms_total, adr)
-- mart_gs_monthly(facility, month, group_size, bookings, revenue, rooms_total, adr)
-- mart_cxl_summary(facility, month, channel, bookings, cancels, cancel_revenue, cxl_rate 取消率=取消÷全予約) ※rooms/guests系列は室泊・人泊
+- mart_plan_monthly(facility, month, plan, bookings, revenue, rooms_total 室泊, guests 人泊, adr) ※ステイシーC/O確定=freee計上基準
+- mart_adr_band_monthly(facility, month, band ADR帯(1室1泊), bookings, revenue, rooms_total, adr) ※ステイシーC/O確定
+- mart_gs_monthly(facility, month, group_size, bookings, revenue, rooms_total, adr) ※ステイシーC/O確定
+- mart_cxl_summary(facility, month, channel, bookings 全予約(取消含む), cancels 取消, cancel_revenue, cxl_rate 取消率=取消÷全予約) ※ステイシー全チャネル(直予約/電話/エージェント含む)
+- mart_cxl_lt(facility, month, bucket リードタイム帯, count) ※取消の予約日→CIまでの日数分布
+- mart_booking_lt(facility, month, bucket, revenue, rooms_total, guests, adr, count) ※ステイシーC/O確定・予約日基準のLT別売上
 - budget_monthly(facility, fiscal_year '2025'/'2026', month, category, item_code, item_name, amount) ※予算P&L。item_code='sales_total'が売上予算, 'operating_income'が営業損益, 'cogs_total'原価, 'sga_total'販管費
 - actual_monthly(facility, fiscal_year, month, item_code, item_name, actual 実績, prior_amount 昨年)
 - mart_budget_revenue_monthly(facility, month, revenue_budget)

@@ -127,7 +127,7 @@ export default function RevenuePage() {
               {(['staysee', 'lincoln'] as const).map((s) => (
                 <button key={s} onClick={() => setEvSrc(s)} className="px-3 py-1.5 text-xs"
                   style={{ background: evSrc === s ? 'var(--accent)' : 'var(--surface)', color: evSrc === s ? '#fff' : 'var(--text-dim)' }}>
-                  {s === 'staysee' ? 'ステイシー' : 'リンカーン'}
+                  {s === 'staysee' ? 'ステイシー' : 'リンカーン(旧)'}
                 </button>
               ))}
             </div>
