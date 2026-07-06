@@ -113,8 +113,7 @@ export default function YojitsuPage() {
   const [actual, setActual] = useState<ARow[]>([])
   const [kpi, setKpi] = useState<KpiRow[]>([])
   const [occ, setOcc] = useState<OccRow[]>([])
-  const [opDays, setOpDays] = useState<Record<string, number>>({})
-  const [opRooms, setOpRooms] = useState<Record<string, number>>({})  // 月別客室数の上書き
+  const [opRooms, setOpRooms] = useState<Record<string, number>>({})  // 月別客室数の上書き（稼働日数は稼働率martから自動）
   const [fy, setFy] = useState('')
   const [month, setMonth] = useState('')
   const [view, setView] = useState<'month' | 'year'>('month')
@@ -133,19 +132,16 @@ export default function YojitsuPage() {
       fetchAll(() => supabase.from('actual_monthly').select('fiscal_year, month, item_code, actual').eq('facility', current).order('id')),
       fetchAll(() => supabase.from('mart_monthly_kpi').select('month, guests, adr, guest_unit, companion').eq('facility', current)),
       fetchAll(() => supabase.from('mart_occupancy_monthly').select('month, rooms_sold, occ, operating_days').eq('facility', current)),
-      supabase.from('dim_operating_days').select('month, days, rooms').eq('facility', current).then((r) => r),
+      supabase.from('dim_operating_days').select('month, rooms').eq('facility', current).then((r) => r),
     ]).then(([b, a, kp, oc, od]: any[]) => {
       setBudget((b as BRow[]) ?? [])
       setActual((a as ARow[]) ?? [])
       setKpi((kp as KpiRow[]) ?? [])
       setOcc((oc as OccRow[]) ?? [])
-      const m: Record<string, number> = {}
       const rm: Record<string, number> = {}
-      ;((od?.data as { month: string; days: number | null; rooms: number | null }[]) ?? []).forEach((r) => {
-        if (r.days != null) m[r.month] = r.days
+      ;((od?.data as { month: string; rooms: number | null }[]) ?? []).forEach((r) => {
         if (r.rooms != null) rm[r.month] = r.rooms  // 月別客室数の上書き（改装等）
       })
-      setOpDays(m)
       setOpRooms(rm)
     }).catch((e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false))
@@ -183,7 +179,7 @@ export default function YojitsuPage() {
   const occMap = useMemo(() => { const m: Record<string, OccRow> = {}; occ.forEach((r) => { m[r.month] = r }); return m }, [occ])
 
   const getBudget = (code: string, ym: string): number | null => budgetMap[k(ym, code)] ?? null
-  const getDays = (ym: string): number | null => opDays[ym] ?? occMap[ym]?.operating_days ?? null
+  const getDays = (ym: string): number | null => occMap[ym]?.operating_days ?? null  // 稼働日数=販売実績のある日数（martで自動算出）
   const sumActualRaw = (codes: string[], ym: string): number =>
     codes.reduce((s, c) => s + (actualMap[k(ym, c)] ?? 0), 0)
 
@@ -592,7 +588,7 @@ export default function YojitsuPage() {
           )}
 
           <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
-            予算=月次計画、実績=アップロード由来（集計行は明細から再計算）。KPI（稼働率・販売室数・客数・単価等）は売上実績、在庫数=総客室数×稼働日数（稼働日数・月別客室数は設定で入力。改装等で部屋数が変わる月は上書き可）。
+            予算=月次計画、実績=アップロード由来（集計行は明細から再計算）。KPI（稼働率・販売室数・客数・単価等）は売上実績、在庫数=客室数×稼働日数（稼働日数=販売実績のある日数を自動算出。改装等で部屋数が変わる月は設定で客室数を上書き可）。
             {view === 'year' && ' 年度合計=着地見込み（実績月は実績、未到来月は予算）。下段の年度合計差異は対予算。'}
             <br />
             損益分岐点・原価分析: 原価=全額変動費／水道光熱費=変動30%・固定70%／賞与=計上月のまま固定費。総費用=売上−営業利益、固定費=総費用−変動費。限界利益率=(売上−変動費)/売上、損益分岐点売上高=固定費/限界利益率。1人あたり=÷宿泊客数、1部屋あたり=÷販売室数。

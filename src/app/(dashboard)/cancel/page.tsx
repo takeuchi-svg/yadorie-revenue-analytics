@@ -5,8 +5,10 @@ import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { useFacilityData } from '@/lib/use-facility-data'
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts'
-import { fmtNum, fmtYen, pct, CHART_AXIS, chartTooltip } from '@/lib/ui'
+import {
+  BarChart, Bar, ComposedChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid,
+} from 'recharts'
+import { fmtNum, fmtYen, pct, CHART_AXIS, chartTooltip, channelColor } from '@/lib/ui'
 import { Loading, Empty, LoadError } from '@/components/page-bits'
 import type { BookingEventRow as Ev } from '@/lib/db-types'
 
@@ -23,22 +25,36 @@ const BUCKETS: { label: string; lo: number; hi: number }[] = [
   { label: 'G) 56-83日前', lo: 56, hi: 83 }, { label: 'H) 84-111日前', lo: 84, hi: 111 },
   { label: 'I) 112日以上前', lo: 112, hi: Infinity },
 ]
-const bucketOf = (d: number) => BUCKETS.find((b) => d >= b.lo && d <= b.hi)?.label ?? BUCKETS[0].label
+
+// 取消率 = 取消 ÷ 全予約（取消された予約も予約としてカウント）
+type Agg = { name: string; bookings: number; cancels: number; cancelAmount: number; rate: number | null }
+function cxlBy(events: Ev[], keyOf: (e: Ev) => string | null): Agg[] {
+  const m = new Map<string, { bookings: number; cancels: number; cancelAmount: number }>()
+  for (const e of events) {
+    const k = keyOf(e); if (k == null) continue
+    const g = m.get(k) ?? { bookings: 0, cancels: 0, cancelAmount: 0 }
+    if (e.event_type === '予約') g.bookings++
+    else if (e.event_type === '取消') { g.cancels++; g.cancelAmount += e.amount_gross || 0 }
+    m.set(k, g)
+  }
+  return [...m.entries()].map(([name, v]) => ({
+    name, ...v, rate: v.bookings > 0 ? v.cancels / v.bookings : null,
+  }))
+}
 
 export default function CancelPage() {
   const { current, currentFacility } = useFacility()
   const [month, setMonth] = useState('all')
 
   const { data, loading, error: loadError } = useFacilityData<Ev[]>((facility) => {
-    // 直近24ヶ月（チェックイン基準）に制限。全履歴フェッチは施設の運用年数とともに際限なく重くなるため
+    // 直近24ヶ月（チェックイン基準）に制限。全履歴フェッチは運用年数とともに際限なく重くなるため
     const cut = new Date(); cut.setMonth(cut.getMonth() - 24)
     const cutoff = cut.toISOString().slice(0, 10)
     return fetchAll<Ev>(() => supabase.from('raw_booking_event')
-      .select('event_type, checkin, received_at, amount_gross, rooms, guests_total, nights')
+      .select('event_type, channel, plan, checkin, received_at, amount_gross, rooms, guests_total, nights')
       .eq('facility', facility).gte('checkin', cutoff).order('id'))
   })
   const events = useMemo(() => data ?? [], [data])
-  // 室泊・人泊（泊数を掛ける。ADR・客単価を1泊あたりに揃える）
   const rn = (e: Ev) => (e.rooms || 0) * Math.max(e.nights ?? 1, 1)
   const gn = (e: Ev) => (e.guests_total || 0) * Math.max(e.nights ?? 1, 1)
 
@@ -49,10 +65,22 @@ export default function CancelPage() {
   const cancels = scope.filter((e) => e.event_type === '取消')
 
   const bk = bookings.length, cx = cancels.length
-  // 取消率 = 取消 ÷ 全予約（取消された予約も予約としてカウント済み）
   const cxlRate = bk > 0 ? cx / bk : null
   const cxlAmount = cancels.reduce((s, e) => s + (e.amount_gross || 0), 0)
   const netBookings = bk - cx
+
+  // 月次推移（全期間・チェックイン月ごと）。予約数/取消数の棒 + 取消率の折れ線
+  const trend = useMemo(() => {
+    const rows = cxlBy(events, (e) => e.checkin?.slice(0, 7) ?? null)
+    return rows
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((r) => ({ month: r.name.slice(2), 予約: r.bookings, 取消: r.cancels, 取消率: r.rate != null ? Math.round(r.rate * 1000) / 10 : null }))
+  }, [events])
+
+  // チャネル別（選択月）
+  const byChannel = useMemo(() => cxlBy(scope, (e) => e.channel || '不明').sort((a, b) => b.bookings - a.bookings), [scope])
+  // プラン別（選択月・上位15）
+  const byPlan = useMemo(() => cxlBy(scope, (e) => e.plan || '不明').sort((a, b) => b.bookings - a.bookings).slice(0, 15), [scope])
 
   // LT分析テーブル（予約ベース） + 取消。室数・人数は室泊・人泊
   const totalRooms = bookings.reduce((s, e) => s + rn(e), 0)
@@ -107,10 +135,35 @@ export default function CancelPage() {
       ) : (
         <>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <Kpi label="CXL率" value={pct(cxlRate)} accent />
+            <Kpi label="取消率" value={pct(cxlRate)} accent />
             <Kpi label="取消件数" value={fmtNum(cx)} />
             <Kpi label="取消金額" value={fmtYen(cxlAmount)} />
             <Kpi label="ネット予約" value={fmtNum(netBookings)} />
+          </div>
+
+          {/* 月次推移（全期間） */}
+          <div className="card p-4 mb-6">
+            <h2 className="text-sm font-semibold mb-1">取消率の月次推移（全期間・チェックイン月）</h2>
+            <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>棒＝予約数(青)・取消数(橙)、折れ線＝取消率。月選択に関わらず全期間を表示。</p>
+            <ResponsiveContainer width="100%" height={300}>
+              <ComposedChart data={trend} margin={{ top: 5, right: 10, bottom: 5, left: 0 }}>
+                <CartesianGrid stroke="#e7dac6" vertical={false} />
+                <XAxis dataKey="month" {...CHART_AXIS} />
+                <YAxis yAxisId="l" {...CHART_AXIS} allowDecimals={false} />
+                <YAxis yAxisId="r" orientation="right" {...CHART_AXIS} tickFormatter={(v) => `${v}%`} />
+                <Tooltip {...chartTooltip} formatter={(v: any, n: any) => (n === '取消率' ? `${v}%` : fmtNum(Number(v)))} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Bar yAxisId="l" dataKey="予約" fill="#378ADD" />
+                <Bar yAxisId="l" dataKey="取消" fill="#D85A30" />
+                <Line yAxisId="r" dataKey="取消率" stroke="#C0392B" strokeWidth={2} dot={{ r: 2 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* チャネル別 / プラン別 分解 */}
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+            <BreakdownTable title="チャネル別" dim="チャネル" rows={byChannel} colored month={month} />
+            <BreakdownTable title="プラン別（上位15）" dim="プラン" rows={byPlan} month={month} truncate />
           </div>
 
           {/* LT分布 */}
@@ -171,6 +224,49 @@ export default function CancelPage() {
           </p>
         </>
       )}
+    </div>
+  )
+}
+
+function BreakdownTable({ title, dim, rows, colored, truncate, month }: {
+  title: string; dim: string; rows: Agg[]; colored?: boolean; truncate?: boolean; month: string
+}) {
+  return (
+    <div className="card overflow-x-auto">
+      <div className="px-3 pt-3 flex items-baseline justify-between">
+        <h2 className="text-sm font-semibold">{title}</h2>
+        <span className="text-[10px]" style={{ color: 'var(--text-dim)' }}>{month === 'all' ? '全期間' : month}</span>
+      </div>
+      <table className="w-full text-sm whitespace-nowrap mt-2">
+        <thead>
+          <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-left">
+            <th className="px-3 py-2">{dim}</th>
+            <th className="px-3 py-2 text-right">予約数</th>
+            <th className="px-3 py-2 text-right">取消数</th>
+            <th className="px-3 py-2 text-right">取消率</th>
+            <th className="px-3 py-2 text-right">取消金額</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 && (
+            <tr><td colSpan={5} className="px-3 py-3 text-center" style={{ color: 'var(--text-dim)' }}>データなし</td></tr>
+          )}
+          {rows.map((r) => (
+            <tr key={r.name} style={{ borderTop: '1px solid var(--border)' }}>
+              <td className="px-3 py-2 font-medium" style={truncate ? { maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis' } : undefined}>
+                <span className="inline-flex items-center gap-1.5">
+                  {colored && <span className="inline-block w-2 h-2 rounded-full" style={{ background: channelColor(r.name) }} />}
+                  {truncate ? r.name.slice(0, 32) : r.name}
+                </span>
+              </td>
+              <td className="px-3 py-2 text-right">{fmtNum(r.bookings)}</td>
+              <td className="px-3 py-2 text-right">{fmtNum(r.cancels)}</td>
+              <td className="px-3 py-2 text-right font-medium" style={{ color: r.rate != null && r.rate >= 0.3 ? 'var(--red)' : undefined }}>{pct(r.rate)}</td>
+              <td className="px-3 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{fmtYen(r.cancelAmount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

@@ -2,9 +2,10 @@
 --  計算監査フィックス（2026-07）  Supabase SQL Editor にこの全文を貼り付けて Run（冪等）
 --
 --  含まれる修正:
---   [1] dim_operating_days 作成（存在しなかった）＋ 月別客室数上書き列 rooms 追加
+--   [1] dim_operating_days 作成＋ 月別客室数上書き列 rooms（稼働日数は手入力せず実績から自動算出）
 --       → 改装等で月により部屋数が変わる施設（例: FRY 6月まで10室→7月から13室）に対応
---   [2] 稼働率ビュー: 分母を「月別客室数（上書き優先）×稼働日数（手入力優先）」に変更
+--   [2] 稼働率ビュー: 分母を「月別客室数（上書き優先）×稼働日数（=販売実績のある日数）」に変更
+--       稼働日数 = raw_room_sales(scope='total') で sold>0 の日数（販売0の日は非稼働）
 --   [3] mart_monthly_kpi 再定義: 客数→人泊数 / 客単価→人泊単価 / 同伴係数→人泊÷室泊
 --       （dim_budget 依存の occ/revpar/revenue_budget 列は廃止。dim_budgetは未使用の遺物）
 --   [4] 売上分析系ビュー: 人数→人泊・室数→室泊 に統一（Lincoln系のADRも室泊分母に）
@@ -18,7 +19,7 @@
 CREATE TABLE IF NOT EXISTS dim_operating_days (
   facility TEXT NOT NULL,
   month TEXT NOT NULL,          -- 'YYYY-MM'
-  days INT,                     -- 稼働日数（手入力）
+  days INT,                     -- 予備列（現在は未使用。稼働日数は実績から自動算出）
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   PRIMARY KEY (facility, month)
 );
@@ -50,12 +51,12 @@ SELECT
   rs.facility,
   rs.source_month AS month,
   SUM(rs.sold) AS rooms_sold,
-  COALESCE(MAX(od.days), COUNT(DISTINCT rs.stay_date)) AS operating_days,   -- 手入力優先
-  COALESCE(MAX(od.rooms), MAX(f.total_rooms)) AS total_rooms,               -- 月別上書き優先
+  COUNT(DISTINCT rs.stay_date) FILTER (WHERE rs.sold > 0) AS operating_days,  -- 稼働日数=販売実績のある日数（自動算出）
+  COALESCE(MAX(od.rooms), MAX(f.total_rooms)) AS total_rooms,                 -- 月別上書き優先
   CASE WHEN COALESCE(MAX(od.rooms), MAX(f.total_rooms)) > 0
-        AND COALESCE(MAX(od.days), COUNT(DISTINCT rs.stay_date)) > 0
+        AND COUNT(DISTINCT rs.stay_date) FILTER (WHERE rs.sold > 0) > 0
     THEN ROUND(SUM(rs.sold)::NUMERIC
-      / (COALESCE(MAX(od.rooms), MAX(f.total_rooms)) * COALESCE(MAX(od.days), COUNT(DISTINCT rs.stay_date))), 4)
+      / (COALESCE(MAX(od.rooms), MAX(f.total_rooms)) * COUNT(DISTINCT rs.stay_date) FILTER (WHERE rs.sold > 0)), 4)
   END AS occ
 FROM raw_room_sales rs
 LEFT JOIN dim_facility f ON rs.facility = f.facility
