@@ -39,8 +39,10 @@ export default function OverviewPage() {
   const [budgetByMonth, setBudgetByMonth] = useState<Record<string, number | null>>({})
   const [aiSummary, setAiSummary] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
+  const [aiErr, setAiErr] = useState('')
   const [aiIssue, setAiIssue] = useState('')
   const [aiIssueLoading, setAiIssueLoading] = useState(false)
+  const [aiIssueErr, setAiIssueErr] = useState('')
   const [channels, setChannels] = useState<ChannelRow[]>([])
   const [loading, setLoading] = useState(true)
   const [initiativeMissing, setInitiativeMissing] = useState(false)
@@ -96,7 +98,7 @@ export default function OverviewPage() {
   const genSummary = useCallback(async (facility: string, month: string, force = false) => {
     const key = `${facility}|${month}`
     if (!force && summaryCache.has(key)) { setAiSummary(summaryCache.get(key)!); return }
-    setAiLoading(true); setAiSummary('')
+    setAiLoading(true); setAiSummary(''); setAiErr('')
     try {
       const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch('/api/insight', {
@@ -107,14 +109,15 @@ export default function OverviewPage() {
       const d = await res.json()
       const text = d.content || ''
       setAiSummary(text); if (text) summaryCache.set(key, text)
-    } catch { setAiSummary('') } finally { setAiLoading(false) }
+      if (!text && d.error) setAiErr(String(d.error))
+    } catch (e) { setAiSummary(''); setAiErr(e instanceof Error ? e.message : String(e)) } finally { setAiLoading(false) }
   }, [])
 
   // 概要のAI課題と対策（参考）。サマリと同じく1つだけ保存して全員で共有。
   const genIssue = useCallback(async (facility: string, month: string, force = false) => {
     const key = `${facility}|${month}`
     if (!force && issueCache.has(key)) { setAiIssue(issueCache.get(key)!); return }
-    setAiIssueLoading(true); setAiIssue('')
+    setAiIssueLoading(true); setAiIssue(''); setAiIssueErr('')
     try {
       const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch('/api/insight', {
@@ -125,7 +128,8 @@ export default function OverviewPage() {
       const d = await res.json()
       const text = d.content || ''
       setAiIssue(text); if (text) issueCache.set(key, text)
-    } catch { setAiIssue('') } finally { setAiIssueLoading(false) }
+      if (!text && d.error) setAiIssueErr(String(d.error))
+    } catch (e) { setAiIssue(''); setAiIssueErr(e instanceof Error ? e.message : String(e)) } finally { setAiIssueLoading(false) }
   }, [])
 
   useEffect(() => {
@@ -224,6 +228,8 @@ export default function OverviewPage() {
               <p className="text-sm" style={{ color: 'var(--text-dim)' }}>生成中...</p>
             ) : aiSummary ? (
               <AssistantContent content={aiSummary} />
+            ) : aiErr ? (
+              <p className="text-sm" style={{ color: 'var(--red)' }}>生成エラー: {aiErr}</p>
             ) : (
               <p className="text-sm" style={{ color: 'var(--text-dim)' }}>AIサマリは未生成です（APIキー設定後に表示されます）。</p>
             )}
@@ -249,6 +255,8 @@ export default function OverviewPage() {
               <p className="text-sm" style={{ color: 'var(--text-dim)' }}>生成中...</p>
             ) : aiIssue ? (
               <AssistantContent content={aiIssue} />
+            ) : aiIssueErr ? (
+              <p className="text-sm" style={{ color: 'var(--red)' }}>生成エラー: {aiIssueErr}</p>
             ) : (
               <p className="text-sm" style={{ color: 'var(--text-dim)' }}>課題と対策は未生成です（APIキー設定後に表示されます）。</p>
             )}
