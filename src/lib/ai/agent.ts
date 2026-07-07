@@ -223,8 +223,11 @@ export async function runInsight(
   const system = `${INSIGHT_PERSONA}\n${profileCtx}\n以下の【実データ】のみを根拠に分析してください（query_dataツールは使わない・推測の数値は作らない）。月は'YYYY-MM'、fiscal_year'2025'=2025/4〜2026/3、occは0-1の稼働率。`
   const prompt = kind === 'summary' ? SUMMARY_PROMPT(month) : ISSUE_PROMPT(month)
   const resp = await client.messages.create({
-    model: MODEL, max_tokens: 2000, system,
+    model: MODEL, max_tokens: 4000, system,
     messages: [{ role: 'user', content: `${prompt}\n\n【実データ】\n${dataBlock}` }],
   })
-  return resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
+  const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
+  // 生成が途中で止まった/空の場合は理由を添えて返す（呼び出し側で可視化）
+  if (!text) throw new Error(`AIが空の応答を返しました（stop_reason=${resp.stop_reason ?? '不明'}）`)
+  return text
 }
