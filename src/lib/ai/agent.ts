@@ -85,33 +85,15 @@ async function loadAiCatalog(sb: any): Promise<{ tables: Set<string>; schemaText
   }
 }
 
-// ---- AIのデータ読み取り（K30） ----
-// AI_DB_URL があれば ai_reader ロールで mart_ai スキーマのみ読む（物理防御）。
-// 未設定時は従来どおり service_role の REST（フォールバック。K30適用完了後は AI_DB_URL 運用が正）。
-async function aiData(sb: any, input: AiQueryInput, allowedFacilities: string[] | null): Promise<any[]> {
-  if (aiDbAvailable()) {
-    return queryMartAi({ ...input, facilityIn: allowedFacilities ?? undefined })
+// ---- AIのデータ読み取り（K30・物理防御） ----
+// 必ず ai_reader ロールで mart_ai スキーマのみを読む（AI_DB_URL 経由）。
+// AI_DB_URL 未設定なら「AIはデータを読まない（エラー）」＝service_roleでの直読み経路は撤去済み。
+// これにより、AIが公開スキーマ（個人給与を含む）を service_role で読む経路は存在しない。
+async function aiData(_sb: any, input: AiQueryInput, allowedFacilities: string[] | null): Promise<any[]> {
+  if (!aiDbAvailable()) {
+    throw new Error('AIのデータ接続（AI_DB_URL）が未設定です。管理者にご連絡ください。')
   }
-  // legacy REST（public スキーマ・コード許可リストのみが砦の旧経路）
-  let q = sb.from(input.table).select(input.columns || '*')
-  if (allowedFacilities != null) {
-    if (allowedFacilities.length === 0) throw new Error('閲覧可能な施設がありません')
-    q = q.in('facility', allowedFacilities)
-  }
-  for (const f of input.filters ?? []) {
-    if (f.op === 'eq') q = q.eq(f.column, f.value)
-    else if (f.op === 'gte') q = q.gte(f.column, f.value)
-    else if (f.op === 'lte') q = q.lte(f.column, f.value)
-    else if (f.op === 'like') q = q.ilike(f.column, `%${f.value}%`)
-    else if (f.op === 'neq') q = q.neq(f.column, f.value)
-    else if (f.op === 'in') q = q.in(f.column, Array.isArray(f.value) ? f.value : [f.value])
-    else throw new Error(`不正な演算子: ${f.op}`)
-  }
-  if (input.order?.column) q = q.order(input.order.column, { ascending: input.order.ascending !== false })
-  q = q.limit(Math.min(input.limit || 100, 300))
-  const { data, error } = await q
-  if (error) throw new Error(error.message)
-  return data ?? []
+  return queryMartAi({ ...input, facilityIn: allowedFacilities ?? undefined })
 }
 
 // query_data ツール本体。許可リスト（C0自動生成）でテーブルを検証し、aiData で読む

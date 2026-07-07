@@ -58,9 +58,11 @@ const BOTTOM_TOOLS: { href: string; label: string }[] = [
 
 export default function Sidebar() {
   const pathname = usePathname()
-  const { facilities, current, setCurrent } = useFacility()
+  const { facilities, current, setCurrent, isAdmin } = useFacility()
   const router = useRouter()
   const [openGroup, setOpenGroup] = useState<string | null>(null)
+  // 管理者/オーナーのみ「灯の頭の中」を表示（ページ側でも権限ガード）
+  const bottomTools = isAdmin ? [...BOTTOM_TOOLS, { href: '/knowledge', label: '灯の頭の中' }] : BOTTOM_TOOLS
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -162,7 +164,7 @@ export default function Sidebar() {
         </div>
 
         <div className="space-y-0.5">
-          {BOTTOM_TOOLS.map((item) => {
+          {bottomTools.map((item) => {
             const active = pathname === item.href
             return (
               <Link
