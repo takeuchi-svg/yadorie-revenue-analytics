@@ -17,8 +17,10 @@ interface KpiRow { month: string; revenue: number | null; guests: number | null;
 interface ActRow { month: string; item_code: string; item_name: string; actual: number | null }
 // T13: みなし残業超残業代・派遣時間の手入力→勤怠×賃金の自動算出(mart_labor_cost_monthly)へ切替済み
 
-// 人件費 = 以下のitem_name合計（+ 外注費（人材） or 実績合算「外注費」）
-const LABOR_NAMES = ['給料手当', '賞与', '通勤費', '法定福利費', '福利厚生費', '雑給']
+// 人件費 = 以下のitem_code合計。AI用ビュー labor_cost_ratio_monthly と同一科目に揃える
+// （外注費は「外注費」と分割科目「外注費_人材_/清掃_/その他_」が別勘定で併存＝全て合算）。
+const LABOR_CODES = ['給料手当', '賞与', '通勤費', '法定福利費', '福利厚生費', '雑給',
+  '外注費', '外注費_人材_', '外注費_清掃_', '外注費_その他_', '業務委託料']
 
 const fyOf = (ym: string) => { const y = +ym.slice(0, 4), m = +ym.slice(5, 7); return m >= 4 ? y : y - 1 }
 const fyMonths = (fy: number): string[] => {
@@ -139,8 +141,7 @@ export default function ProductivityPage() {
     const am = actMap[ym]
     if (am) {
       let lc = 0
-      for (const nm of LABOR_NAMES) lc += am.name[nm] ?? 0
-      lc += am.name['外注費（人材）'] ?? am.name['外注費'] ?? 0
+      for (const c of LABOR_CODES) lc += am.code[c] ?? 0
       a.laborCost = lc
       a.plSales = am.code['sales_total'] ?? 0
       a.pGross = (am.code['sales_total'] ?? 0) - (am.code['cogs_total'] ?? 0)
@@ -330,7 +331,7 @@ export default function ProductivityPage() {
 
           <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
             分子（売上・客数・販売室数）は売上実績mart、人件費・付加価値（売上総利益）はPL実績(actual_monthly)、労働時間・人数は勤怠(mart_labor_monthly)。
-            人件費=給料手当+賞与+通勤費+法定福利費+福利厚生費+雑給+外注費（人材）。売上高人件費率はPL基準。
+            人件費=給料手当+賞与+通勤費+法定福利費+福利厚生費+雑給+外注費(人材)+外注費(清掃)+外注費(その他)+業務委託料。売上高人件費率はPL基準。
             ヘルプ勤務は計上先施設へ、本社部門(HQ)は除外。年度の人数は月平均、比率・原単位は年度合算から再計算。前年比は前年同月の勤怠データがある月のみ表示。
           </p>
         </>

@@ -101,7 +101,8 @@ export interface MonthlyKpiRow {
 }
 export interface OccupancyMonthlyRow {
   month: string
-  occ: number | null
+  occ: number | null                 // 稼働日ベース（分母=客室数×稼働日数）
+  occ_calendar_days?: number | null  // 全日ベース（分母=客室数×暦日数）
   rooms_sold: number | null
   operating_days: number | null
   total_rooms: number | null

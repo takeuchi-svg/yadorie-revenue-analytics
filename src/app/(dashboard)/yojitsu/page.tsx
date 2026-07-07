@@ -11,7 +11,7 @@ import { Loading, Empty, LoadError } from '@/components/page-bits'
 interface BRow { fiscal_year: string; month: string; category: string | null; item_code: string; item_name: string; amount: number | null; sort_order: number | null }
 interface ARow { fiscal_year: string; month: string; item_code: string; actual: number | null }
 interface KpiRow { month: string; guests: number | null; adr: number | null; guest_unit: number | null; companion: number | null }
-interface OccRow { month: string; rooms_sold: number | null; occ: number | null; operating_days: number | null }
+interface OccRow { month: string; rooms_sold: number | null; occ: number | null; occ_calendar_days?: number | null; operating_days: number | null }
 
 // 折りたたみ対象カテゴリと、その集計行コード
 const COLLAPSIBLE: Record<string, string> = { '売上': 'sales_total', '原価': 'cogs_total', '人件費': 'labor_total', '販売管理費': 'sga_total' }
@@ -131,7 +131,7 @@ export default function YojitsuPage() {
       fetchAll(() => supabase.from('budget_monthly').select('fiscal_year, month, category, item_code, item_name, amount, sort_order').eq('facility', current).order('id')),
       fetchAll(() => supabase.from('actual_monthly').select('fiscal_year, month, item_code, actual').eq('facility', current).order('id')),
       fetchAll(() => supabase.from('mart_monthly_kpi').select('month, guests, adr, guest_unit, companion').eq('facility', current)),
-      fetchAll(() => supabase.from('mart_occupancy_monthly').select('month, rooms_sold, occ, operating_days').eq('facility', current)),
+      fetchAll(() => supabase.from('mart_occupancy_monthly').select('month, rooms_sold, occ, occ_calendar_days, operating_days').eq('facility', current)),
       supabase.from('dim_operating_days').select('month, rooms').eq('facility', current).then((r) => r),
     ]).then(([b, a, kp, oc, od]: any[]) => {
       setBudget((b as BRow[]) ?? [])
@@ -187,7 +187,7 @@ export default function YojitsuPage() {
   const getActual = (code: string, ym: string): number | null => {
     if (!actualMonths.has(ym)) return null
     switch (code) {
-      case '稼働率': return occMap[ym]?.occ ?? null
+      case '稼働率': return occMap[ym]?.occ_calendar_days ?? occMap[ym]?.occ ?? null   // 全日ベース優先
       case '販売室数': return occMap[ym]?.rooms_sold ?? null
       case '宿泊客数': return kpiMap[ym]?.guests ?? null
       case '客単価': return kpiMap[ym]?.guest_unit ?? null

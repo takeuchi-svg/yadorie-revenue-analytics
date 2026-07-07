@@ -61,7 +61,7 @@ export default function OverviewPage() {
     Promise.all([
       supabase.from('mart_monthly_kpi').select('*').eq('facility', current)
         .order('month', { ascending: false }).limit(12),
-      supabase.from('mart_occupancy_monthly').select('month, occ, rooms_sold, operating_days, total_rooms').eq('facility', current),
+      supabase.from('mart_occupancy_monthly').select('month, occ, occ_calendar_days, rooms_sold, operating_days, total_rooms').eq('facility', current),
       supabase.from('mart_budget_revenue_monthly').select('month, revenue_budget').eq('facility', current),
     ]).then(([kpiRes, occRes, budRes]) => {
       const kpiData = (kpiRes.data as MonthlyKpi[]) ?? []
@@ -69,7 +69,7 @@ export default function OverviewPage() {
       const occMap: Record<string, number | null> = {}
       const capMap: Record<string, number | null> = {}
       ;((occRes.data as OccRow[]) ?? []).forEach((o) => {
-        occMap[o.month] = o.occ
+        occMap[o.month] = o.occ_calendar_days ?? o.occ   // 稼働率は全日ベースを主に表示（未算出時は稼働日ベース）
         capMap[o.month] = (o.total_rooms && o.operating_days) ? o.total_rooms * o.operating_days : null
       })
       const budMap: Record<string, number | null> = {}
