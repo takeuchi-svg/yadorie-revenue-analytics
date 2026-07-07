@@ -6,6 +6,15 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { supabase } from '@/lib/supabase/client'
+import StructuredTab from './structured'
+
+type Tab = 'core' | 'kpi' | 'glossary' | 'standard_pl'
+const TABS: { k: Tab; label: string }[] = [
+  { k: 'core', label: 'プロンプト・ナレッジ' },
+  { k: 'kpi', label: 'KPI辞書' },
+  { k: 'glossary', label: '用語集' },
+  { k: 'standard_pl', label: '基準PL' },
+]
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface Item {
@@ -62,6 +71,7 @@ export default function KnowledgePage() {
   const [diffV, setDiffV] = useState<any | null>(null)
   const [publishNote, setPublishNote] = useState('')
   const [showPublish, setShowPublish] = useState(false)
+  const [tab, setTab] = useState<Tab>('core')
 
   const call = useCallback(async (payload: any) => {
     const { data: { session } } = await supabase.auth.getSession()
@@ -159,6 +169,21 @@ export default function KnowledgePage() {
           <p className="text-sm" style={{ color: 'var(--text-dim)' }}>この画面はオーナー／管理者のみが利用できます。</p>
         </div>
       ) : (
+        <>
+          {/* タブ */}
+          <div className="flex gap-1 mb-4 flex-wrap">
+            {TABS.map((t) => (
+              <button key={t.k} onClick={() => setTab(t.k)}
+                className="px-4 py-1.5 rounded-md text-sm transition-colors"
+                style={{ background: tab === t.k ? 'var(--accent)' : 'var(--surface2)', color: tab === t.k ? '#fff' : 'var(--text-dim)' }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {tab !== 'core' ? (
+            <StructuredTab kind={tab} />
+          ) : (
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
           {/* 一覧 */}
           <div className="space-y-4">
@@ -259,6 +284,8 @@ export default function KnowledgePage() {
             )}
           </div>
         </div>
+          )}
+        </>
       )}
 
       {msg && <p className="text-sm mt-3" style={{ color: msg.startsWith('エラー') ? 'var(--red)' : 'var(--green)' }}>{msg}</p>}

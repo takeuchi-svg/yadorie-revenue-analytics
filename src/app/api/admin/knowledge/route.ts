@@ -36,6 +36,121 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ prompts, knowledge })
     }
 
+    // ---- 構造化データ（KPI辞書 / 用語集 / 基準PL）: 閲覧=admin以上・編集/公開=owner ----
+    // 各行が独立して status / draft_content(JSON) / 版履歴を持つ（ai_knowledge と同じ作法）。
+    if (action.startsWith('struct')) {
+      const S: Record<string, { table: string; ver: string; verFk: string; idCol: string; fields: string[] }> = {
+        kpi: { table: 'kpi_definition', ver: 'kpi_definition_version', verFk: 'kpi_key', idCol: 'kpi_key',
+               fields: ['kpi_key', 'label_ja', 'formula', 'numerator', 'denominator', 'unit', 'direction', 'note'] },
+        glossary: { table: 'glossary', ver: 'glossary_version', verFk: 'term', idCol: 'term',
+               fields: ['term', 'definition_ja', 'note'] },
+        standard_pl: { table: 'standard_pl_master', ver: 'standard_pl_master_version', verFk: 'std_id', idCol: 'id',
+               fields: ['facility_type', 'item_key', 'value', 'unit', 'note'] },
+      }
+      const kind = body.kind as string
+      const cfg = S[kind]
+      if (!cfg) return NextResponse.json({ error: '不明な種別' }, { status: 400 })
+      const canView = myRank >= 2   // admin 以上
+      const canEditStruct = myRank >= 3 // owner のみ
+      if (!canView) return NextResponse.json({ error: '閲覧権限がありません' }, { status: 403 })
+
+      // 一覧
+      if (action === 'structList') {
+        const { data, error } = await sb.from(cfg.table).select('*').order(cfg.idCol)
+        if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        return NextResponse.json({ rows: data ?? [], canEdit: canEditStruct })
+      }
+
+      // 以降は編集系（owner のみ）
+      if (!canEditStruct) return NextResponse.json({ error: '編集権限がありません（オーナーのみ）' }, { status: 403 })
+
+      // 入力フィールドをホワイトリストで抽出（identity 含む）
+      const pickFields = (src: any): any => {
+        const o: any = {}
+        for (const f of cfg.fields) if (src?.[f] !== undefined) o[f] = src[f] === '' ? null : src[f]
+        return o
+      }
+      // 版履歴に入れる編集フィールドのみ（identity は含めるが id は含めない）
+      const draftFields = (src: any): any => {
+        const o: any = {}
+        for (const f of cfg.fields) o[f] = src?.[f] === '' || src?.[f] === undefined ? null : src[f]
+        return o
+      }
+
+      if (action === 'structVersions') {
+        const { data } = await sb.from(cfg.ver).select('*').eq(cfg.verFk, body.id).order('changed_at', { ascending: false }).limit(50)
+        return NextResponse.json({ versions: data ?? [] })
+      }
+
+      // 下書き保存（新規作成 or 既存の draft_content 更新）
+      if (action === 'structSaveDraft') {
+        const df = draftFields(body.fields ?? {})
+        if (body.id == null || body.id === '') {
+          // 新規: NOT NULL 制約を満たすため列も初期値で埋め、status='draft'（＝未公開・非注入）
+          const ins = pickFields(body.fields ?? {})
+          ins.status = 'draft'
+          ins.draft_content = df
+          ins.updated_by = myEmail
+          ins.updated_at = new Date().toISOString()
+          const { error } = await sb.from(cfg.table).insert(ins)
+          if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+          return NextResponse.json({ ok: true })
+        }
+        // 既存: 公開中の列は触らず draft_content だけ更新
+        const { error } = await sb.from(cfg.table)
+          .update({ draft_content: df, updated_by: myEmail, updated_at: new Date().toISOString() })
+          .eq(cfg.idCol, body.id)
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+        return NextResponse.json({ ok: true })
+      }
+
+      // 公開: draft_content を列へ反映＋版スナップショット。変更メモ必須。
+      if (action === 'structPublish') {
+        const note = (body.change_note ?? '').trim()
+        if (!note) return NextResponse.json({ error: '変更メモは必須です' }, { status: 400 })
+        const { data: row } = await sb.from(cfg.table).select('*').eq(cfg.idCol, body.id).maybeSingle()
+        if (!row) return NextResponse.json({ error: '対象が見つかりません' }, { status: 404 })
+        const r = row as any
+        // 反映元 = 明示 fields > draft_content > 現在の列
+        const src = body.fields ?? r.draft_content ?? r
+        const snap = draftFields(src)
+        const cols = pickFields(src)
+        cols.status = 'published'
+        cols.draft_content = null
+        cols.updated_by = myEmail
+        cols.updated_at = new Date().toISOString()
+        const { error: e1 } = await sb.from(cfg.table).update(cols).eq(cfg.idCol, body.id)
+        if (e1) return NextResponse.json({ error: e1.message }, { status: 400 })
+        await sb.from(cfg.ver).insert({ [cfg.verFk]: body.id, content: snap, status: 'published', change_note: note, changed_by: myEmail })
+        return NextResponse.json({ ok: true })
+      }
+
+      // ロールバック: 版の JSON を列へ復元
+      if (action === 'structRollback') {
+        const { data: v } = await sb.from(cfg.ver).select('content').eq('id', body.version_id).maybeSingle()
+        if (!v) return NextResponse.json({ error: '版が見つかりません' }, { status: 404 })
+        const snap = (v as any).content ?? {}
+        const cols = pickFields(snap)
+        cols.status = 'published'
+        cols.draft_content = null
+        cols.updated_by = myEmail
+        cols.updated_at = new Date().toISOString()
+        const { error } = await sb.from(cfg.table).update(cols).eq(cfg.idCol, body.id)
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+        await sb.from(cfg.ver).insert({ [cfg.verFk]: body.id, content: snap, status: 'published', change_note: `ロールバック（版#${body.version_id}へ復元）`, changed_by: myEmail })
+        return NextResponse.json({ ok: true })
+      }
+
+      // 削除（owner のみ・公開行なら灯からも消える）
+      if (action === 'structDelete') {
+        const { error } = await sb.from(cfg.table).delete().eq(cfg.idCol, body.id)
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+        return NextResponse.json({ ok: true })
+      }
+
+      return NextResponse.json({ error: '不明なアクション' }, { status: 400 })
+    }
+
     // 対象の特定（kind='prompt' は prompt_key / kind='knowledge' は id）
     const kind = body.kind as 'prompt' | 'knowledge'
     const table = kind === 'prompt' ? 'ai_prompt' : 'ai_knowledge'
