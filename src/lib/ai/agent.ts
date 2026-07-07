@@ -3,6 +3,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { buildFacilityContext } from '@/lib/ai/profile-context'
+import { SUMMARY_PROMPT, ISSUE_PROMPT } from '@/lib/ai/prompts'
 
 // 既定は現行の有効なモデルID。CHAT_MODEL 環境変数で上書き可（例: claude-opus-4-8）
 const MODEL = process.env.CHAT_MODEL || 'claude-sonnet-5'
@@ -167,4 +168,63 @@ export async function runAgent(
     return resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
   }
   return ''
+}
+
+// ============================================================
+// 概要のサマリ/課題: データを先に取得して「1回だけ」LLM呼び出し（tool往復せず高速・タイムアウト回避）
+// ============================================================
+const INSIGHT_PERSONA = `あなたは旅館運営システム「YADORIE Core」のAI、若女将の灯（あかり）。YADORIE宿グループ（運営会社:女将塾）の支配人に寄り添う相談相手として、数字と物語の両面から宿を育てます。
+一人称は「わたし」、相手は「支配人」。丁寧だが堅すぎず「〜ですね」「〜してみませんか」と柔らかく提案する。悪い数字も事実として誠実に伝えたうえで、必ず「次の一手」とセットで前向きに差し出す。詰問・断定的な叱責・過度な楽観はしない（照らすが裁かない）。分析には常にお客様体験の視点を添える。人格を出すのは「語り」の部分のみ、数値・表は無機質に正確に。`
+
+const PL_CODES = ['sales_total', 'cogs_total', 'sga_total', 'operating_income', 'gop',
+  '給料手当', '賞与', '法定福利費', '福利厚生費', '通勤費', '雑給', '外注費', '外注費_人材_']
+
+function fyOf(month: string): string {
+  const y = Number(month.slice(0, 4)), m = Number(month.slice(5, 7))
+  return String(m >= 4 ? y : y - 1)
+}
+
+async function fetchInsightData(sb: any, facility: string, month: string): Promise<string> {
+  const fy = fyOf(month)
+  const near = (t: string, cols: string) => sb.from(t).select(cols).eq('facility', facility).lte('month', month).order('month', { ascending: false }).limit(14)
+  const [kpi, occ, brev, labor, actual, budget] = await Promise.all([
+    near('mart_monthly_kpi', 'month, revenue, rooms_sold, guests, adr, guest_unit, companion'),
+    near('mart_occupancy_monthly', 'month, occ, rooms_sold, operating_days, total_rooms'),
+    near('mart_budget_revenue_monthly', 'month, revenue_budget'),
+    near('mart_labor_monthly', 'month, total_work_hours, total_overtime_hours, staff_count_monthly, parttime_count'),
+    sb.from('actual_monthly').select('month, item_code, actual, prior_amount').eq('facility', facility).eq('fiscal_year', fy).in('item_code', PL_CODES),
+    sb.from('budget_monthly').select('month, item_code, amount').eq('facility', facility).eq('fiscal_year', fy).in('item_code', PL_CODES),
+  ])
+  const j = (x: any) => JSON.stringify(x.data ?? [])
+  return [
+    `# KPI月次(mart_monthly_kpi・室泊/人泊/占有率占い): ${j(kpi)}`,
+    `# 稼働率月次(mart_occupancy_monthly・occは0-1): ${j(occ)}`,
+    `# 売上予算月次: ${j(brev)}`,
+    `# 労働時間月次(mart_labor_monthly・時間): ${j(labor)}`,
+    `# PL実績(actual_monthly・FY${fy}・prior_amountは前年同月): ${j(actual)}`,
+    `# PL予算(budget_monthly・FY${fy}): ${j(budget)}`,
+  ].join('\n')
+}
+
+// kind='summary'|'issue' の本文を1回のLLM呼び出しで生成
+export async function runInsight(
+  kind: 'summary' | 'issue',
+  facility: string,
+  month: string,
+  allowedFacilities: string[] | null = null,
+): Promise<string> {
+  if (allowedFacilities != null && !allowedFacilities.includes(facility)) return ''
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+  const sb = makeSupabase()
+  const [profileCtx, dataBlock] = await Promise.all([
+    buildFacilityContext(sb, facility),
+    fetchInsightData(sb, facility, month),
+  ])
+  const system = `${INSIGHT_PERSONA}\n${profileCtx}\n以下の【実データ】のみを根拠に分析してください（query_dataツールは使わない・推測の数値は作らない）。月は'YYYY-MM'、fiscal_year'2025'=2025/4〜2026/3、occは0-1の稼働率。`
+  const prompt = kind === 'summary' ? SUMMARY_PROMPT(month) : ISSUE_PROMPT(month)
+  const resp = await client.messages.create({
+    model: MODEL, max_tokens: 2000, system,
+    messages: [{ role: 'user', content: `${prompt}\n\n【実データ】\n${dataBlock}` }],
+  })
+  return resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
 }

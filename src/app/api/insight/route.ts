@@ -1,8 +1,7 @@
 // 概要ページの AI実績サマリ / 課題と対策 を「キャッシュ優先・無ければ1回だけ生成して保存」する。
 // 保存はサービスロールキーで確実に行うため、誰が開いても最初に生成された1つを全員が共有する。
 import { NextRequest, NextResponse } from 'next/server'
-import { runAgent, makeSupabase, hasApiKey } from '@/lib/ai/agent'
-import { SUMMARY_PROMPT, ISSUE_PROMPT } from '@/lib/ai/prompts'
+import { runInsight, makeSupabase, hasApiKey } from '@/lib/ai/agent'
 import { requireUser, isAuthErr, facilityAllowed } from '@/lib/ai/auth'
 
 export const runtime = 'nodejs'
@@ -33,9 +32,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ content: '', error: 'AIのAPIキー（ANTHROPIC_API_KEY）が未設定です。' })
     }
 
-    // 生成 → 保存（全員で共有）
-    const prompt = kind === 'summary' ? SUMMARY_PROMPT(month) : ISSUE_PROMPT(month)
-    const content = await runAgent([{ role: 'user', content: prompt }], facility, auth.facilities)
+    // 生成 → 保存（全員で共有）。データ先取り＋1回呼び出しでタイムアウト回避
+    const content = await runInsight(kind, facility, month, auth.facilities)
     if (content) {
       try {
         await sb.from(table).upsert(
