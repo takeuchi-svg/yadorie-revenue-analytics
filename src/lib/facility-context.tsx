@@ -58,7 +58,7 @@ export function FacilityProvider({ children }: { children: ReactNode }) {
         if (user) {
           const { data: au, error } = await supabase.from('app_user').select('role').eq('user_id', user.id).maybeSingle()
           if (error) throw error
-          admin = au?.role === 'admin'
+          admin = au?.role === 'admin' || au?.role === 'owner'
           if (admin) {
             allowed = all
           } else {

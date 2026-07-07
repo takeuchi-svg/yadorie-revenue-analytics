@@ -3,8 +3,12 @@
 // テーブル未作成・未入力時は '' を返す（呼び出し側はそのまま連結してよい）。
 import { PROFILE_SECTIONS } from '@/lib/facility-profile-def'
 
+const DEFAULT_PREAMBLE = `【施設プロフィール（この施設の意図・方針。分析・提案の前提として必ず考慮する）】
+※プロフィール=意図、実績DB=事実。両者のギャップにも着目する。「避けたいこと・NG」に反する提案はしない。`
+
 /* eslint-disable @typescript-eslint/no-explicit-any */
-export async function buildFacilityContext(sb: any, facility: string): Promise<string> {
+// preamble: 前文（正本=ai_prompt 'profile_context_template'。注入エンジンから渡される。省略時は既定文）
+export async function buildFacilityContext(sb: any, facility: string, preamble?: string): Promise<string> {
   try {
     const [p, s, ini] = await Promise.all([
       sb.from('dim_facility_profile').select('*').eq('facility', facility).maybeSingle(),
@@ -35,9 +39,7 @@ export async function buildFacilityContext(sb: any, facility: string): Promise<s
     if (iniLines.length) parts.push(`【直近の取組履歴（事実。効果の成否は実績データで判断すること）】\n${iniLines.join('\n')}`)
 
     if (!parts.length) return ''
-    return `\n\n【施設プロフィール（この施設の意図・方針。分析・提案の前提として必ず考慮する）】\n` +
-      `※プロフィール=意図、実績DB=事実。両者のギャップにも着目する。「避けたいこと・NG」に反する提案はしない。\n` +
-      parts.join('\n\n')
+    return `\n\n${(preamble ?? DEFAULT_PREAMBLE).trim()}\n` + parts.join('\n\n')
   } catch {
     return '' // テーブル未作成等は無視（コンテキストなしで動作）
   }

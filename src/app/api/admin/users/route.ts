@@ -17,7 +17,7 @@ async function requireAdmin(req: NextRequest) {
   const { data: { user }, error } = await anon.auth.getUser(token)
   if (error || !user) return { error: '認証失敗' }
   const { data: au } = await admin().from('app_user').select('role').eq('user_id', user.id).maybeSingle()
-  if (!au || au.role !== 'admin') return { error: '権限がありません（管理者のみ）' }
+  if (!au || (au.role !== 'admin' && au.role !== 'owner')) return { error: '権限がありません（管理者のみ）' }
   return { user }
 }
 
@@ -78,6 +78,9 @@ export async function POST(req: NextRequest) {
 
     if (action === 'setRole') {
       const { user_id, role } = body as { user_id: string; role: string }
+      // owner の役割変更・API経由での owner 付与は不可（owner=克樹さん固定。変更はSQLのみ）
+      const { data: target } = await sb.from('app_user').select('role').eq('user_id', user_id).maybeSingle()
+      if (target?.role === 'owner') return NextResponse.json({ error: 'オーナーの役割は変更できません' }, { status: 400 })
       await sb.from('app_user').update({ role: role === 'admin' ? 'admin' : 'member' }).eq('user_id', user_id)
       return NextResponse.json({ ok: true })
     }
@@ -90,6 +93,8 @@ export async function POST(req: NextRequest) {
 
     if (action === 'delete') {
       const { user_id } = body as { user_id: string }
+      const { data: target } = await sb.from('app_user').select('role').eq('user_id', user_id).maybeSingle()
+      if (target?.role === 'owner') return NextResponse.json({ error: 'オーナーは削除できません' }, { status: 400 })
       await sb.from('user_facility').delete().eq('user_id', user_id)
       await sb.from('app_user').delete().eq('user_id', user_id)
       await sb.auth.admin.deleteUser(user_id)

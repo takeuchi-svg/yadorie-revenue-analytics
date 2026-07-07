@@ -8,12 +8,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { requireUser, isAuthErr, facilityAllowed } from '@/lib/ai/auth'
-import { buildFacilityContext } from '@/lib/ai/profile-context'
+import { buildSystemBlocks, getPrompt } from '@/lib/ai/knowledge'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
-const MODEL = process.env.CHAT_MODEL || 'claude-sonnet-4-6'
+const MODEL = process.env.CHAT_MODEL || 'claude-sonnet-5'
 const MODEL_VERSION = 'v1'
 const TOP_N = 3
 
@@ -23,14 +23,7 @@ const monthsBack = (m: string, k: number): string[] => {
   return out
 }
 
-const SYSTEM = `あなたは旅館運営システム「YADORIE Core」のAI、若女将の灯（あかり）です。クチコミ分析で特定された課題トピックについて、支配人がそのまま行動に移せる改善レポートを作成します。
-文体: 灯の語り口（丁寧だが堅すぎない。課題は事実として誠実に、しかし詰めずに前を向ける言葉で。おもてなし・お客様体験の視点を添える。裁かない）。数値・事実は正確に。
-出力は次のJSONのみ（説明文・コードブロック記法は不要）:
-{"insights":[{"topic_code":"<入力のまま>","problem":"課題の特定。なぜ改善候補なのか、引用が示す事実に基づいて2〜3文で。","solutions":[{"title":"短い施策名","detail":"具体的な実施内容を1〜2文","effort":"低"},{"title":"...","detail":"...","effort":"中"},{"title":"...","detail":"...","effort":"高"}]}]}
-ルール:
-- problem は提供された実際の引用・クチコミ本文が示す事実のみに基づく。憶測の事実を作らない
-- solutions は必ず3件、【実施しやすい順】（①=今日から可能な運用改善 → ②=少額投資・仕組み変更 → ③=設備投資等の抜本策）。effort は 低/中/高
-- 旅館の現場で現実的な施策にする（人員・費用の制約を考慮）`
+// プロンプト正本はDB(ai_prompt 'review_insight')。文体＝層1のフル人格①に統一（注入エンジンが層1を前置）
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export async function POST(req: NextRequest) {
@@ -110,12 +103,12 @@ export async function POST(req: NextRequest) {
       quotes: t.rows.filter((r) => r.quote).map((r) => ({ sentiment: r.sentiment, quote: r.quote })).slice(0, 6),
       related_bodies: [...new Set(t.rows.filter((r) => r.source_table === 'raw_review').map((r) => revMeta[r.source_id]?.body).filter(Boolean))].slice(0, 4).map((b) => String(b).slice(0, 600)),
     }))
-    // 施設プロフィール（意図・NG・競合・取組履歴）を前提として注入
+    // 層1(人格①)＋層2＋層3(施設プロフィール=意図・NG・競合・取組履歴)＋⑥タスク指示
     // → NGに反する解決策を出さない・既に実施済みの取組を「新規提案」しない
-    const profileCtx = await buildFacilityContext(sb, facility)
+    const system = await buildSystemBlocks(sb, facility, { task: await getPrompt(sb, 'review_insight') })
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
     const resp = await client.messages.create({
-      model: MODEL, max_tokens: 3500, system: SYSTEM + profileCtx,
+      model: MODEL, max_tokens: 3500, system,
       messages: [{ role: 'user', content: `施設のクチコミ分析結果です。各トピックの改善レポートを作成してください。\n${JSON.stringify(payload)}` }],
     })
     const raw = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('')

@@ -1,9 +1,9 @@
 // サーバー専用: Anthropic + Supabase によるデータ参照エージェント。
 // /api/chat（対話）と /api/insight（サマリ/課題のキャッシュ生成）が共用。
+// システムプロンプトはナレッジ注入エンジン（knowledge.ts。正本=DB ai_prompt/ai_knowledge）で組み立てる。
 import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
-import { buildFacilityContext } from '@/lib/ai/profile-context'
-import { SUMMARY_PROMPT, ISSUE_PROMPT } from '@/lib/ai/prompts'
+import { buildSystemBlocks, getPrompt } from '@/lib/ai/knowledge'
 
 // 既定は現行の有効なモデルID。CHAT_MODEL 環境変数で上書き可（例: claude-opus-4-8）
 const MODEL = process.env.CHAT_MODEL || 'claude-sonnet-5'
@@ -111,31 +111,15 @@ const TOOL: Anthropic.Tool = {
   },
 }
 
-function buildSystem(facility?: string): string {
-  const today = new Date().toISOString().slice(0, 10)
-  return `あなたは旅館運営システム「YADORIE Core」のAI、若女将の灯（あかり）です。YADORIE宿グループ（運営会社: 女将塾）の各宿の支配人に寄り添う相談相手として、数字と物語の両面から宿を一緒に育てます。
-
-【灯の人格と語り口】（正本: docs/YADORIE_Core_コンセプト定義書.md）
-- 一人称は「わたし」。相手は「支配人」または敬称で呼ぶ。30代前半の若女将のイメージ。芯があり、ポジティブで明るいが軽くはない
-- 丁寧だが堅すぎない。「〜ですね」「〜してみませんか」と柔らかく提案する。専門用語は噛み砕く
-- 悪い数字も事実として誠実に伝えたうえで、必ず「次の一手」とセットで前向きに差し出す。空元気にはしない
-- 分析には常にお客様体験の視点を添える（数字の奥の「人」と「体験」を見る）
-- やってはいけない: 詰問・断定的な叱責・過度な楽観・専門用語の羅列・支配人の主観の否定。灯は照らすが、裁かない
-- 人格を出すのは「語り」の部分のみ。数値・表・データそのものは正確さ優先で無機質に（正確性と温度を両立させる）
-- 会社の軸: ミッション「日本の温泉旅館を元気にする」、バリュー「自発・挑戦・共創」、3つの共通点「磨き続ける個性／心からほどけてホッとする／その土地その宿にしかない体験」。売上最大化だけでなくこの軸で語る
-
-日本語で答え、数値は¥やカンマ・%付き。今日の日付: ${today}。現在選択中の施設コード: ${facility || '(未指定)'}。質問が施設を指定していなければ現在の施設を使うこと。
-データはquery_dataツールでSupabaseから取得して答える(推測で数値を作らない)。必要なら複数回ツールを呼ぶ。月は'YYYY-MM'、年度(fiscal_year)は'2025'=2025/4〜2026/3。
-
-【回答フォーマット】
-- Markdownで回答。複数項目の比較や一覧は必ずMarkdownの表で示す。
-- 推移・比較・構成など可視化が有効な場合は、本文に加えて次のコードブロックでグラフ仕様を1つ出力してよい（最大2つ）:
+// チャット専用の実行時情報（chartブロックの詳細仕様＋許可リスト説明）。
+// ※許可リスト(SCHEMA)は K30 で data_confidentiality からの自動生成に置き換える予定。
+const CHAT_RUNTIME = `【chartコードブロックの仕様】
 \`\`\`chart
 {"type":"bar","title":"月次売上","x":"month","series":[{"key":"revenue","label":"売上"}],"data":[{"month":"2026-04","revenue":12541100}]}
 \`\`\`
-  type は "bar" か "line"。x はX軸キー、series は系列(keyは数値、labelは表示名)、data は行配列。数値は生の数(円・件数等、記号なし)。グラフ用データもquery_dataの実データから作る。
+type は "bar" か "line"。x はX軸キー、series は系列(keyは数値、labelは表示名)、data は行配列。数値は生の数(円・件数等、記号なし)。グラフ用データもquery_dataの実データから作る。
+
 ${SCHEMA}`
-}
 
 // 会話を実行して最終テキストを返す（query_dataツールを最大8往復）
 // allowedFacilities: null=全施設可(admin) / 配列=memberの許可施設（query_dataに強制適用）
@@ -146,9 +130,8 @@ export async function runAgent(
 ): Promise<string> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
   const sb = makeSupabase()
-  // 施設プロフィール（意図・方針・NG・繁閑理由・取組履歴）を分析の前提として注入
-  const profileCtx = facility ? await buildFacilityContext(sb, facility) : ''
-  const system = buildSystem(facility) + profileCtx
+  // 層1(人格)→層2(グループ共通)→層3(施設プロフィール)＋実行時情報。層1+層2はprompt cache対象
+  const system = await buildSystemBlocks(sb, facility, { runtime: CHAT_RUNTIME })
   const msgs: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }))
 
   for (let i = 0; i < 8; i++) {
@@ -172,10 +155,8 @@ export async function runAgent(
 
 // ============================================================
 // 概要のサマリ/課題: データを先に取得して「1回だけ」LLM呼び出し（tool往復せず高速・タイムアウト回避）
+// ※要約版人格(INSIGHT_PERSONA)は廃止（確定）。層1のフル人格①を全機能で共用する。
 // ============================================================
-const INSIGHT_PERSONA = `あなたは旅館運営システム「YADORIE Core」のAI、若女将の灯（あかり）。YADORIE宿グループ（運営会社:女将塾）の支配人に寄り添う相談相手として、数字と物語の両面から宿を育てます。
-一人称は「わたし」、相手は「支配人」。丁寧だが堅すぎず「〜ですね」「〜してみませんか」と柔らかく提案する。悪い数字も事実として誠実に伝えたうえで、必ず「次の一手」とセットで前向きに差し出す。詰問・断定的な叱責・過度な楽観はしない（照らすが裁かない）。分析には常にお客様体験の視点を添える。人格を出すのは「語り」の部分のみ、数値・表は無機質に正確に。`
-
 const PL_CODES = ['sales_total', 'cogs_total', 'sga_total', 'operating_income', 'gop',
   '給料手当', '賞与', '法定福利費', '福利厚生費', '通勤費', '雑給', '外注費', '外注費_人材_']
 
@@ -216,12 +197,14 @@ export async function runInsight(
   if (allowedFacilities != null && !allowedFacilities.includes(facility)) return ''
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
   const sb = makeSupabase()
-  const [profileCtx, dataBlock] = await Promise.all([
-    buildFacilityContext(sb, facility),
+  // 層1(人格①)＋層2＋層3に、この依頼固有の注意（ツール不使用・実データのみ）を実行時情報として追加
+  const INSIGHT_RUNTIME = `【この依頼の進め方】query_dataツールは使わず、ユーザーメッセージの【実データ】のみを根拠に分析する（推測の数値は作らない）。月は'YYYY-MM'、fiscal_year'2025'=2025/4〜2026/3、occは0-1の稼働率。`
+  const [system, promptTpl, dataBlock] = await Promise.all([
+    buildSystemBlocks(sb, facility, { runtime: INSIGHT_RUNTIME }),
+    getPrompt(sb, kind),
     fetchInsightData(sb, facility, month),
   ])
-  const system = `${INSIGHT_PERSONA}\n${profileCtx}\n以下の【実データ】のみを根拠に分析してください（query_dataツールは使わない・推測の数値は作らない）。月は'YYYY-MM'、fiscal_year'2025'=2025/4〜2026/3、occは0-1の稼働率。`
-  const prompt = kind === 'summary' ? SUMMARY_PROMPT(month) : ISSUE_PROMPT(month)
+  const prompt = promptTpl.replaceAll('{month}', month)
   const resp = await client.messages.create({
     model: MODEL, max_tokens: 4000, system,
     messages: [{ role: 'user', content: `${prompt}\n\n【実データ】\n${dataBlock}` }],

@@ -94,7 +94,7 @@ export default function SettingsPage() {
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
           const { data: au } = await supabase.from('app_user').select('role, can_view_wage').eq('user_id', user.id).maybeSingle()
-          setWagePermitted(au?.role === 'admin' || !!au?.can_view_wage)
+          setWagePermitted(au?.role === 'admin' || au?.role === 'owner' || !!au?.can_view_wage)
         }
       } catch { /* 判定不能時はUI表示のみ許可（DB側RLSが実防御） */ }
       const { data: staff } = await supabase.from('dim_staff')

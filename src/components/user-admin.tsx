@@ -106,12 +106,16 @@ export default function UserAdmin() {
           <div key={u.user_id} className="rounded-md p-3" style={{ border: '1px solid var(--border)' }}>
             <div className="flex items-center gap-2 mb-2 flex-wrap">
               <span className="text-sm font-medium">{u.email}</span>
-              <select className="field px-2 py-1 text-xs" value={u.role}
-                onChange={async (e) => { await call('setRole', { user_id: u.user_id, role: e.target.value }); reload() }}>
-                <option value="member">一般</option>
-                <option value="admin">管理者</option>
-              </select>
-              {u.role !== 'admin' && (
+              {u.role === 'owner' ? (
+                <span className="text-xs px-2 py-1 rounded-md font-semibold" style={{ background: 'var(--accent)', color: '#fff' }}>オーナー</span>
+              ) : (
+                <select className="field px-2 py-1 text-xs" value={u.role}
+                  onChange={async (e) => { await call('setRole', { user_id: u.user_id, role: e.target.value }); reload() }}>
+                  <option value="member">一般</option>
+                  <option value="admin">管理者</option>
+                </select>
+              )}
+              {u.role === 'member' && (
                 <label className="flex items-center gap-1 text-xs cursor-pointer" style={{ color: 'var(--text-dim)' }} title="ON: 割当施設の従業員の賃金・個人別人件費を閲覧/編集できる">
                   <input type="checkbox" checked={!!u.can_view_wage}
                     onChange={async (e) => { await call('setWagePerm', { user_id: u.user_id, can_view_wage: e.target.checked }); reload() }} />
@@ -124,7 +128,7 @@ export default function UserAdmin() {
               <button onClick={async () => { if (confirm(`${u.email} を削除しますか？`)) { await call('delete', { user_id: u.user_id }); reload() } }}
                 className="text-xs px-2 py-1 rounded-md" style={{ color: 'var(--red)', border: '1px solid var(--border)' }}>削除</button>
             </div>
-            {u.role !== 'admin' && (
+            {u.role === 'member' && (
               <div>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-x-3 gap-y-1 text-xs mb-2">
                   {facilities.map((f) => (
@@ -139,7 +143,11 @@ export default function UserAdmin() {
                   className="text-xs px-3 py-1 rounded-md text-white" style={{ background: 'var(--accent)' }}>施設割当を保存</button>
               </div>
             )}
-            {u.role === 'admin' && <p className="text-xs" style={{ color: 'var(--text-dim)' }}>全施設を閲覧できます</p>}
+            {(u.role === 'admin' || u.role === 'owner') && (
+              <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
+                全施設を閲覧できます{u.role === 'owner' ? '（オーナー: AIナレッジ・プロンプトの編集権限を持ちます）' : ''}
+              </p>
+            )}
           </div>
         ))}
       </div>

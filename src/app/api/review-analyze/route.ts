@@ -7,23 +7,16 @@ import Anthropic from '@anthropic-ai/sdk'
 import { createClient } from '@supabase/supabase-js'
 import { requireUser, isAuthErr, facilityAllowed } from '@/lib/ai/auth'
 import { buildFacilityContext } from '@/lib/ai/profile-context'
+import { getPrompt } from '@/lib/ai/knowledge'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
-const MODEL = process.env.CHAT_MODEL || 'claude-sonnet-4-6'
+const MODEL = process.env.CHAT_MODEL || 'claude-sonnet-5'
 const MODEL_VERSION = 'v1'
 const BATCH = 8
 
-const SYSTEM = `あなたは旅館・ホテルのクチコミ分析の専門家です。与えられた各テキストから「宿の改善・強みに関わるトピック」を抽出します。
-出力は次のJSONのみ（説明文・コードブロック記法は不要）:
-{"results":[{"key":"<入力のkeyをそのまま>","topics":[{"code":"bath_temp","label":"風呂の温度","sentiment":"negative","quote":"該当箇所の短い引用(40字以内)"}]}]}
-ルール:
-- code は英語snake_case。同じ概念には同じcodeを使う（例: bath_temp, bath_crowded, dinner_quality, breakfast_variety, room_view, room_amenity, service_hospitality, checkin_wait, clean_room, price_value, facility_old, location_access）
-- label は短い日本語（8字以内目安）
-- sentiment は positive / negative / neutral
-- 明確に読み取れるトピックのみ。1テキスト最大5件。該当が無ければ topics は空配列
-- 賞賛も抽出する（positive）。改善示唆は negative`
+// プロンプト正本はDB(ai_prompt 'review_analyze')。⑤は灯人格でなく「クチコミ分析の専門家」（仕様どおり）
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export async function POST(req: NextRequest) {
@@ -70,11 +63,15 @@ export async function POST(req: NextRequest) {
     const batch = items.slice(0, BATCH)
 
     // 1回のLLM呼び出しでバッチ全件を分析（施設プロフィール=意図・方針を前提として注入）
-    const profileCtx = await buildFacilityContext(sb, facility)
+    const [taskPrompt, preamble] = await Promise.all([
+      getPrompt(sb, 'review_analyze'),
+      getPrompt(sb, 'profile_context_template'),
+    ])
+    const profileCtx = await buildFacilityContext(sb, facility, preamble)
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
     const user = `施設のクチコミ/アンケート自由記述です。各テキストのトピックを抽出してください。\n` +
       JSON.stringify(batch.map((b) => ({ key: b.key, text: b.text.slice(0, 1500) })), null, 0)
-    const resp = await client.messages.create({ model: MODEL, max_tokens: 3000, system: SYSTEM + profileCtx, messages: [{ role: 'user', content: user }] })
+    const resp = await client.messages.create({ model: MODEL, max_tokens: 3000, system: taskPrompt + profileCtx, messages: [{ role: 'user', content: user }] })
     const raw = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('')
     const jsonStr = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)
     const parsed = JSON.parse(jsonStr) as { results: { key: string; topics: { code: string; label: string; sentiment: string; quote?: string }[] }[] }
