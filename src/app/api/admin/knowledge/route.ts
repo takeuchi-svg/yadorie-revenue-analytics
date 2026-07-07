@@ -3,8 +3,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { requireUser, isAuthErr } from '@/lib/ai/auth'
+import { runAgent, hasApiKey } from '@/lib/ai/agent'
 
 export const runtime = 'nodejs'
+export const maxDuration = 60   // goldenRun は灯を1問実行するため長め
 
 const admin = () => createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } })
 const rank = (r: string) => (r === 'owner' ? 3 : r === 'admin' ? 2 : r === 'member' ? 1 : 0)
@@ -144,6 +146,61 @@ export async function POST(req: NextRequest) {
       // 削除（owner のみ・公開行なら灯からも消える）
       if (action === 'structDelete') {
         const { error } = await sb.from(cfg.table).delete().eq(cfg.idCol, body.id)
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+        return NextResponse.json({ ok: true })
+      }
+
+      return NextResponse.json({ error: '不明なアクション' }, { status: 400 })
+    }
+
+    // ---- ゴールデン質問セット（K40）: 閲覧/実行=admin以上・編集=owner ----
+    if (action.startsWith('golden')) {
+      const canEditG = myRank >= 3
+      if (myRank < 2) return NextResponse.json({ error: '閲覧権限がありません' }, { status: 403 })
+
+      if (action === 'goldenList') {
+        const { data, error } = await sb.from('golden_question').select('*').order('sort_order').order('id')
+        if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+        return NextResponse.json({ rows: data ?? [], canEdit: canEditG })
+      }
+
+      // 1問だけ灯に実行して回答を返す（UI側で1問ずつ呼びタイムアウト回避）
+      if (action === 'goldenRun') {
+        if (!hasApiKey()) return NextResponse.json({ error: 'ANTHROPIC_API_KEY 未設定' }, { status: 400 })
+        const q = (body.question ?? '').toString().trim()
+        if (!q) return NextResponse.json({ error: '質問が空です' }, { status: 400 })
+        const facility = (body.facility || 'FRY').toString()
+        try {
+          const text = await runAgent([{ role: 'user', content: q }], facility, null)
+          return NextResponse.json({ answer: text || '(応答が空でした)' })
+        } catch (e) {
+          return NextResponse.json({ answer: '', error: e instanceof Error ? e.message : String(e) })
+        }
+      }
+
+      if (!canEditG) return NextResponse.json({ error: '編集権限がありません（オーナーのみ）' }, { status: 403 })
+
+      if (action === 'goldenSave') {
+        const f = body.fields ?? {}
+        const question = (f.question ?? '').toString().trim()
+        const expectation = (f.expectation ?? '').toString().trim()
+        if (!question || !expectation) return NextResponse.json({ error: '質問と期待値は必須です' }, { status: 400 })
+        const row: any = {
+          category: f.category || 'kpi_def', question, expectation,
+          facility: f.facility ? String(f.facility) : null,
+          sort_order: Number(f.sort_order) || 0,
+          is_active: f.is_active !== false,
+          updated_by: myEmail, updated_at: new Date().toISOString(),
+        }
+        const { error } = body.id
+          ? await sb.from('golden_question').update(row).eq('id', body.id)
+          : await sb.from('golden_question').insert(row)
+        if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+        return NextResponse.json({ ok: true })
+      }
+
+      if (action === 'goldenDelete') {
+        const { error } = await sb.from('golden_question').delete().eq('id', body.id)
         if (error) return NextResponse.json({ error: error.message }, { status: 400 })
         return NextResponse.json({ ok: true })
       }

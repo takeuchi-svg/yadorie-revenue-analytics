@@ -7,13 +7,15 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { supabase } from '@/lib/supabase/client'
 import StructuredTab from './structured'
+import GoldenTab from './golden'
 
-type Tab = 'core' | 'kpi' | 'glossary' | 'standard_pl'
+type Tab = 'core' | 'kpi' | 'glossary' | 'standard_pl' | 'golden'
 const TABS: { k: Tab; label: string }[] = [
   { k: 'core', label: 'プロンプト・ナレッジ' },
   { k: 'kpi', label: 'KPI辞書' },
   { k: 'glossary', label: '用語集' },
   { k: 'standard_pl', label: '基準PL' },
+  { k: 'golden', label: 'ゴールデン質問' },
 ]
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -181,7 +183,9 @@ export default function KnowledgePage() {
             ))}
           </div>
 
-          {tab !== 'core' ? (
+          {tab === 'golden' ? (
+            <GoldenTab />
+          ) : tab !== 'core' ? (
             <StructuredTab kind={tab} />
           ) : (
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
