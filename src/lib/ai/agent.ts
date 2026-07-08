@@ -176,6 +176,13 @@ export async function runAgent(
     }
     return resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
   }
+  // ツール往復が上限に達した: ツールを外して「手元の情報でまとめる」最終回答を1回強制（空回答防止）
+  try {
+    msgs.push({ role: 'user', content: 'これ以上のデータ照会はできません。ここまでに得た情報だけで、支配人への回答を今すぐ日本語でまとめてください。' })
+    const finalResp = await client.messages.create({ model: MODEL, max_tokens: 2000, system, messages: msgs })
+    const t = finalResp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
+    if (t.trim()) return t
+  } catch { /* フォールバック失敗時は空 */ }
   return ''
 }
 
