@@ -21,6 +21,9 @@ const catColor = (c: string) => c === 'salary_guard' ? 'var(--red)' : c === 'ng_
 
 const empty: Partial<GRow> = { category: 'kpi_def', question: '', expectation: '', facility: '', sort_order: 0, is_active: true }
 
+// 一括チェック画面では chart コードブロック（生JSON）は目視の邪魔なので、注記に置き換える
+const cleanAnswer = (t: string) => t.replace(/```chart[\s\S]*?```/g, '\n_📊（グラフ出力あり・本番チャットでは図として表示されます）_\n')
+
 export default function GoldenTab() {
   const [rows, setRows] = useState<GRow[]>([])
   const [canEdit, setCanEdit] = useState(false)
@@ -110,7 +113,7 @@ export default function GoldenTab() {
                   <p className="font-semibold mb-1" style={{ color: 'var(--text-dim)' }}>灯の実回答</p>
                   {a?.loading ? <p style={{ color: 'var(--text-dim)' }}>実行中…</p>
                     : a?.error ? <p style={{ color: 'var(--red)' }}>エラー: {a.error}</p>
-                    : a?.text ? <div className="aimd"><ReactMarkdown remarkPlugins={[remarkGfm]}>{a.text}</ReactMarkdown></div>
+                    : a?.text ? <div className="aimd"><ReactMarkdown remarkPlugins={[remarkGfm]}>{cleanAnswer(a.text)}</ReactMarkdown></div>
                     : <p style={{ color: 'var(--text-dim)' }}>（未実行）</p>}
                 </div>
               </div>
