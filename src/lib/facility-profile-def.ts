@@ -58,6 +58,9 @@ export const PROFILE_SECTIONS: ProfileSection[] = [
 
 export const INITIATIVE_CATEGORIES = ['食事', '接客', '集客', '設備', '価格', 'オペレーション', 'その他'] as const
 
+// 施設タイプ（基準PL・横断比較の区分。standard_pl_master.facility_type と一致させる）
+export const FACILITY_TYPES = ['小規模旅館', '温泉旅館', '小規模都市型ホテル', '中規模旅館', '都市型ホテル', '高級旅館', '大規模旅館'] as const
+
 // ---- 具体性ゲージ（R1: ルールベース即時判定） ----
 // 0=抽象的(赤) 1=やや抽象(橙) 2=やや具体(黄) 3=具体的(緑)
 const ABSTRACT_WORDS = /(こだわり|おもてなし|心を込め|真心|最高|素晴らし|様々|さまざま|いろいろ|色々|充実|豊富|アットホーム|くつろぎの空間|癒やし|癒し)/g

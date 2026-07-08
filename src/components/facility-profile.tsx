@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { useFacility } from '@/lib/facility-context'
-import { PROFILE_SECTIONS, INITIATIVE_CATEGORIES, concreteness, GAUGE_COLORS } from '@/lib/facility-profile-def'
+import { PROFILE_SECTIONS, INITIATIVE_CATEGORIES, FACILITY_TYPES, concreteness, GAUGE_COLORS } from '@/lib/facility-profile-def'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface Initiative { id: number; year_month: string; category: string | null; title: string; description: string | null; status: string | null; created_by: string | null }
@@ -110,6 +110,7 @@ export default function FacilityProfile() {
     for (const sec of PROFILE_SECTIONS) for (const f of sec.fields) row[f.key] = profile[f.key] || null
     row.price_min = profile.price_min || null
     row.price_max = profile.price_max || null
+    row.facility_type = profile.facility_type || null   // 基準PL照合用の施設タイプ
     const { error } = await supabase.from('dim_facility_profile').upsert(row, { onConflict: 'facility' })
     // 総客室数は dim_facility（旧・設定/施設マスタから統合。予実の在庫数等で使用）
     const { error: e2 } = await supabase.from('dim_facility')
@@ -219,6 +220,14 @@ export default function FacilityProfile() {
                 {si === 0 && (
                   <>
                     <div className="flex gap-4 flex-wrap">
+                      <div>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-dim)' }}>施設タイプ（基準PL・横断比較の区分）</label>
+                        <select className="field px-3 py-1.5 text-sm" style={{ minWidth: 180 }}
+                          value={profile.facility_type ?? ''} onChange={(e) => setField('facility_type', e.target.value)}>
+                          <option value="">（未設定）</option>
+                          {FACILITY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </div>
                       <div>
                         <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-dim)' }}>総客室数（稼働率・予実の在庫数に使用）</label>
                         <input type="number" min={0} className="field px-3 py-1.5 text-sm w-32"

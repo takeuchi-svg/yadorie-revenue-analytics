@@ -22,6 +22,10 @@ export async function buildFacilityContext(sb: any, facility: string, preamble?:
 
     const parts: string[] = []
     if (prof) {
+      // 施設タイプ（基準PL照合の起点。この施設の水準はこのタイプの基準PLで評価する）
+      if ((prof.facility_type ?? '').toString().trim()) {
+        parts.push(`【施設タイプ】${prof.facility_type}（この施設の水準評価は、女将塾の基準PLのうち「${prof.facility_type}」の目標値に照らして行う）`)
+      }
       for (const sec of PROFILE_SECTIONS) {
         const lines = sec.fields
           .map((f) => ({ label: f.label.replace('（★必須）', ''), v: (prof[f.key] ?? '').toString().trim() }))
