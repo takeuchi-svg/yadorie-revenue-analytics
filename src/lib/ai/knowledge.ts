@@ -131,9 +131,11 @@ export async function buildSystemBlocks(
     .replaceAll('{施設}', facility || '(未指定)')
 
   const l2items = layer2.length ? layer2 : DEFAULT_LAYER2
-  // 層2 = グループ共通Markdownナレッジ ＋ 構造化データ（KPI辞書/用語集/基準PL）を提案Eの型で連結。
-  // どちらも cache_control の対象プレフィックス内に含める。空セクションは buildStructuredText 側で除外。
-  const structuredText = buildStructuredText(kpi, glossary, standardPl)
+  // 層2 = 全施設共通のMarkdownナレッジ ＋ KPI辞書・用語集（cache対象プレフィックス。施設非依存で共有）。
+  // 基準PLは全7タイプを毎回積むと重いので層2には入れず、profile-context（層3）で
+  // 「その施設のタイプ1つ分」だけ注入する（standardPl はここでは未使用）。
+  void standardPl
+  const structuredText = buildStructuredText(kpi, glossary, [])
   const layer2Text = [l2items.map((x) => x.content).join('\n\n'), structuredText]
     .filter((s) => s.trim())
     .join('\n\n')

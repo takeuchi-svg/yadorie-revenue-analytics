@@ -23,7 +23,7 @@ const ALLOWED_TABLES = new Set([
 
 const SCHEMA = `参照可能なテーブル/ビュー（列）:
 - mart_monthly_kpi(facility, month 'YYYY-MM', revenue 売上, rooms_sold 室泊数, guests 人泊数, adr 室単価(1室1泊), guest_unit 客単価(人泊単価=1人1泊), companion 同伴係数(人泊÷室泊)) ※チェックイン月に計上(freee計上基準)。稼働率はmart_occupancy_monthlyを使うこと
-- mart_occupancy_monthly(facility, month, rooms_sold 販売室数, operating_days, total_rooms, occ) ※稼働率の正データ(販売数集計表由来)
+- mart_occupancy_monthly(facility, month, rooms_sold 販売室数, operating_days 稼働日数, total_rooms 客室数, occ 稼働率(稼働日ベース), occ_calendar_days 稼働率(全日ベース・特記なければ稼働率はこちらを使う)) ※稼働率の正データ(販売数集計表由来)
 - mart_occupancy_daily(facility, date 'YYYY-MM-DD', rooms_sold, total_rooms, occ)
 - mart_channel_monthly(facility, month, channel チャネル, revenue, rooms, guests, adr, guest_unit)
 - mart_room_type_monthly(facility, month, room_type 部屋タイプ, revenue, rooms_sold, guests, adr)
@@ -47,7 +47,7 @@ const SCHEMA = `参照可能なテーブル/ビュー（列）:
 
 // 生産性KPIの算出ガイド（許可リストと別建て。K20でKPI辞書=層2へ移設予定）
 const PRODUCTIVITY_NOTE = `【生産性KPIの算出方法】※必要に応じてactual_monthlyとmart_labor_monthlyを結合して算出
-- 人件費 = actual_monthlyのitem_name合計: 給料手当+賞与+通勤費+法定福利費+福利厚生費+雑給+外注費（人材）(無ければ外注費)
+- 人件費 = 給料手当+賞与+通勤費+法定福利費+福利厚生費+雑給+外注費(人材)+外注費(清掃)+外注費(その他)+業務委託料（正確な定義はKPI辞書に従う）
 - 売上高人件費率 = 人件費 ÷ 売上(item_code='sales_total') ／ 付加価値 = 売上 − 原価(cogs_total)
 - 従業員1人1時間あたり売上 = 売上(mart_monthly_kpi.revenue) ÷ total_work_hours
 - 1人1時間あたり付加価値 = 付加価値 ÷ total_work_hours ／ 月給社員1人あたり平均残業 = total_overtime_hours ÷ staff_count_monthly
@@ -161,7 +161,7 @@ export async function runAgent(
   const msgs: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }))
 
   for (let i = 0; i < 8; i++) {
-    const resp = await client.messages.create({ model: MODEL, max_tokens: 2000, system, tools: [TOOL], messages: msgs })
+    const resp = await client.messages.create({ model: MODEL, max_tokens: 3000, system, tools: [TOOL], messages: msgs })
     if (resp.stop_reason === 'tool_use') {
       const results: Anthropic.ToolResultBlockParam[] = []
       for (const block of resp.content) {
@@ -179,7 +179,7 @@ export async function runAgent(
   // ツール往復が上限に達した: ツールを外して「手元の情報でまとめる」最終回答を1回強制（空回答防止）
   try {
     msgs.push({ role: 'user', content: 'これ以上のデータ照会はできません。ここまでに得た情報だけで、支配人への回答を今すぐ日本語でまとめてください。' })
-    const finalResp = await client.messages.create({ model: MODEL, max_tokens: 2000, system, messages: msgs })
+    const finalResp = await client.messages.create({ model: MODEL, max_tokens: 3000, system, messages: msgs })
     const t = finalResp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
     if (t.trim()) return t
   } catch { /* フォールバック失敗時は空 */ }
@@ -252,7 +252,7 @@ export async function runInsight(
   ])
   const prompt = promptTpl.replaceAll('{month}', month)
   const resp = await client.messages.create({
-    model: MODEL, max_tokens: 4000, system,
+    model: MODEL, max_tokens: 8000, system,
     messages: [{ role: 'user', content: `${prompt}\n\n【実データ】\n${dataBlock}` }],
   })
   const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')

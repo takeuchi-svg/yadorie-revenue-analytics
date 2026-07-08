@@ -17,15 +17,31 @@ export async function buildFacilityContext(sb: any, facility: string, preamble?:
         .eq('facility', facility).order('year_month', { ascending: false }).limit(15),
     ])
     const prof = p?.data as Record<string, any> | null
+
+    // この施設タイプの基準PL（1タイプ分だけ。全タイプは重いので層2には載せない）
+    let plLine = ''
+    const ftype = (prof?.facility_type ?? '').toString().trim()
+    if (ftype) {
+      const pl = await sb.from('standard_pl_master')
+        .select('item_key, value, unit').eq('facility_type', ftype).eq('status', 'published')
+      const labels: Record<string, string> = {
+        cogs_ratio: '原価率', labor_cost_ratio: '人件費率', sga_ratio: '販管費率',
+        gop_ratio: 'GOP率', ebitda_ratio: 'EBITDA率', oi_ratio: '営業利益率',
+        occ_target: '稼働率目標', adr_target: 'ADR目標',
+      }
+      const items = ((pl?.data as { item_key: string; value: number | null; unit: string | null }[]) ?? [])
+        .filter((r) => r.value != null)
+        .map((r) => `${labels[r.item_key] ?? r.item_key} ${r.unit === 'ratio' ? `${(Number(r.value) * 100).toFixed(1)}%` : Number(r.value).toLocaleString()}`)
+      if (items.length) plLine = `【基準PL（この施設タイプ「${ftype}」の目標水準・対売上）】\n${items.join(' / ')}\n※水準の良し悪しはこの女将塾基準に照らして評価する`
+    }
     const notes = (s?.data as { month: number; note: string | null }[]) ?? []
     const inis = (ini?.data as { year_month: string; category: string | null; title: string; description: string | null; status: string | null }[]) ?? []
 
     const parts: string[] = []
     if (prof) {
-      // 施設タイプ（基準PL照合の起点。この施設の水準はこのタイプの基準PLで評価する）
-      if ((prof.facility_type ?? '').toString().trim()) {
-        parts.push(`【施設タイプ】${prof.facility_type}（この施設の水準評価は、女将塾の基準PLのうち「${prof.facility_type}」の目標値に照らして行う）`)
-      }
+      // 施設タイプ＋基準PL（基準値があればセットで、無ければタイプのみ）
+      if (plLine) parts.push(plLine)
+      else if (ftype) parts.push(`【施設タイプ】${ftype}（水準評価は女将塾の基準PLのうち「${ftype}」の目標値に照らす）`)
       for (const sec of PROFILE_SECTIONS) {
         const lines = sec.fields
           .map((f) => ({ label: f.label.replace('（★必須）', ''), v: (prof[f.key] ?? '').toString().trim() }))
