@@ -158,15 +158,17 @@ export async function runAgent(
   void allowedFacilities
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
   const sb = makeSupabase()
+  // 回答の長さガード: 長文生成で60秒に近づき通信エラー/切れになるのを防ぐ（簡潔＝速い）
+  const BREVITY = `【回答の長さ】簡潔に。要点は2〜4点に絞り、冗長な列挙・前置き・過度な言い換えを避ける。表は必要な列・行だけ、グラフは最大1つ。全体で概ね900字以内を目安に、長くなりそうなら「まず要点→必要なら深掘りを提案」の形にする。`
   const dataBlock = facility ? await fetchChatContext(sb, facility) : ''
   const runtime = dataBlock
-    ? `${CHAT_CHART_SPEC}\n\n【現在の施設の直近データ（この実データのみを根拠に答える。ここに無い指標・他施設は「今は手元にない」と述べ、推測の数値は作らない）】\n${dataBlock}\n\n${PRODUCTIVITY_NOTE}`
-    : `${CHAT_CHART_SPEC}\n\n（施設が未選択のため実データがありません。施設の選択をやさしく促してください）`
+    ? `${CHAT_CHART_SPEC}\n\n${BREVITY}\n\n【現在の施設の直近データ（この実データのみを根拠に答える。ここに無い指標・他施設は「今は手元にない」と述べ、推測の数値は作らない）】\n${dataBlock}\n\n${PRODUCTIVITY_NOTE}`
+    : `${CHAT_CHART_SPEC}\n\n${BREVITY}\n\n（施設が未選択のため実データがありません。施設の選択をやさしく促してください）`
   // 層1(人格)→層2(共通ナレッジ)→層3(施設プロフィール＋直近データ)。層1+層2はprompt cache対象
   const system = await buildSystemBlocks(sb, facility, { runtime })
   const msgs: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }))
-  // max_tokens は表＋グラフ＋語りで長くなりがちなので広めに（3000だと途中で切れていた）
-  const resp = await client.messages.create({ model: MODEL, max_tokens: 8000, system, messages: msgs })
+  // 上限は 4000（≒生成40〜50秒以内に収め60秒タイムアウトを避ける）。簡潔指示と併用。
+  const resp = await client.messages.create({ model: MODEL, max_tokens: 4000, system, messages: msgs })
   return resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
 }
 
