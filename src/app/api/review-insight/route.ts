@@ -108,7 +108,7 @@ export async function POST(req: NextRequest) {
     const system = await buildSystemBlocks(sb, facility, { task: await getPrompt(sb, 'review_insight') })
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
     const resp = await client.messages.create({
-      model: MODEL, max_tokens: 3500, system,
+      model: MODEL, max_tokens: 3500, thinking: { type: 'disabled' }, system,
       messages: [{ role: 'user', content: `施設のクチコミ分析結果です。各トピックの改善レポートを作成してください。\n${JSON.stringify(payload)}` }],
     })
     const raw = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('')

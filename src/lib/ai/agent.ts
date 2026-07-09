@@ -9,6 +9,13 @@ import { aiDbAvailable, queryMartAi, type AiQueryInput } from '@/lib/ai/db'
 // 既定は現行の有効なモデルID。CHAT_MODEL 環境変数で上書き可（例: claude-opus-4-8）
 const MODEL = process.env.CHAT_MODEL || 'claude-sonnet-5'
 
+// 拡張思考(thinking)は全AI呼び出しで無効化する。
+// Claude Sonnet 5 は既定が adaptive thinking＝難しい質問ほど本文の前に「思考」へ
+// トークンと時間を使う。灯はデータを先渡し済みで長考不要なのに、思考が
+// max_tokens を食い潰して「空回答(stop_reason=max_tokens)」「途中切れ」、
+// 生成時間が延びて「60秒タイムアウト(通信エラー)」の根本原因になっていた。
+const NO_THINKING = { type: 'disabled' as const }
+
 // フォールバック用の静的許可リスト（正本は data_confidentiality の C0。K30適用後は自動生成が優先）
 const ALLOWED_TABLES = new Set([
   'mart_monthly_kpi', 'mart_occupancy_monthly', 'mart_occupancy_daily',
@@ -169,7 +176,7 @@ export async function runAgent(
   const sb = makeSupabase()
   const system = await buildChatSystem(sb, facility)
   const msgs: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }))
-  const resp = await client.messages.create({ model: MODEL, max_tokens: 4000, system, messages: msgs })
+  const resp = await client.messages.create({ model: MODEL, max_tokens: 4000, thinking: NO_THINKING, system, messages: msgs })
   return resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
 }
 
@@ -186,7 +193,7 @@ export async function runAgentStream(
   return new ReadableStream<Uint8Array>({
     async start(controller) {
       try {
-        const s = client.messages.stream({ model: MODEL, max_tokens: 4000, system, messages: msgs })
+        const s = client.messages.stream({ model: MODEL, max_tokens: 4000, thinking: NO_THINKING, system, messages: msgs })
         for await (const ev of s) {
           if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
             controller.enqueue(encoder.encode(ev.delta.text))
@@ -329,7 +336,7 @@ export async function runInsight(
   ])
   const prompt = promptTpl.replaceAll('{month}', month)
   const resp = await client.messages.create({
-    model: MODEL, max_tokens: 4000, system,
+    model: MODEL, max_tokens: 4000, thinking: NO_THINKING, system,
     messages: [{ role: 'user', content: `${prompt}\n\n【実データ】\n${dataBlock}` }],
   })
   const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')

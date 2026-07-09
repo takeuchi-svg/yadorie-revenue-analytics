@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
     const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
     const user = `施設のクチコミ/アンケート自由記述です。各テキストのトピックを抽出してください。\n` +
       JSON.stringify(batch.map((b) => ({ key: b.key, text: b.text.slice(0, 1500) })), null, 0)
-    const resp = await client.messages.create({ model: MODEL, max_tokens: 3000, system: taskPrompt + profileCtx, messages: [{ role: 'user', content: user }] })
+    const resp = await client.messages.create({ model: MODEL, max_tokens: 3000, thinking: { type: 'disabled' }, system: taskPrompt + profileCtx, messages: [{ role: 'user', content: user }] })
     const raw = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('')
     const jsonStr = raw.slice(raw.indexOf('{'), raw.lastIndexOf('}') + 1)
     const parsed = JSON.parse(jsonStr) as { results: { key: string; topics: { code: string; label: string; sentiment: string; quote?: string }[] }[] }
