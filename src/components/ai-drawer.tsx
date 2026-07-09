@@ -77,6 +77,36 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
 
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }) }, [messages, loading])
 
+  // 会話メモリ: 履歴API呼び出し（(ユーザー×施設)単位）
+  const historyCall = async (payload: Record<string, unknown>) => {
+    const { data: { session } } = await supabase.auth.getSession()
+    return fetch('/api/chat-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
+      body: JSON.stringify({ ...payload, facility: current }),
+    })
+  }
+  const saveMsg = (role: 'user' | 'assistant', content: string) => {
+    if (content.trim()) historyCall({ action: 'append', role, content }).catch(() => {})
+  }
+
+  // 施設切替・初回オープンで履歴を復元
+  useEffect(() => {
+    let alive = true
+    setMessages([])
+    historyCall({ action: 'load' })
+      .then((r) => r.json())
+      .then((d) => { if (alive && Array.isArray(d.messages)) setMessages(d.messages) })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [current]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const newThread = async () => {
+    if (loading) return
+    await historyCall({ action: 'clear' }).catch(() => {})
+    setMessages([])
+  }
+
   const send = async (text: string) => {
     const q = text.trim()
     if (!q || loading) return
@@ -84,6 +114,7 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
     setMessages(next)
     setInput('')
     setLoading(true)
+    saveMsg('user', q)   // 会話メモリに保存
     try {
       const { data: { session } } = await supabase.auth.getSession()
       const res = await fetch('/api/chat', {
@@ -95,7 +126,9 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
       // エラー時は JSON({reply})。成功時は text/plain のストリーム。
       if (!res.ok || !res.body || ctype.includes('application/json')) {
         const data = await res.json().catch(() => ({ reply: '通信エラーが発生しました' }))
-        setMessages((m) => [...m, { role: 'assistant', content: data.reply ?? 'エラー' }])
+        const reply = data.reply ?? 'エラー'
+        setMessages((m) => [...m, { role: 'assistant', content: reply }])
+        saveMsg('assistant', reply)
         setLoading(false)
         return
       }
@@ -110,12 +143,15 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
         acc += decoder.decode(value, { stream: true })
         setMessages((m) => { const c = m.slice(); c[c.length - 1] = { role: 'assistant', content: acc }; return c })
       }
+      const finalText = acc.trim() ? acc : '回答の生成に時間がかかりました。質問を具体的にして再度お試しください。'
       if (!acc.trim()) {
-        setMessages((m) => { const c = m.slice(); c[c.length - 1] = { role: 'assistant', content: '回答の生成に時間がかかりました。質問を具体的にして再度お試しください。' }; return c })
+        setMessages((m) => { const c = m.slice(); c[c.length - 1] = { role: 'assistant', content: finalText }; return c })
       }
+      saveMsg('assistant', finalText)
       setLoading(false)
     } catch {
       setMessages((m) => [...m, { role: 'assistant', content: '通信エラーが発生しました' }])
+      saveMsg('assistant', '通信エラーが発生しました')
       setLoading(false)
     }
   }
@@ -131,7 +167,13 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
             <div className="text-[10px]" style={{ color: 'var(--text-dim)' }}>YADORIE Coreの若女将 ・ {currentFacility?.name ?? current} のデータを参照</div>
           </div>
         </div>
-        <button onClick={onClose} className="text-lg leading-none px-2 hover:opacity-70" style={{ color: 'var(--text-dim)' }}>✕</button>
+        <div className="flex items-center gap-1">
+          <button onClick={newThread} disabled={loading || messages.length === 0}
+            className="text-[11px] px-2 py-1 rounded-md hover:opacity-80 disabled:opacity-40"
+            style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}
+            title="この施設の相談を区切って新しく始める（過去は残ります）">＋ 新しい相談</button>
+          <button onClick={onClose} className="text-lg leading-none px-2 hover:opacity-70" style={{ color: 'var(--text-dim)' }}>✕</button>
+        </div>
       </div>
 
       {/* messages */}
