@@ -53,8 +53,10 @@ export default function ShiftPage() {
   // モーダル
   const [segEdit, setSegEdit] = useState<{ staff: string; date: string; shiftId: number } | null>(null)
   const [segDraft, setSegDraft] = useState<ShiftSegment[]>([])
-  const [timeEdit, setTimeEdit] = useState<{ staff: string; date: string; shiftId: number; start: string; end: string } | null>(null)  // #3 時間帯ミニ編集
+  const [timeEdit, setTimeEdit] = useState<{ staff: string; date: string; shiftId: number; start: string; end: string; brk: number } | null>(null)  // #3 時間帯ミニ編集(休憩付き)
   const [ganttDate, setGanttDate] = useState<string | null>(null)  // #4 日別ガント
+  const [zoom, setZoom] = useState(1)          // 文字サイズ拡大（年長者対策）
+  const [fullscreen, setFullscreen] = useState(false)  // 全画面表示
   const [spotOpen, setSpotOpen] = useState(false)
   const [spotName, setSpotName] = useState(''); const [spotWage, setSpotWage] = useState<number | ''>('')
 
@@ -275,7 +277,8 @@ export default function ShiftPage() {
     const p = patMap[c.patternId]
     const start = (seg?.start_time ?? p?.start_time ?? '09:00').slice(0, 5)
     const end = (seg?.end_time ?? p?.end_time ?? '17:00').slice(0, 5)
-    setTimeEdit({ staff: staffCode, date, shiftId, start, end })
+    const brk = seg?.break_minutes ?? p?.break_minutes ?? 0
+    setTimeEdit({ staff: staffCode, date, shiftId, start, end, brk })
   }
   const saveTimeEditor = async () => {
     if (!timeEdit) return
@@ -284,7 +287,7 @@ export default function ShiftPage() {
       const c = cells[ck(timeEdit.staff, timeEdit.date)]
       const p = c?.patternId != null ? patMap[c.patternId] : null
       const roleId = segByShift[timeEdit.shiftId]?.[0]?.role_id ?? p?.default_role_id ?? roles[0]?.role_id ?? 0
-      const brk = segByShift[timeEdit.shiftId]?.[0]?.break_minutes ?? p?.break_minutes ?? 0
+      const brk = Math.max(0, timeEdit.brk || 0)
       const wm = segMinutes(timeEdit.start, timeEdit.end, brk)
       const seg: ShiftSegment = { seq: 1, role_id: roleId, start_time: timeEdit.start, end_time: timeEdit.end, break_minutes: brk, work_minutes: wm }
       await saveSegments(timeEdit.shiftId, [seg])
@@ -343,12 +346,16 @@ export default function ShiftPage() {
     finally { setSaving(false) }
   }
 
+  const printShift = () => window.print()
+
   const patOptions = useMemo(() => ({ work: patterns.filter((p) => p.pattern_type === '勤務'), off: patterns.filter((p) => p.pattern_type === '休日') }), [patterns])
   const wdColor = (wd: number) => (wd === 0 ? 'var(--red)' : wd === 6 ? 'var(--accent)' : 'var(--text-dim)')
   const btnGhost = 'px-3 py-1.5 text-xs rounded-md hover:opacity-80'
 
   return (
     <div className="p-6">
+      {/* 印刷/PDF: シフト表だけを横向きで出力（張り出し用） */}
+      <style>{`@media print { body * { visibility: hidden !important; } .shift-print, .shift-print * { visibility: visible !important; } .shift-print { position: absolute !important; left: 0; top: 0; width: auto !important; max-height: none !important; overflow: visible !important; box-shadow: none !important; } .shift-print table { zoom: 1 !important; } @page { size: A4 landscape; margin: 8mm; } }`}</style>
       <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold mb-1">シフト・労務</h1>
@@ -356,6 +363,12 @@ export default function ShiftPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <input type="month" className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)} />
+          <div className="flex items-center gap-0.5">
+            <button onClick={() => setZoom((z) => Math.max(0.8, +(z - 0.1).toFixed(2)))} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }} title="文字を小さく">A−</button>
+            <button onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(2)))} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }} title="文字を大きく">A+</button>
+          </div>
+          <button onClick={() => setFullscreen(true)} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>全画面</button>
+          <button onClick={printShift} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>PDF/印刷</button>
           <button onClick={copyPrevMonth} disabled={saving} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>前月コピー</button>
           <button onClick={() => setSpotOpen(true)} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>スポット追加</button>
           {copyBuf && <button onClick={doPaste} className={btnGhost} style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>貼付（{copyBuf.rows === 1 && copyBuf.cols === 1 && sel.size ? `${sel.size}セル` : `${copyBuf.rows}×${copyBuf.cols}`}）</button>}
@@ -403,9 +416,22 @@ export default function ShiftPage() {
             </div>
           </details>
 
-          {/* 月グリッド */}
-          <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 280px)' }}>
-            <table className="text-xs border-separate" style={{ borderSpacing: 0 }}>
+          {/* 月グリッド（全画面ラップ） */}
+          <div className={fullscreen ? 'fixed inset-0 z-40 p-3 flex flex-col' : ''} style={fullscreen ? { background: 'var(--bg)' } : undefined}>
+            {fullscreen && (
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <span className="text-sm font-semibold">{currentFacility?.name ?? current} — {month} シフト表</span>
+                <div className="ml-auto flex items-center gap-1">
+                  <button onClick={() => setZoom((z) => Math.max(0.8, +(z - 0.1).toFixed(2)))} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }} title="文字を小さく">A−</button>
+                  <span className="text-xs w-10 text-center" style={{ color: 'var(--text-dim)' }}>{Math.round(zoom * 100)}%</span>
+                  <button onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(2)))} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }} title="文字を大きく">A+</button>
+                  <button onClick={printShift} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>PDF/印刷</button>
+                  <button onClick={() => setFullscreen(false)} className={btnGhost} style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>✕ 閉じる</button>
+                </div>
+              </div>
+            )}
+            <div className={`card overflow-auto shift-print ${fullscreen ? 'flex-1' : ''}`} style={{ maxHeight: fullscreen ? 'none' : 'calc(100vh - 280px)' }}>
+            <table className="text-xs border-separate" style={{ borderSpacing: 0, zoom }}>
               <thead>
                 <tr>
                   <th className="px-2 h-12 text-left whitespace-nowrap sticky left-0 top-0 z-30" style={{ minWidth: 150, background: 'var(--surface2)', borderRight: '2px solid var(--border)' }}>氏名</th>
@@ -463,6 +489,7 @@ export default function ShiftPage() {
                 </tr>
               </tbody>
             </table>
+            </div>
           </div>
 
           <div className="grid grid-cols-3 gap-3 mt-4">
@@ -536,11 +563,17 @@ export default function ShiftPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setTimeEdit(null)}>
           <div className="card p-5 w-[320px] max-w-[92vw]" style={{ background: 'var(--surface)' }} onClick={(e) => e.stopPropagation()}>
             <h3 className="text-base font-semibold mb-1">時間帯 — {staffMap[timeEdit.staff]?.name ?? timeEdit.staff}・{timeEdit.date}</h3>
-            <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>開始・終了を設定します（休憩はパターン既定。複数役割に分けたい時は「役割分割」で）。</p>
-            <div className="flex items-center gap-2 mb-4">
+            <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>開始・終了・休憩を設定します（複数役割に分けたい時は「役割分割」で）。</p>
+            <div className="flex items-center gap-2 mb-2">
               <input type="time" className="field px-2 py-1.5 text-sm" value={timeEdit.start} onChange={(e) => setTimeEdit({ ...timeEdit, start: e.target.value })} />
               <span>〜</span>
               <input type="time" className="field px-2 py-1.5 text-sm" value={timeEdit.end} onChange={(e) => setTimeEdit({ ...timeEdit, end: e.target.value })} />
+            </div>
+            <div className="flex items-center gap-2 mb-3 text-sm">
+              <label style={{ color: 'var(--text-dim)' }}>休憩</label>
+              <input type="number" min={0} step={15} className="field px-2 py-1.5 text-sm w-20 text-right" value={timeEdit.brk} onChange={(e) => setTimeEdit({ ...timeEdit, brk: e.target.value === '' ? 0 : Number(e.target.value) })} />
+              <span style={{ color: 'var(--text-dim)' }}>分</span>
+              <span className="ml-auto">実働 <b>{(segMinutes(timeEdit.start, timeEdit.end, Math.max(0, timeEdit.brk || 0)) / 60).toFixed(1)}h</b></span>
             </div>
             <div className="flex justify-end gap-2">
               <button className="text-sm px-3 py-1.5 rounded-md" style={{ border: '1px solid var(--border)' }} onClick={() => setTimeEdit(null)}>キャンセル</button>
@@ -584,10 +617,10 @@ export default function ShiftPage() {
               </div>
               {rows.length === 0 ? <p className="text-sm py-8 text-center" style={{ color: 'var(--text-dim)' }}>この日の勤務はありません。</p> : (
                 <div>
-                  <div className="flex text-[10px]" style={{ color: 'var(--text-dim)' }}>
+                  <div className="flex text-[11px]" style={{ color: 'var(--text-dim)' }}>
                     <div style={{ width: 120, flexShrink: 0 }} />
-                    <div className="relative flex-1" style={{ height: 16 }}>
-                      {ticks.map((t) => <span key={t} className="absolute" style={{ left: `${(t - lo) / span * 100}%`, transform: 'translateX(-50%)' }}>{fmt(t)}</span>)}
+                    <div className="relative flex-1" style={{ height: 18 }}>
+                      {ticks.map((t, i) => (i % 2 === 0 ? <span key={t} className="absolute" style={{ left: `${(t - lo) / span * 100}%`, transform: 'translateX(-50%)' }}>{Math.floor(t / 60) % 24}時</span> : null))}
                     </div>
                   </div>
                   <div className="space-y-1 mt-1">
