@@ -53,6 +53,9 @@ export default function ShiftPage() {
   // #4 ペイント方式: パターンを選んでセルをクリック/ドラッグで塗る
   const [paintBrush, setPaintBrush] = useState<number | 'clear' | null>(null)
   const paintingRef = useRef(false)
+  // 1日分まるごとコピー（列コピー）
+  const [dayBuf, setDayBuf] = useState<Record<string, { patternId: number | null; minutes: number }> | null>(null)
+  const [dayBufDate, setDayBufDate] = useState<string>('')
   // #3 ガントのバー端ドラッグ（15分刻み）
   const dragRef = useRef<{ shiftId: number; edge: 'start' | 'end'; rectLeft: number; rectWidth: number; lo: number; hi: number; staff: string; date: string } | null>(null)
   // モーダル
@@ -184,6 +187,25 @@ export default function ShiftPage() {
     setDirtyCells((prev) => { const n = new Set(prev); keys.forEach((k) => n.add(k)); return n })
     setMsg(`貼付しました（${copyBuf.rows}人 × ${copyBuf.cols}日）`)
   }, [copyBuf, sel, staff, days])
+
+  // 1日分（その日の全員）をコピー／別の日へ貼付
+  const copyDay = (date: string) => {
+    const buf: Record<string, { patternId: number | null; minutes: number }> = {}
+    for (const s of staff) { const c = cells[ck(s.staff_code, date)]; buf[s.staff_code] = c ? { patternId: c.patternId, minutes: c.minutes } : { patternId: null, minutes: 0 } }
+    setDayBuf(buf); setDayBufDate(date)
+    setMsg(`${date} の1日分をコピーしました。貼付先の日付の「貼」を押してください`)
+  }
+  const pasteDay = (date: string) => {
+    if (!dayBuf) return
+    const keys: string[] = []
+    setCells((prev) => {
+      const n = { ...prev }
+      for (const s of staff) { const src = dayBuf[s.staff_code]; if (!src) continue; const k = ck(s.staff_code, date); n[k] = { ...n[k], patternId: src.patternId, minutes: src.minutes }; keys.push(k) }
+      return n
+    })
+    setDirtyCells((prev) => { const n = new Set(prev); keys.forEach((k) => n.add(k)); return n })
+    setMsg(`${date} に貼付しました（${dayBufDate} の1日分）`)
+  }
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -469,6 +491,8 @@ export default function ShiftPage() {
             ))}
             <button onClick={() => setPaintBrush(paintBrush === 'clear' ? null : 'clear')} className="text-xs px-2 py-1 rounded" style={{ border: `1px solid ${paintBrush === 'clear' ? 'var(--red)' : 'var(--border)'}`, color: 'var(--red)' }}>消す</button>
             {paintBrush !== null && <span className="text-[10px]" style={{ color: 'var(--accent)' }}>← セルをクリック/ドラッグで塗る（もう一度押すと解除）</span>}
+            <span className="text-[11px] ml-2" style={{ color: 'var(--text-dim)' }}>｜ 日付にカーソルを当てて<b>「コ」＝1日コピー / 「貼」＝貼付</b></span>
+            {dayBuf && <span className="text-[11px] flex items-center gap-1" style={{ color: 'var(--accent)' }}>{dayBufDate} の1日をコピー中<button onClick={() => { setDayBuf(null); setMsg('') }} className="underline">解除</button></span>}
           </div>
 
           {/* 月グリッド */}
@@ -477,8 +501,17 @@ export default function ShiftPage() {
               <thead>
                 <tr>
                   <th className="px-2 h-12 text-left whitespace-nowrap sticky left-0 top-0 z-30" style={{ minWidth: 150, background: 'var(--surface2)', borderRight: '2px solid var(--border)' }} />
-                  {days.map((d) => (<th key={d.date} onClick={() => setGanttDate(d.date)} title="クリックでこの日のシフトをガント表示"
-                    className="px-1 h-12 text-center whitespace-nowrap sticky top-0 z-20 cursor-pointer hover:opacity-80" style={{ minWidth: 58, background: 'var(--surface2)' }}><div>{d.day}</div><div style={{ fontSize: 10, color: wdColor(d.wd) }}>{WD[d.wd]}</div></th>))}
+                  {days.map((d) => (
+                    <th key={d.date} className="px-1 h-12 text-center whitespace-nowrap sticky top-0 z-20 group relative" style={{ minWidth: 58, background: 'var(--surface2)' }}>
+                      <div onClick={() => setGanttDate(d.date)} className="cursor-pointer hover:opacity-80" title="クリックでこの日のシフトをガント表示">
+                        <div>{d.day}</div><div style={{ fontSize: 10, color: wdColor(d.wd) }}>{WD[d.wd]}</div>
+                      </div>
+                      <div className="absolute left-0 right-0 hidden group-hover:flex justify-center gap-0.5 z-40" style={{ bottom: 1 }}>
+                        <button onClick={(e) => { e.stopPropagation(); copyDay(d.date) }} className="text-[9px] leading-none px-1 py-0.5 rounded" style={{ border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-dim)' }} title="この日の全員をコピー">コ</button>
+                        {dayBuf && <button onClick={(e) => { e.stopPropagation(); pasteDay(d.date) }} className="text-[9px] leading-none px-1 py-0.5 rounded" style={{ border: '1px solid var(--accent)', background: 'var(--surface)', color: 'var(--accent)' }} title={`${dayBufDate} の1日分をここに貼付`}>貼</button>}
+                      </div>
+                    </th>
+                  ))}
                   <th className="px-1 h-12 text-center sticky top-0 z-20" style={{ minWidth: 52, background: 'var(--surface)', borderLeft: '2px solid var(--border)' }}>時間計</th>
                   <th className="px-1 h-12 text-center sticky top-0 z-20" style={{ minWidth: 40, background: 'var(--surface)' }}>休日</th>
                 </tr>
