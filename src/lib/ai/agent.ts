@@ -165,7 +165,8 @@ export async function runAgent(
   // 層1(人格)→層2(共通ナレッジ)→層3(施設プロフィール＋直近データ)。層1+層2はprompt cache対象
   const system = await buildSystemBlocks(sb, facility, { runtime })
   const msgs: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }))
-  const resp = await client.messages.create({ model: MODEL, max_tokens: 3000, system, messages: msgs })
+  // max_tokens は表＋グラフ＋語りで長くなりがちなので広めに（3000だと途中で切れていた）
+  const resp = await client.messages.create({ model: MODEL, max_tokens: 8000, system, messages: msgs })
   return resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
 }
 
