@@ -476,7 +476,7 @@ export default function ShiftPage() {
             <table className="text-xs border-separate" style={{ borderSpacing: 0, zoom }}>
               <thead>
                 <tr>
-                  <th className="px-2 h-12 text-left whitespace-nowrap sticky left-0 top-0 z-30" style={{ minWidth: 150, background: 'var(--surface2)', borderRight: '2px solid var(--border)' }}>氏名</th>
+                  <th className="px-2 h-12 text-left whitespace-nowrap sticky left-0 top-0 z-30" style={{ minWidth: 150, background: 'var(--surface2)', borderRight: '2px solid var(--border)' }} />
                   {days.map((d) => (<th key={d.date} onClick={() => setGanttDate(d.date)} title="クリックでこの日のシフトをガント表示"
                     className="px-1 h-12 text-center whitespace-nowrap sticky top-0 z-20 cursor-pointer hover:opacity-80" style={{ minWidth: 58, background: 'var(--surface2)' }}><div>{d.day}</div><div style={{ fontSize: 10, color: wdColor(d.wd) }}>{WD[d.wd]}</div></th>))}
                   <th className="px-1 h-12 text-center sticky top-0 z-20" style={{ minWidth: 52, background: 'var(--surface)', borderLeft: '2px solid var(--border)' }}>時間計</th>
@@ -559,7 +559,6 @@ export default function ShiftPage() {
               </tbody>
             </table>
             </div>
-          </div>
 
           <div className="grid grid-cols-3 gap-3 mt-4">
             <div className="card p-4"><div className="text-xs" style={{ color: 'var(--text-dim)' }}>月次 労働時間 合計</div><div className="text-xl font-bold">{fmtNum(summary.totalH)} h</div></div>
@@ -572,10 +571,8 @@ export default function ShiftPage() {
             セル=パターン選択＋時間手修正。<b>Shift+クリックで範囲選択→コピー</b>し、<b>貼付先の左上をクリック→貼付</b>で形のまま複製（⌘/Ctrl+C・V可。単一セルは範囲選択に塗りつぶし）。<b>勤務セルをダブルクリックで役割分割</b>。
             スポットの実働は保存時に実績(raw_attendance_daily/manual)へ記録され総労働時間・KPIに反映。人件費は計画ベースの月次合計のみ表示。
           </p>
-        </>
-      )}
 
-      {/* 役割分割モーダル（T08） */}
+          {/* 役割分割モーダル（T08）※全画面でも出るよう fsRef 内に配置 */}
       {segEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setSegEdit(null)}>
           <div className="card p-5 w-[560px] max-w-[92vw]" style={{ background: 'var(--surface)' }} onClick={(e) => e.stopPropagation()}>
@@ -743,6 +740,9 @@ export default function ShiftPage() {
           </div>
         )
       })()}
+          </div>
+        </>
+      )}
     </div>
   )
 }
