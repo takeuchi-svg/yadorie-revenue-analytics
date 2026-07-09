@@ -485,24 +485,24 @@ export default function ShiftPage() {
               </thead>
               <tbody>
                 {/* 稼働前提（上部に固定・シフト行とは別デザイン）。日付ヘッダはシフト表と共通 */}
-                {([['予算 稼働室/人数', 'budget', 48], ['オンハンド販売室数', 'onhand', 74], ['予測販売室数', 'forecast', 100], ['メモ', 'memo', 126]] as const).map(([label, kind, top], idx, arr) => {
+                {([['予算 稼働室/人数', 'budget', 48], ['オンハンド販売室数', 'onhand', 68], ['予測販売室数', 'forecast', 88], ['メモ', 'memo', 108]] as const).map(([label, kind, top], idx, arr) => {
                   const last = idx === arr.length - 1
                   const bg = 'var(--surface2)'
-                  const bb = last ? '2px solid var(--border)' : '1px solid var(--border)'
+                  const bb = last ? '2px solid var(--border-strong, var(--border))' : '1px solid var(--border)'
                   return (
                     <tr key={kind}>
-                      <td className="px-2 whitespace-nowrap sticky left-0 z-30" style={{ top, height: 26, minWidth: 150, background: bg, color: 'var(--text-dim)', fontSize: 11, fontWeight: 600, borderRight: '2px solid var(--border)', borderBottom: bb }}>{label}</td>
+                      <td className="px-2 whitespace-nowrap sticky left-0 z-30" style={{ top, height: 20, minWidth: 150, background: bg, color: 'var(--text-dim)', fontSize: 11, fontWeight: 600, borderRight: '2px solid var(--border)', borderBottom: bb }}>{label}</td>
                       {days.map((d) => { const r = ctx[d.date]; return (
-                        <td key={d.date} className="px-0.5 sticky z-20 text-center" style={{ top, height: 26, minWidth: 58, background: bg, borderBottom: bb }}>
+                        <td key={d.date} className="px-0.5 sticky z-20 text-center" style={{ top, height: 20, minWidth: 58, background: bg, borderBottom: bb, fontVariantNumeric: 'tabular-nums' }}>
                           {kind === 'budget' ? (<span style={{ fontSize: 11 }}>{r?.budget_rooms ?? '-'}<span style={{ fontSize: 9, color: 'var(--text-dim)' }}>{r?.budget_guests != null ? ` / ${r.budget_guests}` : ''}</span></span>)
-                          : kind === 'memo' ? (<input className="field text-center" style={{ width: 46, fontSize: 10, padding: 2 }} value={r?.memo ?? ''}
+                          : kind === 'memo' ? (<input className="field text-center" style={{ width: 46, fontSize: 10, padding: '1px 2px' }} value={r?.memo ?? ''}
                               onChange={(e) => setCtxField(d.date, { memo: e.target.value })}
                               onMouseEnter={(e) => { const m = ctx[d.date]?.memo; if (m && m.trim()) { const rc = e.currentTarget.getBoundingClientRect(); setMemoPop({ text: m, x: rc.left, y: rc.bottom + 4 }) } }}
                               onMouseLeave={() => setMemoPop(null)} />)
-                          : (<input type="number" min={0} className="field text-center" style={{ width: 40, fontSize: 11, padding: 2 }} value={(kind === 'onhand' ? r?.onhand_rooms : r?.forecast_rooms) ?? ''} onChange={(e) => setCtxField(d.date, kind === 'onhand' ? { onhand_rooms: e.target.value === '' ? null : Number(e.target.value) } : { forecast_rooms: e.target.value === '' ? null : Number(e.target.value) })} />)}
+                          : (<input type="number" min={0} className="field text-center" style={{ width: 40, fontSize: 11, padding: '1px 2px' }} value={(kind === 'onhand' ? r?.onhand_rooms : r?.forecast_rooms) ?? ''} onChange={(e) => setCtxField(d.date, kind === 'onhand' ? { onhand_rooms: e.target.value === '' ? null : Number(e.target.value) } : { forecast_rooms: e.target.value === '' ? null : Number(e.target.value) })} />)}
                         </td>) })}
-                      <td className="sticky z-20" style={{ top, height: 26, minWidth: 52, background: bg, borderLeft: '2px solid var(--border)', borderBottom: bb }} />
-                      <td className="sticky z-20" style={{ top, height: 26, minWidth: 40, background: bg, borderBottom: bb }} />
+                      <td className="sticky z-20" style={{ top, height: 20, minWidth: 52, background: bg, borderLeft: '2px solid var(--border)', borderBottom: bb }} />
+                      <td className="sticky z-20" style={{ top, height: 20, minWidth: 40, background: bg, borderBottom: bb }} />
                     </tr>
                   )
                 })}
@@ -510,9 +510,9 @@ export default function ShiftPage() {
                   const agg = rowAgg(s.staff_code); const tag = s.is_spot ? 'スポット' : (s.wage_type || '未設定')
                   return (
                     <tr key={s.staff_code} style={s.is_spot ? { borderTop: '1px dashed var(--border)' } : undefined}>
-                      <td className="px-2 h-10 whitespace-nowrap sticky left-0 z-10" style={{ background: 'var(--surface)', borderTop: '1px solid var(--border)', borderRight: '2px solid var(--border)' }}>
-                        {s.name ?? s.staff_code}
-                        <span className="ml-1 text-[9px] px-1 py-0.5 rounded" style={{ background: s.is_spot ? 'var(--green)' : 'var(--surface2)', color: s.is_spot ? '#fff' : 'var(--text-dim)' }}>{tag}</span>
+                      <td className="px-2 h-12 whitespace-nowrap sticky left-0 z-10" style={{ background: 'var(--surface)', borderTop: '1px solid var(--border)', borderRight: '2px solid var(--border)' }}>
+                        <span style={{ fontSize: 13 }}>{s.name ?? s.staff_code}</span>
+                        <span className="ml-1 text-[10px] px-1 py-0.5 rounded" style={{ background: s.is_spot ? 'var(--green)' : 'var(--surface2)', color: s.is_spot ? '#fff' : 'var(--text-dim)' }}>{tag}</span>
                       </td>
                       {days.map((d, di) => {
                         const c = cells[ck(s.staff_code, d.date)]; const p = c?.patternId != null ? patMap[c.patternId] : null
@@ -521,33 +521,33 @@ export default function ShiftPage() {
                         const timeRange = isWork ? cellTimeRange(c) : ''
                         const brkH = isWork ? cellBreakH(c) : 0
                         return (
-                          <td key={d.date} className="px-0.5 h-10" title={isWork ? 'ダブルクリックで役割分割' : undefined}
+                          <td key={d.date} className="px-1 h-12" title={isWork ? 'ダブルクリックで役割分割' : undefined}
                             onMouseDown={(e) => {
                               if (e.shiftKey) { e.preventDefault(); selectRect(ri, di, true); return }
                               if (paintBrush !== null) { e.preventDefault(); paintingRef.current = true; applyBrush(s.staff_code, d.date) }
                             }}
                             onMouseEnter={() => { if (paintingRef.current && paintBrush !== null) applyBrush(s.staff_code, d.date) }}
                             onDoubleClick={() => isWork && openSegEditor(s.staff_code, d.date)}
-                            style={{ borderTop: '1px solid var(--border)', background: p?.color ? `${p.color}22` : undefined, boxShadow: selected ? 'inset 0 0 0 2px var(--accent)' : undefined }}>
-                            <select className="w-full text-[10px] rounded" style={{ background: 'transparent', border: '1px solid var(--border)', color: p?.color || 'var(--text)' }}
+                            style={{ borderTop: '1px solid var(--border)', background: p?.color ? `${p.color}12` : undefined, boxShadow: selected ? 'inset 0 0 0 2px var(--accent)' : undefined }}>
+                            <select className="w-full text-[12px] rounded font-medium" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: p?.color || 'var(--text)' }}
                               value={c?.patternId ?? ''} onFocus={() => { anchorRef.current = { r: ri, d: di } }} onChange={(e) => onPattern(s.staff_code, d.date, e.target.value)}>
                               <option value="">－</option>
                               {patOptions.work.map((pt) => <option key={pt.pattern_id} value={pt.pattern_id}>{pt.name}</option>)}
                               {patOptions.off.map((pt) => <option key={pt.pattern_id} value={pt.pattern_id}>{pt.name}</option>)}
                             </select>
-                            <input className="w-full text-[10px] text-center rounded mt-0.5" style={{ background: hasSeg ? 'var(--surface2)' : 'transparent', border: '1px solid var(--border)' }}
+                            <input className="w-full text-[12px] text-center rounded mt-0.5" style={{ background: hasSeg ? 'var(--surface2)' : 'var(--surface)', border: '1px solid var(--border)', fontVariantNumeric: 'tabular-nums' }}
                               value={isWork ? hoursStr(c!.minutes) : ''} disabled={!isWork} title={hasSeg ? '役割分割あり' : undefined}
                               onFocus={() => { anchorRef.current = { r: ri, d: di } }} onChange={(e) => onHours(s.staff_code, d.date, e.target.value, c?.patternId ?? null)} />
                             {timeRange && (
                               <div onClick={(ev) => { ev.stopPropagation(); openTimeEditor(s.staff_code, d.date) }}
-                                className="text-center cursor-pointer" style={{ fontSize: 9, lineHeight: 1.15, color: 'var(--text-dim)', marginTop: 1 }}
+                                className="text-center cursor-pointer" style={{ fontSize: 11, lineHeight: 1.2, color: 'var(--text-dim)', marginTop: 1, fontVariantNumeric: 'tabular-nums' }}
                                 title="クリックで時間帯を編集">{timeRange}{brkH > 0 ? ` (休${brkH.toFixed(1)})` : ''}</div>
                             )}
                           </td>
                         )
                       })}
-                      <td className="px-1 h-10 text-center font-medium" style={{ background: 'var(--surface)', borderLeft: '2px solid var(--border)', borderTop: '1px solid var(--border)' }}>{agg.hours.toFixed(1)}</td>
-                      <td className="px-1 h-10 text-center" style={{ background: 'var(--surface)', borderTop: '1px solid var(--border)', color: 'var(--text-dim)' }}>{agg.off}</td>
+                      <td className="px-1 h-12 text-center font-medium" style={{ background: 'var(--surface)', borderLeft: '2px solid var(--border)', borderTop: '1px solid var(--border)', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>{agg.hours.toFixed(1)}</td>
+                      <td className="px-1 h-12 text-center" style={{ background: 'var(--surface)', borderTop: '1px solid var(--border)', color: 'var(--text-dim)', fontVariantNumeric: 'tabular-nums' }}>{agg.off}</td>
                     </tr>
                   )
                 })}
