@@ -5,6 +5,7 @@ import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { FacilitySelect } from '@/components/facility-select'
 import UserAdmin from '@/components/user-admin'
+import FacilityTypeAdmin from '@/components/facility-type-admin'
 
 interface OtaRow {
   id?: number
@@ -356,7 +357,8 @@ export default function SettingsPage() {
         </p>
       )}
 
-      {/* ユーザー管理（管理者のみ） */}
+      {/* 施設タイプ一括設定・ユーザー管理（管理者のみ） */}
+      {isAdmin && <FacilityTypeAdmin />}
       {isAdmin && <UserAdmin />}
     </div>
   )
