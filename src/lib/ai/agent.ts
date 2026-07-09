@@ -145,45 +145,28 @@ const CHAT_CHART_SPEC = `【chartコードブロックの仕様】
 \`\`\`
 type は "bar" か "line"。x はX軸キー、series は系列(keyは数値、labelは表示名)、data は行配列。数値は生の数(円・件数等、記号なし)。グラフ用データもquery_dataの実データから作る。`
 
-// 会話を実行して最終テキストを返す（query_dataツールを最大8往復）
-// allowedFacilities: null=全施設可(admin) / 配列=memberの許可施設（query_dataに強制適用）
+// 会話を実行して最終テキストを返す。
+// 【方式】往復ゼロ: この施設の直近データを先にまとめて渡し、tool往復なしの「1回のLLM呼び出し」で答える。
+//   → query_dataを最大8往復する旧方式はチャットには遅すぎ・60秒タイムアウトの原因だったため廃止。
+//   （runQuery/TOOL/loadAiCatalog は将来のディープ分析モード用に残置。現行チャットは未使用）
+// allowedFacilities: 施設の閲覧可否は呼び出し側(route)で検証済み。パックは選択施設1つ分。
 export async function runAgent(
   messages: { role: 'user' | 'assistant'; content: string }[],
   facility?: string,
   allowedFacilities: string[] | null = null,
 ): Promise<string> {
+  void allowedFacilities
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
   const sb = makeSupabase()
-  // 層1(人格)→層2(グループ共通)→層3(施設プロフィール)＋実行時情報。層1+層2はprompt cache対象
-  // 許可リスト説明は data_confidentiality(C0) から自動生成（未投入時は静的SCHEMA）
-  const { schemaText } = await loadAiCatalog(sb)
-  const system = await buildSystemBlocks(sb, facility, { runtime: `${CHAT_CHART_SPEC}\n\n${schemaText}\n\n${PRODUCTIVITY_NOTE}` })
+  const dataBlock = facility ? await fetchChatContext(sb, facility) : ''
+  const runtime = dataBlock
+    ? `${CHAT_CHART_SPEC}\n\n【現在の施設の直近データ（この実データのみを根拠に答える。ここに無い指標・他施設は「今は手元にない」と述べ、推測の数値は作らない）】\n${dataBlock}\n\n${PRODUCTIVITY_NOTE}`
+    : `${CHAT_CHART_SPEC}\n\n（施設が未選択のため実データがありません。施設の選択をやさしく促してください）`
+  // 層1(人格)→層2(共通ナレッジ)→層3(施設プロフィール＋直近データ)。層1+層2はprompt cache対象
+  const system = await buildSystemBlocks(sb, facility, { runtime })
   const msgs: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }))
-
-  for (let i = 0; i < 8; i++) {
-    const resp = await client.messages.create({ model: MODEL, max_tokens: 3000, system, tools: [TOOL], messages: msgs })
-    if (resp.stop_reason === 'tool_use') {
-      const results: Anthropic.ToolResultBlockParam[] = []
-      for (const block of resp.content) {
-        if (block.type === 'tool_use') {
-          const out = await runQuery(sb, block.input, allowedFacilities)
-          results.push({ type: 'tool_result', tool_use_id: block.id, content: out })
-        }
-      }
-      msgs.push({ role: 'assistant', content: resp.content })
-      msgs.push({ role: 'user', content: results })
-      continue
-    }
-    return resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
-  }
-  // ツール往復が上限に達した: ツールを外して「手元の情報でまとめる」最終回答を1回強制（空回答防止）
-  try {
-    msgs.push({ role: 'user', content: 'これ以上のデータ照会はできません。ここまでに得た情報だけで、支配人への回答を今すぐ日本語でまとめてください。' })
-    const finalResp = await client.messages.create({ model: MODEL, max_tokens: 3000, system, messages: msgs })
-    const t = finalResp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
-    if (t.trim()) return t
-  } catch { /* フォールバック失敗時は空 */ }
-  return ''
+  const resp = await client.messages.create({ model: MODEL, max_tokens: 3000, system, messages: msgs })
+  return resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
 }
 
 // ============================================================
@@ -191,7 +174,8 @@ export async function runAgent(
 // ※要約版人格(INSIGHT_PERSONA)は廃止（確定）。層1のフル人格①を全機能で共用する。
 // ============================================================
 const PL_CODES = ['sales_total', 'cogs_total', 'sga_total', 'operating_income', 'gop',
-  '給料手当', '賞与', '法定福利費', '福利厚生費', '通勤費', '雑給', '外注費', '外注費_人材_']
+  '給料手当', '賞与', '法定福利費', '福利厚生費', '通勤費', '雑給',
+  '外注費', '外注費_人材_', '外注費_清掃_', '外注費_その他_', '業務委託料']
 
 function fyOf(month: string): string {
   const y = Number(month.slice(0, 4)), m = Number(month.slice(5, 7))
@@ -230,6 +214,67 @@ async function fetchInsightData(sb: any, facility: string, month: string): Promi
     `# 労働時間月次(mart_labor_monthly・時間): ${j(labor)}`,
     `# PL実績(actual_monthly・FY${fy}・prior_amountは前年同月): ${j(actual)}`,
     `# PL予算(budget_monthly・FY${fy}): ${j(budget)}`,
+  ].join('\n')
+}
+
+// チャット用の広めのデータパック。最新実績月を起点に直近14ヶ月＋当月内訳を並列取得し、
+// これを丸ごと灯へ渡して「往復ゼロ・1回」で答えさせる（tool往復による遅さ・タイムアウトを回避）。
+async function fetchChatContext(sb: any, facility: string): Promise<string> {
+  const latest = await aiData(sb, {
+    table: 'mart_monthly_kpi', columns: 'month',
+    filters: [{ column: 'facility', op: 'eq', value: facility }],
+    order: { column: 'month', ascending: false }, limit: 1,
+  }, null).catch(() => [])
+  const anchor = ((latest?.[0]?.month as string) || new Date().toISOString().slice(0, 7))
+  const fy = fyOf(anchor)
+  const trend = (t: string, cols: string) => aiData(sb, {
+    table: t, columns: cols,
+    filters: [{ column: 'facility', op: 'eq', value: facility }, { column: 'month', op: 'lte', value: anchor }],
+    order: { column: 'month', ascending: false }, limit: 14,
+  }, null).catch(() => [])
+  const cur = (t: string, cols: string) => aiData(sb, {
+    table: t, columns: cols,
+    filters: [{ column: 'facility', op: 'eq', value: facility }, { column: 'month', op: 'eq', value: anchor }], limit: 60,
+  }, null).catch(() => [])
+  const pl = (t: string, cols: string) => aiData(sb, {
+    table: t, columns: cols,
+    filters: [
+      { column: 'facility', op: 'eq', value: facility },
+      { column: 'fiscal_year', op: 'in', value: [fy, String(Number(fy) - 1)] },
+      { column: 'item_code', op: 'in', value: PL_CODES },
+    ], limit: 600,
+  }, null).catch(() => [])
+  const [kpi, occ, brev, labor, cxl, onhand, actual, budget, channel, meal, adr, gs, resid] = await Promise.all([
+    trend('mart_monthly_kpi', 'month, revenue, rooms_sold, guests, adr, guest_unit, companion'),
+    trend('mart_occupancy_monthly', 'month, occ, occ_calendar_days, rooms_sold, operating_days, total_rooms'),
+    trend('mart_budget_revenue_monthly', 'month, revenue_budget'),
+    trend('mart_labor_monthly', 'month, total_work_hours, total_overtime_hours, staff_count_monthly, parttime_count'),
+    trend('mart_cxl_summary', 'month, channel, bookings, cancels, cancel_revenue, cxl_rate'),
+    trend('mart_onhand_monthly', 'month, room_nights, room_nights_stayed, room_nights_confirmed, guest_nights, revenue, adr'),
+    pl('actual_monthly', 'month, item_code, actual, prior_amount'),
+    pl('budget_monthly', 'month, item_code, amount'),
+    cur('mart_channel_monthly', 'channel, revenue, rooms, guests, adr, guest_unit'),
+    cur('mart_meal_monthly', 'meal_type, reservations, revenue, rooms, guests'),
+    cur('mart_adr_band_monthly', 'band, bookings, revenue, rooms_total, adr'),
+    cur('mart_gs_monthly', 'group_size, bookings, revenue, rooms_total, adr'),
+    cur('mart_residence_monthly', 'prefecture, region, bookings, guests, revenue'),
+  ])
+  const j = (x: any[]) => JSON.stringify(x ?? [])
+  return [
+    `最新実績月=${anchor} / 年度=${fy}（月は新しい順）`,
+    `# KPI月次(売上/室泊/人泊/ADR/客単価/同伴): ${j(kpi)}`,
+    `# 稼働率月次(occ=稼働日ベース, occ_calendar_days=全日ベース=通常こちら, 0-1): ${j(occ)}`,
+    `# 売上予算月次: ${j(brev)}`,
+    `# 労働時間月次(時間・人数): ${j(labor)}`,
+    `# 取消月次(cxl_rate=取消率): ${j(cxl)}`,
+    `# オンハンド(現時点の予約の入り。将来月=ブッキングペース): ${j(onhand)}`,
+    `# PL実績(FY${fy}と前年・prior_amount=前年同月・item_codeで科目): ${j(actual)}`,
+    `# PL予算(FY${fy}と前年): ${j(budget)}`,
+    `# 【${anchor}】チャネル別: ${j(channel)}`,
+    `# 【${anchor}】喫食別: ${j(meal)}`,
+    `# 【${anchor}】ADR帯別: ${j(adr)}`,
+    `# 【${anchor}】グループサイズ別: ${j(gs)}`,
+    `# 【${anchor}】客層(都道府県): ${j(resid)}`,
   ].join('\n')
 }
 
