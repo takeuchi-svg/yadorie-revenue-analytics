@@ -50,6 +50,11 @@ export default function ShiftPage() {
   const [selRect, setSelRect] = useState<{ rs: number; re: number; ds: number; de: number } | null>(null)
   const [copyBuf, setCopyBuf] = useState<{ rows: number; cols: number; grid: Cell[][] } | null>(null)
   const anchorRef = useRef<{ r: number; d: number } | null>(null)
+  // #4 ペイント方式: パターンを選んでセルをクリック/ドラッグで塗る
+  const [paintBrush, setPaintBrush] = useState<number | 'clear' | null>(null)
+  const paintingRef = useRef(false)
+  // #3 ガントのバー端ドラッグ（15分刻み）
+  const dragRef = useRef<{ shiftId: number; edge: 'start' | 'end'; rectLeft: number; rectWidth: number; lo: number; hi: number; staff: string; date: string } | null>(null)
   // モーダル
   const [segEdit, setSegEdit] = useState<{ staff: string; date: string; shiftId: number } | null>(null)
   const [segDraft, setSegDraft] = useState<ShiftSegment[]>([])
@@ -181,6 +186,44 @@ export default function ShiftPage() {
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
   }, [doCopy, doPaste, sel, copyBuf])
+
+  // #4 ペイント: ブラシ適用＆ドラッグ終了
+  const applyBrush = (staffCode: string, date: string) => {
+    if (paintBrush === 'clear') setCell(staffCode, date, { patternId: null, minutes: 0 })
+    else if (typeof paintBrush === 'number') { const p = patMap[paintBrush]; if (p) setCell(staffCode, date, { patternId: p.pattern_id, minutes: p.pattern_type === '勤務' ? patternMinutes(p) : 0 }) }
+  }
+  useEffect(() => {
+    const up = () => { paintingRef.current = false }
+    window.addEventListener('mouseup', up)
+    return () => window.removeEventListener('mouseup', up)
+  }, [])
+
+  // #3 ガントのバー端ドラッグ（15分刻み）で開始/終了を調整→離すと保存
+  useEffect(() => {
+    const toStr = (m: number) => { const x = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}` }
+    const toMin = (t: string) => (+t.slice(0, 2)) * 60 + (+t.slice(3, 5))
+    const mm = (e: MouseEvent) => {
+      const d = dragRef.current; if (!d) return
+      const seg = segByShift[d.shiftId]?.[0]; if (!seg) return
+      const frac = Math.min(1, Math.max(0, (e.clientX - d.rectLeft) / d.rectWidth))
+      const mins = Math.round((d.lo + frac * (d.hi - d.lo)) / 15) * 15
+      let start = seg.start_time.slice(0, 5), end = seg.end_time.slice(0, 5)
+      if (d.edge === 'start') start = toStr(Math.min(mins, toMin(end) - 15))
+      else end = toStr(Math.max(mins, toMin(start) + 15))
+      const wm = segMinutes(start, end, seg.break_minutes || 0)
+      const nseg = { ...seg, start_time: start, end_time: end, work_minutes: wm }
+      setSegByShift((prev) => ({ ...prev, [d.shiftId]: [nseg] }))
+      setCells((prev) => ({ ...prev, [ck(d.staff, d.date)]: { ...prev[ck(d.staff, d.date)], minutes: wm } }))
+    }
+    const up = async () => {
+      const d = dragRef.current; if (!d) return
+      dragRef.current = null
+      const seg = segByShift[d.shiftId]?.[0]
+      if (seg) { try { await saveSegments(d.shiftId, [{ ...seg, seq: 1 }]); setMsg('時間帯を更新しました') } catch (e: any) { setMsg('Error: ' + (e?.message ?? String(e))) } }
+    }
+    window.addEventListener('mousemove', mm); window.addEventListener('mouseup', up)
+    return () => { window.removeEventListener('mousemove', mm); window.removeEventListener('mouseup', up) }
+  }, [segByShift])
 
   // ---- 前月コピー（曜日合わせ・T09）----
   const copyPrevMonth = async () => {
@@ -416,6 +459,17 @@ export default function ShiftPage() {
             </div>
           </details>
 
+          {/* #4 ペイントパレット: パターンを選んでセルをクリック/ドラッグで塗る */}
+          <div className="flex items-center gap-1.5 flex-wrap mb-2">
+            <span className="text-xs" style={{ color: 'var(--text-dim)' }}>ペイント:</span>
+            {patterns.map((pt) => (
+              <button key={pt.pattern_id} onClick={() => setPaintBrush(paintBrush === pt.pattern_id ? null : pt.pattern_id)}
+                className="text-xs px-2 py-1 rounded" style={{ border: `1px solid ${paintBrush === pt.pattern_id ? 'var(--accent)' : 'var(--border)'}`, background: pt.color ? `${pt.color}22` : undefined, color: pt.color || 'var(--text)', fontWeight: paintBrush === pt.pattern_id ? 700 : 400 }}>{pt.name}</button>
+            ))}
+            <button onClick={() => setPaintBrush(paintBrush === 'clear' ? null : 'clear')} className="text-xs px-2 py-1 rounded" style={{ border: `1px solid ${paintBrush === 'clear' ? 'var(--red)' : 'var(--border)'}`, color: 'var(--red)' }}>消す</button>
+            {paintBrush !== null && <span className="text-[10px]" style={{ color: 'var(--accent)' }}>← セルをクリック/ドラッグで塗る（もう一度押すと解除）</span>}
+          </div>
+
           {/* 月グリッド（全画面ラップ） */}
           <div className={fullscreen ? 'fixed inset-0 z-40 p-3 flex flex-col' : ''} style={fullscreen ? { background: 'var(--bg)' } : undefined}>
             {fullscreen && (
@@ -457,7 +511,11 @@ export default function ShiftPage() {
                         const timeRange = isWork ? cellTimeRange(c) : ''
                         return (
                           <td key={d.date} className="px-0.5 h-10" title={isWork ? 'ダブルクリックで役割分割' : undefined}
-                            onMouseDown={(e) => { if (e.shiftKey) { e.preventDefault(); selectRect(ri, di, true) } }}
+                            onMouseDown={(e) => {
+                              if (e.shiftKey) { e.preventDefault(); selectRect(ri, di, true); return }
+                              if (paintBrush !== null) { e.preventDefault(); paintingRef.current = true; applyBrush(s.staff_code, d.date) }
+                            }}
+                            onMouseEnter={() => { if (paintingRef.current && paintBrush !== null) applyBrush(s.staff_code, d.date) }}
                             onDoubleClick={() => isWork && openSegEditor(s.staff_code, d.date)}
                             style={{ borderTop: '1px solid var(--border)', background: p?.color ? `${p.color}22` : undefined, boxShadow: selected ? 'inset 0 0 0 2px var(--accent)' : undefined }}>
                             <select className="w-full text-[10px] rounded" style={{ background: 'transparent', border: '1px solid var(--border)', color: p?.color || 'var(--text)' }}
@@ -587,7 +645,8 @@ export default function ShiftPage() {
       {ganttDate && (() => {
         const toMin = (t: string) => (+t.slice(0, 2)) * 60 + (+t.slice(3, 5))
         type GSeg = { role_id: number; start: number; end: number; label: string }
-        const rows: { name: string; segs: GSeg[] }[] = []
+        type GRow = { name: string; segs: GSeg[]; draggable: boolean; shiftId: number | null; staff: string; date: string; brk: number }
+        const rows: GRow[] = []
         for (const s of staff) {
           const c = cells[ck(s.staff_code, ganttDate)]
           if (!c || c.patternId == null) continue
@@ -598,7 +657,7 @@ export default function ShiftPage() {
           if (raw.length) segs = raw.map((sg) => { const a = toMin(sg.start_time.slice(0, 5)); let e = toMin(sg.end_time.slice(0, 5)); if (e <= a) e += 1440; return { role_id: sg.role_id, start: a, end: e, label: roleMap[sg.role_id]?.role_name ?? '' } })
           else if (p?.start_time && p?.end_time) { const a = toMin(p.start_time.slice(0, 5)); let e = toMin(p.end_time.slice(0, 5)); if (e <= a) e += 1440; segs = [{ role_id: p.default_role_id ?? 0, start: a, end: e, label: '' }] }
           else segs = []
-          if (segs.length) rows.push({ name: s.name ?? s.staff_code, segs })
+          if (segs.length) rows.push({ name: s.name ?? s.staff_code, segs, draggable: c.shiftId != null && segs.length === 1, shiftId: c.shiftId ?? null, staff: s.staff_code, date: ganttDate, brk: raw[0]?.break_minutes ?? p?.break_minutes ?? 0 })
         }
         let lo = 24 * 60, hi = 0
         for (const r of rows) for (const sg of r.segs) { lo = Math.min(lo, sg.start); hi = Math.max(hi, sg.end) }
@@ -606,7 +665,20 @@ export default function ShiftPage() {
         lo = Math.floor(lo / 60) * 60; hi = Math.ceil(hi / 60) * 60
         const span = hi - lo || 1
         const ticks: number[] = []; for (let t = lo; t <= hi; t += 60) ticks.push(t)
-        const fmt = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:00`
+        const fmt = (m: number) => { const x = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}` }
+        const startDrag = (e: React.MouseEvent, row: GRow, edge: 'start' | 'end') => {
+          e.preventDefault(); e.stopPropagation()
+          if (row.shiftId == null) return
+          const track = (e.currentTarget as HTMLElement).closest('[data-track]') as HTMLElement | null
+          if (!track) return
+          if (!segByShift[row.shiftId]?.length) {
+            const sg = row.segs[0]
+            const seed: ShiftSegment = { seq: 1, role_id: sg.role_id || (roles[0]?.role_id ?? 0), start_time: fmt(sg.start), end_time: fmt(sg.end), break_minutes: row.brk, work_minutes: segMinutes(fmt(sg.start), fmt(sg.end), row.brk) }
+            setSegByShift((prev) => ({ ...prev, [row.shiftId as number]: [seed] }))
+          }
+          const rc = track.getBoundingClientRect()
+          dragRef.current = { shiftId: row.shiftId, edge, rectLeft: rc.left, rectWidth: rc.width, lo, hi, staff: row.staff, date: row.date }
+        }
         const dd = days.find((x) => x.date === ganttDate)
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setGanttDate(null)}>
@@ -627,20 +699,22 @@ export default function ShiftPage() {
                     {rows.map((r, i) => (
                       <div key={i} className="flex items-center">
                         <div className="text-xs whitespace-nowrap overflow-hidden" style={{ width: 120, flexShrink: 0, textOverflow: 'ellipsis' }}>{r.name}</div>
-                        <div className="relative flex-1 rounded" style={{ height: 22, background: 'var(--surface2)' }}>
+                        <div data-track className="relative flex-1 rounded" style={{ height: 24, background: 'var(--surface2)' }}>
                           {ticks.map((t) => <div key={t} className="absolute top-0 bottom-0" style={{ left: `${(t - lo) / span * 100}%`, borderLeft: '1px solid var(--border)' }} />)}
                           {r.segs.map((sg, j) => (
-                            <div key={j} className="absolute top-0.5 bottom-0.5 rounded flex items-center justify-center text-[9px] text-white overflow-hidden px-1"
+                            <div key={j} className="absolute top-0.5 bottom-0.5 rounded flex items-center justify-center text-[9px] text-white overflow-hidden"
                               style={{ left: `${(sg.start - lo) / span * 100}%`, width: `${(sg.end - sg.start) / span * 100}%`, background: roleMap[sg.role_id]?.color || 'var(--accent)' }}
                               title={`${fmt(sg.start)}–${fmt(sg.end)} ${sg.label}`}>
-                              {fmt(sg.start)}–{fmt(sg.end)}{sg.label ? ` ${sg.label}` : ''}
+                              {r.draggable && <div onMouseDown={(e) => startDrag(e, r, 'start')} className="absolute left-0 top-0 bottom-0" style={{ width: 9, cursor: 'ew-resize', background: 'rgba(255,255,255,0.4)', borderRadius: '4px 0 0 4px' }} title="ドラッグで開始を調整" />}
+                              <span className="px-1 truncate">{fmt(sg.start)}–{fmt(sg.end)}{sg.label ? ` ${sg.label}` : ''}</span>
+                              {r.draggable && <div onMouseDown={(e) => startDrag(e, r, 'end')} className="absolute right-0 top-0 bottom-0" style={{ width: 9, cursor: 'ew-resize', background: 'rgba(255,255,255,0.4)', borderRadius: '0 4px 4px 0' }} title="ドラッグで終了を調整" />}
                             </div>
                           ))}
                         </div>
                       </div>
                     ))}
                   </div>
-                  <p className="text-[10px] mt-3" style={{ color: 'var(--text-dim)' }}>バーの色は役割。時間帯は役割分割があればその通り、無ければパターン既定。</p>
+                  <p className="text-[10px] mt-3" style={{ color: 'var(--text-dim)' }}>バーの色は役割。<b>バーの左右の端をドラッグ</b>すると開始/終了を15分単位で調整→自動保存（単一時間帯のみ。役割分割ありは役割分割で編集）。</p>
                 </div>
               )}
             </div>
