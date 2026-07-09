@@ -488,10 +488,10 @@ export default function ShiftPage() {
                 {([['予算 稼働室/人数', 'budget', 48], ['オンハンド販売室数', 'onhand', 74], ['予測販売室数', 'forecast', 100], ['メモ', 'memo', 126]] as const).map(([label, kind, top], idx, arr) => {
                   const last = idx === arr.length - 1
                   const bg = 'var(--surface2)'
-                  const bb = last ? '2px solid var(--accent)' : '1px solid var(--border)'
+                  const bb = last ? '2px solid var(--border)' : '1px solid var(--border)'
                   return (
                     <tr key={kind}>
-                      <td className="px-2 whitespace-nowrap sticky left-0 z-30" style={{ top, height: 26, minWidth: 150, background: bg, color: 'var(--text-dim)', fontSize: 11, fontWeight: 600, borderRight: '2px solid var(--border)', borderLeft: '3px solid var(--accent)', borderBottom: bb }}>{label}</td>
+                      <td className="px-2 whitespace-nowrap sticky left-0 z-30" style={{ top, height: 26, minWidth: 150, background: bg, color: 'var(--text-dim)', fontSize: 11, fontWeight: 600, borderRight: '2px solid var(--border)', borderBottom: bb }}>{label}</td>
                       {days.map((d) => { const r = ctx[d.date]; return (
                         <td key={d.date} className="px-0.5 sticky z-20 text-center" style={{ top, height: 26, minWidth: 58, background: bg, borderBottom: bb }}>
                           {kind === 'budget' ? (<span style={{ fontSize: 11 }}>{r?.budget_rooms ?? '-'}<span style={{ fontSize: 9, color: 'var(--text-dim)' }}>{r?.budget_guests != null ? ` / ${r.budget_guests}` : ''}</span></span>)
