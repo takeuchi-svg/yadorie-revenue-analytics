@@ -47,7 +47,8 @@ export default function ShiftPage() {
   const [msg, setMsg] = useState('')
   // 選択・コピペ
   const [sel, setSel] = useState<Set<string>>(new Set())
-  const [copyBuf, setCopyBuf] = useState<Cell | null>(null)
+  const [selRect, setSelRect] = useState<{ rs: number; re: number; ds: number; de: number } | null>(null)
+  const [copyBuf, setCopyBuf] = useState<{ rows: number; cols: number; grid: Cell[][] } | null>(null)
   const anchorRef = useRef<{ r: number; d: number } | null>(null)
   // モーダル
   const [segEdit, setSegEdit] = useState<{ staff: string; date: string; shiftId: number } | null>(null)
@@ -102,25 +103,49 @@ export default function ShiftPage() {
   // ---- 選択・コピペ（T10）----
   const selectRect = (r2: number, d2: number, extend: boolean) => {
     const a = anchorRef.current
-    if (!extend || !a) { anchorRef.current = { r: r2, d: d2 }; setSel(new Set()); return }
+    if (!extend || !a) { anchorRef.current = { r: r2, d: d2 }; setSel(new Set()); setSelRect(null); return }
     const rs = Math.min(a.r, r2), re = Math.max(a.r, r2), ds = Math.min(a.d, d2), de = Math.max(a.d, d2)
     const s = new Set<string>()
     for (let r = rs; r <= re; r++) for (let d = ds; d <= de; d++) s.add(ck(staff[r].staff_code, days[d].date))
-    setSel(s)
+    setSel(s); setSelRect({ rs, re, ds, de })
   }
+  // ブロックコピー: 範囲があればその矩形を、無ければアンカー1セルを取り込む
   const doCopy = useCallback(() => {
-    const a = anchorRef.current; if (!a) return
-    const c = cells[ck(staff[a.r].staff_code, days[a.d].date)]
-    setCopyBuf(c ? { patternId: c.patternId, minutes: c.minutes } : { patternId: null, minutes: 0 })
-    setMsg('コピーしました（貼付先を選択して貼付）')
-  }, [cells, staff, days])
+    const get = (r: number, d: number): Cell => { const c = cells[ck(staff[r].staff_code, days[d].date)]; return c ? { patternId: c.patternId, minutes: c.minutes } : { patternId: null, minutes: 0 } }
+    if (selRect) {
+      const { rs, re, ds, de } = selRect
+      const grid: Cell[][] = []
+      for (let r = rs; r <= re; r++) { const row: Cell[] = []; for (let d = ds; d <= de; d++) row.push(get(r, d)); grid.push(row) }
+      setCopyBuf({ rows: re - rs + 1, cols: de - ds + 1, grid })
+      setMsg(`コピーしました（${grid.length}人 × ${grid[0].length}日）。貼付先の左上をクリック→貼付`)
+    } else if (anchorRef.current) {
+      const a = anchorRef.current
+      setCopyBuf({ rows: 1, cols: 1, grid: [[get(a.r, a.d)]] })
+      setMsg('コピーしました（貼付先を選択して貼付）')
+    }
+  }, [cells, staff, days, selRect])
   const doPaste = useCallback(() => {
     if (!copyBuf) return
-    const targets = sel.size ? [...sel] : (anchorRef.current ? [ck(staff[anchorRef.current.r].staff_code, days[anchorRef.current.d].date)] : [])
-    if (!targets.length) return
-    setCells((prev) => { const n = { ...prev }; targets.forEach((k) => { n[k] = { ...n[k], patternId: copyBuf.patternId, minutes: copyBuf.minutes } }); return n })
-    setDirtyCells((prev) => { const n = new Set(prev); targets.forEach((k) => n.add(k)); return n })
-    setMsg(`貼付しました（${targets.length}セル）`)
+    // 単一セル×範囲選択 = 塗りつぶし（従来動作を維持）
+    if (copyBuf.rows === 1 && copyBuf.cols === 1 && sel.size) {
+      const one = copyBuf.grid[0][0]
+      setCells((prev) => { const n = { ...prev }; sel.forEach((k) => { n[k] = { ...n[k], patternId: one.patternId, minutes: one.minutes } }); return n })
+      setDirtyCells((prev) => { const n = new Set(prev); sel.forEach((k) => n.add(k)); return n })
+      setMsg(`貼付しました（${sel.size}セル）`); return
+    }
+    // ブロック貼付: アンカー（左上）から形を保って配置
+    const a = anchorRef.current; if (!a) { setMsg('貼付先のセルをクリックしてください'); return }
+    const keys: string[] = []
+    setCells((prev) => {
+      const n = { ...prev }
+      for (let i = 0; i < copyBuf.rows; i++) for (let j = 0; j < copyBuf.cols; j++) {
+        const r = a.r + i, d = a.d + j
+        if (r < staff.length && d < days.length) { const k = ck(staff[r].staff_code, days[d].date); n[k] = { ...n[k], ...copyBuf.grid[i][j] }; keys.push(k) }
+      }
+      return n
+    })
+    setDirtyCells((prev) => { const n = new Set(prev); keys.forEach((k) => n.add(k)); return n })
+    setMsg(`貼付しました（${copyBuf.rows}人 × ${copyBuf.cols}日）`)
   }, [copyBuf, sel, staff, days])
 
   useEffect(() => {
@@ -271,7 +296,7 @@ export default function ShiftPage() {
           <input type="month" className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)} />
           <button onClick={copyPrevMonth} disabled={saving} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>前月コピー</button>
           <button onClick={() => setSpotOpen(true)} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>スポット追加</button>
-          {copyBuf && <button onClick={doPaste} className={btnGhost} style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>貼付（{sel.size || 1}）</button>}
+          {copyBuf && <button onClick={doPaste} className={btnGhost} style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>貼付（{copyBuf.rows === 1 && copyBuf.cols === 1 && sel.size ? `${sel.size}セル` : `${copyBuf.rows}×${copyBuf.cols}`}）</button>}
           <button onClick={doCopy} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>コピー</button>
           <button onClick={save} disabled={saving || dirtyCount === 0} className="px-4 py-1.5 text-sm rounded-md text-white hover:opacity-90 disabled:opacity-40" style={{ background: 'var(--accent)' }}>
             {saving ? '保存中...' : dirtyCount > 0 ? `保存（${dirtyCount}）` : '保存'}
@@ -288,8 +313,19 @@ export default function ShiftPage() {
             <summary className="text-sm font-semibold cursor-pointer" style={{ color: 'var(--text-dim)' }}>稼働前提・メモ</summary>
             <div className="overflow-x-auto mt-2">
               <table className="text-xs border-separate" style={{ borderSpacing: 0 }}>
+                <thead>
+                  <tr>
+                    <th className="px-2 py-1 sticky left-0" style={{ minWidth: 132, background: 'var(--surface)' }} />
+                    {days.map((d) => (
+                      <th key={d.date} className="px-1 py-1 text-center" style={{ minWidth: 52, color: 'var(--text-dim)' }}>
+                        <div>{d.day}</div>
+                        <div style={{ fontSize: 10, color: wdColor(d.wd) }}>{WD[d.wd]}</div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
                 <tbody>
-                  {([['予算 稼働室/人数', 'budget'], ['オンハンド室', 'onhand'], ['予測室', 'forecast'], ['メモ', 'memo']] as const).map(([label, kind]) => (
+                  {([['予算 稼働室/人数', 'budget'], ['オンハンド販売室数', 'onhand'], ['予測販売室数', 'forecast'], ['メモ', 'memo']] as const).map(([label, kind]) => (
                     <tr key={kind}>
                       <td className="px-2 py-1 whitespace-nowrap sticky left-0" style={{ minWidth: 132, background: 'var(--surface)', color: 'var(--text-dim)', borderTop: '1px solid var(--border)' }}>{label}</td>
                       {days.map((d) => { const r = ctx[d.date]; return (
@@ -368,7 +404,7 @@ export default function ShiftPage() {
 
           {msg && <p className="text-sm mt-3" style={{ color: msg.startsWith('Error') ? 'var(--red)' : 'var(--green)' }}>{msg}</p>}
           <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
-            セル=パターン選択＋時間手修正。<b>Shift+クリックで範囲選択→コピー/貼付</b>（⌘/Ctrl+C・V可）。<b>勤務セルをダブルクリックで役割分割</b>。
+            セル=パターン選択＋時間手修正。<b>Shift+クリックで範囲選択→コピー</b>し、<b>貼付先の左上をクリック→貼付</b>で形のまま複製（⌘/Ctrl+C・V可。単一セルは範囲選択に塗りつぶし）。<b>勤務セルをダブルクリックで役割分割</b>。
             スポットの実働は保存時に実績(raw_attendance_daily/manual)へ記録され総労働時間・KPIに反映。人件費は計画ベースの月次合計のみ表示。
           </p>
         </>
