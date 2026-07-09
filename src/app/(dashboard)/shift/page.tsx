@@ -53,13 +53,30 @@ export default function ShiftPage() {
   // モーダル
   const [segEdit, setSegEdit] = useState<{ staff: string; date: string; shiftId: number } | null>(null)
   const [segDraft, setSegDraft] = useState<ShiftSegment[]>([])
+  const [timeEdit, setTimeEdit] = useState<{ staff: string; date: string; shiftId: number; start: string; end: string } | null>(null)  // #3 時間帯ミニ編集
+  const [ganttDate, setGanttDate] = useState<string | null>(null)  // #4 日別ガント
   const [spotOpen, setSpotOpen] = useState(false)
   const [spotName, setSpotName] = useState(''); const [spotWage, setSpotWage] = useState<number | ''>('')
 
   const days = useMemo(() => daysOfMonth(month), [month])
   const patMap = useMemo(() => { const o: Record<number, ShiftPattern> = {}; patterns.forEach((p) => { o[p.pattern_id] = p }); return o }, [patterns])
   const staffMap = useMemo(() => { const o: Record<string, StaffLite> = {}; staff.forEach((s) => { o[s.staff_code] = s }); return o }, [staff])
+  const roleMap = useMemo(() => { const o: Record<number, Role> = {}; roles.forEach((r) => { o[r.role_id] = r }); return o }, [roles])
   const dayIdx = useMemo(() => { const o: Record<string, number> = {}; days.forEach((d, i) => { o[d.date] = i }); return o }, [days])
+
+  // #3 セルの勤務時間帯（役割分割があればその範囲、無ければパターン既定）を 'H:MM–H:MM' で
+  const cellTimeRange = (c?: Cell): string => {
+    if (!c) return ''
+    const segs = c.shiftId != null ? segByShift[c.shiftId] : undefined
+    if (segs && segs.length) {
+      const starts = segs.map((s) => s.start_time.slice(0, 5)).sort()
+      const ends = segs.map((s) => s.end_time.slice(0, 5)).sort()
+      return `${starts[0]}–${ends[ends.length - 1]}`
+    }
+    const p = c.patternId != null ? patMap[c.patternId] : null
+    if (p?.start_time && p?.end_time) return `${p.start_time.slice(0, 5)}–${p.end_time.slice(0, 5)}`
+    return ''
+  }
 
   const reload = useCallback(async () => {
     if (!current || !month) return
@@ -233,6 +250,51 @@ export default function ShiftPage() {
     finally { setSaving(false) }
   }
 
+  // 未保存セルを先に保存して shift_id を確定（役割分割・時間編集で共用）
+  const ensureShiftId = async (staffCode: string, date: string): Promise<number | null> => {
+    const key = ck(staffCode, date); const c = cells[key]
+    if (!c || c.patternId == null || patMap[c.patternId]?.pattern_type !== '勤務') return null
+    let shiftId = c.shiftId
+    if (shiftId == null || dirtyCells.has(key)) {
+      shiftId = (await saveShiftCell({ staff_code: staffCode, work_facility: current, work_date: date, pattern_id: c.patternId, planned_minutes: c.minutes })) ?? undefined
+      if (shiftId == null) { setMsg('Error: シフト行の保存に失敗しました'); return null }
+      setCell(staffCode, date, { shiftId })
+      setDirtyCells((prev) => { const n = new Set(prev); n.delete(key); return n })
+    }
+    return shiftId
+  }
+
+  // #3 時間帯ミニ編集を開く（役割分割が2つ以上ある場合は役割分割モーダルへ回す）
+  const openTimeEditor = async (staffCode: string, date: string) => {
+    const c = cells[ck(staffCode, date)]
+    if (!c || c.patternId == null) return
+    if (c.shiftId != null && (segByShift[c.shiftId]?.length ?? 0) > 1) { openSegEditor(staffCode, date); return }
+    const shiftId = await ensureShiftId(staffCode, date)
+    if (shiftId == null) return
+    const seg = segByShift[shiftId]?.[0]
+    const p = patMap[c.patternId]
+    const start = (seg?.start_time ?? p?.start_time ?? '09:00').slice(0, 5)
+    const end = (seg?.end_time ?? p?.end_time ?? '17:00').slice(0, 5)
+    setTimeEdit({ staff: staffCode, date, shiftId, start, end })
+  }
+  const saveTimeEditor = async () => {
+    if (!timeEdit) return
+    setSaving(true)
+    try {
+      const c = cells[ck(timeEdit.staff, timeEdit.date)]
+      const p = c?.patternId != null ? patMap[c.patternId] : null
+      const roleId = segByShift[timeEdit.shiftId]?.[0]?.role_id ?? p?.default_role_id ?? roles[0]?.role_id ?? 0
+      const brk = segByShift[timeEdit.shiftId]?.[0]?.break_minutes ?? p?.break_minutes ?? 0
+      const wm = segMinutes(timeEdit.start, timeEdit.end, brk)
+      const seg: ShiftSegment = { seq: 1, role_id: roleId, start_time: timeEdit.start, end_time: timeEdit.end, break_minutes: brk, work_minutes: wm }
+      await saveSegments(timeEdit.shiftId, [seg])
+      setSegByShift((prev) => ({ ...prev, [timeEdit.shiftId]: [seg] }))
+      setCells((prev) => ({ ...prev, [ck(timeEdit.staff, timeEdit.date)]: { ...prev[ck(timeEdit.staff, timeEdit.date)], minutes: wm } }))
+      setTimeEdit(null); setMsg(`時間帯を保存（${(wm / 60).toFixed(1)}h）`)
+    } catch (e: any) { setMsg('Error: ' + (e?.message ?? String(e))) }
+    finally { setSaving(false) }
+  }
+
   // ---- スポット追加（T11）----
   const addSpot = async () => {
     if (!spotName || spotWage === '') { setMsg('氏名と時給を入力してください'); return }
@@ -347,7 +409,8 @@ export default function ShiftPage() {
               <thead>
                 <tr>
                   <th className="px-2 h-12 text-left whitespace-nowrap sticky left-0 top-0 z-30" style={{ minWidth: 150, background: 'var(--surface2)', borderRight: '2px solid var(--border)' }}>氏名</th>
-                  {days.map((d) => (<th key={d.date} className="px-1 h-12 text-center whitespace-nowrap sticky top-0 z-20" style={{ minWidth: 58, background: 'var(--surface2)' }}><div>{d.day}</div><div style={{ fontSize: 10, color: wdColor(d.wd) }}>{WD[d.wd]}</div></th>))}
+                  {days.map((d) => (<th key={d.date} onClick={() => setGanttDate(d.date)} title="クリックでこの日のシフトをガント表示"
+                    className="px-1 h-12 text-center whitespace-nowrap sticky top-0 z-20 cursor-pointer hover:opacity-80" style={{ minWidth: 58, background: 'var(--surface2)' }}><div>{d.day}</div><div style={{ fontSize: 10, color: wdColor(d.wd) }}>{WD[d.wd]}</div></th>))}
                   <th className="px-1 h-12 text-center sticky top-0 z-20" style={{ minWidth: 52, background: 'var(--surface)', borderLeft: '2px solid var(--border)' }}>時間計</th>
                   <th className="px-1 h-12 text-center sticky top-0 z-20" style={{ minWidth: 40, background: 'var(--surface)' }}>休日</th>
                 </tr>
@@ -365,6 +428,7 @@ export default function ShiftPage() {
                         const c = cells[ck(s.staff_code, d.date)]; const p = c?.patternId != null ? patMap[c.patternId] : null
                         const isWork = p?.pattern_type === '勤務'; const selected = sel.has(ck(s.staff_code, d.date))
                         const hasSeg = c?.shiftId != null && (segByShift[c.shiftId]?.length ?? 0) > 1
+                        const timeRange = isWork ? cellTimeRange(c) : ''
                         return (
                           <td key={d.date} className="px-0.5 h-10" title={isWork ? 'ダブルクリックで役割分割' : undefined}
                             onMouseDown={(e) => { if (e.shiftKey) { e.preventDefault(); selectRect(ri, di, true) } }}
@@ -379,6 +443,11 @@ export default function ShiftPage() {
                             <input className="w-full text-[10px] text-center rounded mt-0.5" style={{ background: hasSeg ? 'var(--surface2)' : 'transparent', border: '1px solid var(--border)' }}
                               value={isWork ? hoursStr(c!.minutes) : ''} disabled={!isWork} title={hasSeg ? '役割分割あり' : undefined}
                               onFocus={() => { anchorRef.current = { r: ri, d: di } }} onChange={(e) => onHours(s.staff_code, d.date, e.target.value, c?.patternId ?? null)} />
+                            {timeRange && (
+                              <div onClick={(ev) => { ev.stopPropagation(); openTimeEditor(s.staff_code, d.date) }}
+                                className="text-center cursor-pointer" style={{ fontSize: 9, lineHeight: 1.15, color: 'var(--text-dim)', marginTop: 1 }}
+                                title="クリックで時間帯を編集">{timeRange}</div>
+                            )}
                           </td>
                         )
                       })}
@@ -461,6 +530,90 @@ export default function ShiftPage() {
           </div>
         </div>
       )}
+
+      {/* #3 時間帯ミニ編集 */}
+      {timeEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setTimeEdit(null)}>
+          <div className="card p-5 w-[320px] max-w-[92vw]" style={{ background: 'var(--surface)' }} onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-base font-semibold mb-1">時間帯 — {staffMap[timeEdit.staff]?.name ?? timeEdit.staff}・{timeEdit.date}</h3>
+            <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>開始・終了を設定します（休憩はパターン既定。複数役割に分けたい時は「役割分割」で）。</p>
+            <div className="flex items-center gap-2 mb-4">
+              <input type="time" className="field px-2 py-1.5 text-sm" value={timeEdit.start} onChange={(e) => setTimeEdit({ ...timeEdit, start: e.target.value })} />
+              <span>〜</span>
+              <input type="time" className="field px-2 py-1.5 text-sm" value={timeEdit.end} onChange={(e) => setTimeEdit({ ...timeEdit, end: e.target.value })} />
+            </div>
+            <div className="flex justify-end gap-2">
+              <button className="text-sm px-3 py-1.5 rounded-md" style={{ border: '1px solid var(--border)' }} onClick={() => setTimeEdit(null)}>キャンセル</button>
+              <button className="text-sm px-4 py-1.5 rounded-md text-white" style={{ background: 'var(--accent)' }} onClick={saveTimeEditor} disabled={saving}>保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* #4 日別ガント */}
+      {ganttDate && (() => {
+        const toMin = (t: string) => (+t.slice(0, 2)) * 60 + (+t.slice(3, 5))
+        type GSeg = { role_id: number; start: number; end: number; label: string }
+        const rows: { name: string; segs: GSeg[] }[] = []
+        for (const s of staff) {
+          const c = cells[ck(s.staff_code, ganttDate)]
+          if (!c || c.patternId == null) continue
+          const p = patMap[c.patternId]
+          if (p?.pattern_type !== '勤務') continue
+          const raw = (c.shiftId != null ? segByShift[c.shiftId] : null) ?? []
+          let segs: GSeg[]
+          if (raw.length) segs = raw.map((sg) => { const a = toMin(sg.start_time.slice(0, 5)); let e = toMin(sg.end_time.slice(0, 5)); if (e <= a) e += 1440; return { role_id: sg.role_id, start: a, end: e, label: roleMap[sg.role_id]?.role_name ?? '' } })
+          else if (p?.start_time && p?.end_time) { const a = toMin(p.start_time.slice(0, 5)); let e = toMin(p.end_time.slice(0, 5)); if (e <= a) e += 1440; segs = [{ role_id: p.default_role_id ?? 0, start: a, end: e, label: '' }] }
+          else segs = []
+          if (segs.length) rows.push({ name: s.name ?? s.staff_code, segs })
+        }
+        let lo = 24 * 60, hi = 0
+        for (const r of rows) for (const sg of r.segs) { lo = Math.min(lo, sg.start); hi = Math.max(hi, sg.end) }
+        if (lo >= hi) { lo = 8 * 60; hi = 22 * 60 }
+        lo = Math.floor(lo / 60) * 60; hi = Math.ceil(hi / 60) * 60
+        const span = hi - lo || 1
+        const ticks: number[] = []; for (let t = lo; t <= hi; t += 60) ticks.push(t)
+        const fmt = (m: number) => `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:00`
+        const dd = days.find((x) => x.date === ganttDate)
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setGanttDate(null)}>
+            <div className="card p-5 w-[820px] max-w-[95vw] max-h-[85vh] overflow-auto" style={{ background: 'var(--surface)' }} onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-base font-semibold">{ganttDate}（{dd ? WD[dd.wd] : ''}）のシフト — {rows.length}名</h3>
+                <button onClick={() => setGanttDate(null)} className="text-lg leading-none px-2" style={{ color: 'var(--text-dim)' }}>✕</button>
+              </div>
+              {rows.length === 0 ? <p className="text-sm py-8 text-center" style={{ color: 'var(--text-dim)' }}>この日の勤務はありません。</p> : (
+                <div>
+                  <div className="flex text-[10px]" style={{ color: 'var(--text-dim)' }}>
+                    <div style={{ width: 120, flexShrink: 0 }} />
+                    <div className="relative flex-1" style={{ height: 16 }}>
+                      {ticks.map((t) => <span key={t} className="absolute" style={{ left: `${(t - lo) / span * 100}%`, transform: 'translateX(-50%)' }}>{fmt(t)}</span>)}
+                    </div>
+                  </div>
+                  <div className="space-y-1 mt-1">
+                    {rows.map((r, i) => (
+                      <div key={i} className="flex items-center">
+                        <div className="text-xs whitespace-nowrap overflow-hidden" style={{ width: 120, flexShrink: 0, textOverflow: 'ellipsis' }}>{r.name}</div>
+                        <div className="relative flex-1 rounded" style={{ height: 22, background: 'var(--surface2)' }}>
+                          {ticks.map((t) => <div key={t} className="absolute top-0 bottom-0" style={{ left: `${(t - lo) / span * 100}%`, borderLeft: '1px solid var(--border)' }} />)}
+                          {r.segs.map((sg, j) => (
+                            <div key={j} className="absolute top-0.5 bottom-0.5 rounded flex items-center justify-center text-[9px] text-white overflow-hidden px-1"
+                              style={{ left: `${(sg.start - lo) / span * 100}%`, width: `${(sg.end - sg.start) / span * 100}%`, background: roleMap[sg.role_id]?.color || 'var(--accent)' }}
+                              title={`${fmt(sg.start)}–${fmt(sg.end)} ${sg.label}`}>
+                              {fmt(sg.start)}–{fmt(sg.end)}{sg.label ? ` ${sg.label}` : ''}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] mt-3" style={{ color: 'var(--text-dim)' }}>バーの色は役割。時間帯は役割分割があればその通り、無ければパターン既定。</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
