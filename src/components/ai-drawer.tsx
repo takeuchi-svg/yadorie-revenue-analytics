@@ -7,6 +7,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { CHART_AXIS, chartTooltip } from '@/lib/ui'
+import FeedbackButton from '@/components/feedback-button'
 
 const SERIES_COLORS = ['#c75b39', '#2e9e6b', '#d98a2b', '#378ADD', '#9168E0', '#84cc16']
 
@@ -151,12 +152,22 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
           </div>
         )}
         {messages.map((m, i) => (
-          <div key={i} className={m.role === 'user' ? 'flex justify-end' : 'flex justify-start'}>
-            <div className="max-w-[90%] px-3 py-2 rounded-lg text-sm"
-              style={{ background: m.role === 'user' ? 'var(--accent)' : 'var(--surface2)', color: m.role === 'user' ? '#fff' : 'var(--text)' }}>
-              {m.role === 'user' ? <span className="whitespace-pre-wrap">{m.content}</span> : <AssistantContent content={m.content} />}
+          m.role === 'user' ? (
+            <div key={i} className="flex justify-end">
+              <div className="max-w-[90%] px-3 py-2 rounded-lg text-sm" style={{ background: 'var(--accent)', color: '#fff' }}>
+                <span className="whitespace-pre-wrap">{m.content}</span>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div key={i} className="flex flex-col items-start gap-1">
+              <div className="max-w-[90%] px-3 py-2 rounded-lg text-sm" style={{ background: 'var(--surface2)', color: 'var(--text)' }}>
+                <AssistantContent content={m.content} />
+              </div>
+              {m.content.trim() && !loading && (
+                <FeedbackButton source="chat" question={messages[i - 1]?.content ?? ''} answer={m.content} facility={current} />
+              )}
+            </div>
+          )
         ))}
         {loading && (messages.length === 0 || messages[messages.length - 1].role === 'user') && (
           <div className="flex justify-start">

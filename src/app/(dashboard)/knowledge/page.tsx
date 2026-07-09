@@ -8,14 +8,16 @@ import remarkGfm from 'remark-gfm'
 import { supabase } from '@/lib/supabase/client'
 import StructuredTab from './structured'
 import GoldenTab from './golden'
+import FeedbackTab from './feedback'
 
-type Tab = 'core' | 'kpi' | 'glossary' | 'standard_pl' | 'golden'
-const TABS: { k: Tab; label: string }[] = [
+type Tab = 'core' | 'kpi' | 'glossary' | 'standard_pl' | 'golden' | 'feedback'
+const TABS: { k: Tab; label: string; ownerOnly?: boolean }[] = [
   { k: 'core', label: 'プロンプト・ナレッジ' },
   { k: 'kpi', label: 'KPI辞書' },
   { k: 'glossary', label: '用語集' },
   { k: 'standard_pl', label: '基準PL' },
   { k: 'golden', label: 'ゴールデン質問' },
+  { k: 'feedback', label: '改善要望', ownerOnly: true },
 ]
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -174,7 +176,7 @@ export default function KnowledgePage() {
         <>
           {/* タブ */}
           <div className="flex gap-1 mb-4 flex-wrap">
-            {TABS.map((t) => (
+            {TABS.filter((t) => !t.ownerOnly || role === 'owner').map((t) => (
               <button key={t.k} onClick={() => setTab(t.k)}
                 className="px-4 py-1.5 rounded-md text-sm transition-colors"
                 style={{ background: tab === t.k ? 'var(--accent)' : 'var(--surface2)', color: tab === t.k ? '#fff' : 'var(--text-dim)' }}>
@@ -185,6 +187,8 @@ export default function KnowledgePage() {
 
           {tab === 'golden' ? (
             <GoldenTab />
+          ) : tab === 'feedback' ? (
+            <FeedbackTab />
           ) : tab !== 'core' ? (
             <StructuredTab kind={tab} />
           ) : (

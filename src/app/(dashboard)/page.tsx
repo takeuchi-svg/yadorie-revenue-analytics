@@ -9,6 +9,7 @@ import {
 } from 'recharts'
 import { fmtYen, pct, fmtNum, channelColor, CHART_AXIS, chartTooltip } from '@/lib/ui'
 import { AssistantContent, SparkleIcon } from '@/components/ai-drawer'
+import FeedbackButton from '@/components/feedback-button'
 import type { MonthlyKpiRow as MonthlyKpi, OccupancyMonthlyRow as OccRow, ChannelRow } from '@/lib/db-types'
 
 // AIサマリ/課題のセッション内キャッシュ（facility|month → 本文）。本体の共有キャッシュはDB(ai_summary/ai_issue)
@@ -227,7 +228,10 @@ export default function OverviewPage() {
             {aiLoading ? (
               <p className="text-sm" style={{ color: 'var(--text-dim)' }}>生成中...</p>
             ) : aiSummary ? (
-              <AssistantContent content={aiSummary} />
+              <>
+                <AssistantContent content={aiSummary} />
+                <div className="mt-2"><FeedbackButton source="summary" question={`${latest?.month ?? ''} 実績サマリ`} answer={aiSummary} facility={current} /></div>
+              </>
             ) : aiErr ? (
               <p className="text-sm" style={{ color: 'var(--red)' }}>生成エラー: {aiErr}</p>
             ) : (
@@ -254,7 +258,10 @@ export default function OverviewPage() {
             {aiIssueLoading ? (
               <p className="text-sm" style={{ color: 'var(--text-dim)' }}>生成中...</p>
             ) : aiIssue ? (
-              <AssistantContent content={aiIssue} />
+              <>
+                <AssistantContent content={aiIssue} />
+                <div className="mt-2"><FeedbackButton source="issue" question={`${latest?.month ?? ''} 課題と対策`} answer={aiIssue} facility={current} /></div>
+              </>
             ) : aiIssueErr ? (
               <p className="text-sm" style={{ color: 'var(--red)' }}>生成エラー: {aiIssueErr}</p>
             ) : (
