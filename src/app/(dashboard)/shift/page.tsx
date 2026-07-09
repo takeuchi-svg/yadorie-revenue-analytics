@@ -460,42 +460,6 @@ export default function ShiftPage() {
                 </div>
               </div>
             )}
-          {/* 稼働前提・メモ */}
-          <details className="card mb-4" style={{ padding: '8px 12px' }} open>
-            <summary className="text-sm font-semibold cursor-pointer" style={{ color: 'var(--text-dim)' }}>稼働前提・メモ</summary>
-            <div className="overflow-x-auto mt-2">
-              <table className="text-xs border-separate" style={{ borderSpacing: 0, zoom }}>
-                <thead>
-                  <tr>
-                    <th className="px-2 py-1 sticky left-0" style={{ minWidth: 132, background: 'var(--surface)' }} />
-                    {days.map((d) => (
-                      <th key={d.date} className="px-1 py-1 text-center" style={{ minWidth: 52, color: 'var(--text-dim)' }}>
-                        <div>{d.day}</div>
-                        <div style={{ fontSize: 10, color: wdColor(d.wd) }}>{WD[d.wd]}</div>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {([['予算 稼働室/人数', 'budget'], ['オンハンド販売室数', 'onhand'], ['予測販売室数', 'forecast'], ['メモ', 'memo']] as const).map(([label, kind]) => (
-                    <tr key={kind}>
-                      <td className="px-2 py-1 whitespace-nowrap sticky left-0" style={{ minWidth: 132, background: 'var(--surface)', color: 'var(--text-dim)', borderTop: '1px solid var(--border)' }}>{label}</td>
-                      {days.map((d) => { const r = ctx[d.date]; return (
-                        <td key={d.date} className="px-1 py-1 text-center" style={{ minWidth: 52, borderTop: '1px solid var(--border)' }}>
-                          {kind === 'budget' ? (<div>{r?.budget_rooms ?? '-'}<div style={{ fontSize: 10, color: 'var(--text-dim)' }}>{r?.budget_guests ?? ''}</div></div>)
-                          : kind === 'memo' ? (<input className="field text-center" style={{ width: 46, fontSize: 10, padding: 2 }} value={r?.memo ?? ''}
-                              onChange={(e) => setCtxField(d.date, { memo: e.target.value })}
-                              onMouseEnter={(e) => { const m = ctx[d.date]?.memo; if (m && m.trim()) { const rc = e.currentTarget.getBoundingClientRect(); setMemoPop({ text: m, x: rc.left, y: rc.bottom + 4 }) } }}
-                              onMouseLeave={() => setMemoPop(null)} />)
-                          : (<input type="number" min={0} className="field text-center" style={{ width: 40, fontSize: 11, padding: 2 }} value={(kind === 'onhand' ? r?.onhand_rooms : r?.forecast_rooms) ?? ''} onChange={(e) => setCtxField(d.date, kind === 'onhand' ? { onhand_rooms: e.target.value === '' ? null : Number(e.target.value) } : { forecast_rooms: e.target.value === '' ? null : Number(e.target.value) })} />)}
-                        </td>) })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
-
           {/* #4 ペイントパレット: パターンを選んでセルをクリック/ドラッグで塗る */}
           <div className="flex items-center gap-1.5 flex-wrap mb-2">
             <span className="text-xs" style={{ color: 'var(--text-dim)' }}>ペイント:</span>
@@ -520,6 +484,28 @@ export default function ShiftPage() {
                 </tr>
               </thead>
               <tbody>
+                {/* 稼働前提（上部に固定・シフト行とは別デザイン）。日付ヘッダはシフト表と共通 */}
+                {([['予算 稼働室/人数', 'budget', 48], ['オンハンド販売室数', 'onhand', 74], ['予測販売室数', 'forecast', 100], ['メモ', 'memo', 126]] as const).map(([label, kind, top], idx, arr) => {
+                  const last = idx === arr.length - 1
+                  const bg = 'var(--surface2)'
+                  const bb = last ? '2px solid var(--accent)' : '1px solid var(--border)'
+                  return (
+                    <tr key={kind}>
+                      <td className="px-2 whitespace-nowrap sticky left-0 z-30" style={{ top, height: 26, minWidth: 150, background: bg, color: 'var(--text-dim)', fontSize: 11, fontWeight: 600, borderRight: '2px solid var(--border)', borderLeft: '3px solid var(--accent)', borderBottom: bb }}>{label}</td>
+                      {days.map((d) => { const r = ctx[d.date]; return (
+                        <td key={d.date} className="px-0.5 sticky z-20 text-center" style={{ top, height: 26, minWidth: 58, background: bg, borderBottom: bb }}>
+                          {kind === 'budget' ? (<span style={{ fontSize: 11 }}>{r?.budget_rooms ?? '-'}<span style={{ fontSize: 9, color: 'var(--text-dim)' }}>{r?.budget_guests != null ? ` / ${r.budget_guests}` : ''}</span></span>)
+                          : kind === 'memo' ? (<input className="field text-center" style={{ width: 46, fontSize: 10, padding: 2 }} value={r?.memo ?? ''}
+                              onChange={(e) => setCtxField(d.date, { memo: e.target.value })}
+                              onMouseEnter={(e) => { const m = ctx[d.date]?.memo; if (m && m.trim()) { const rc = e.currentTarget.getBoundingClientRect(); setMemoPop({ text: m, x: rc.left, y: rc.bottom + 4 }) } }}
+                              onMouseLeave={() => setMemoPop(null)} />)
+                          : (<input type="number" min={0} className="field text-center" style={{ width: 40, fontSize: 11, padding: 2 }} value={(kind === 'onhand' ? r?.onhand_rooms : r?.forecast_rooms) ?? ''} onChange={(e) => setCtxField(d.date, kind === 'onhand' ? { onhand_rooms: e.target.value === '' ? null : Number(e.target.value) } : { forecast_rooms: e.target.value === '' ? null : Number(e.target.value) })} />)}
+                        </td>) })}
+                      <td className="sticky z-20" style={{ top, height: 26, minWidth: 52, background: bg, borderLeft: '2px solid var(--border)', borderBottom: bb }} />
+                      <td className="sticky z-20" style={{ top, height: 26, minWidth: 40, background: bg, borderBottom: bb }} />
+                    </tr>
+                  )
+                })}
                 {staff.map((s, ri) => {
                   const agg = rowAgg(s.staff_code); const tag = s.is_spot ? 'スポット' : (s.wage_type || '未設定')
                   return (
