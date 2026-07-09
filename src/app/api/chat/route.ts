@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { runAgent, hasApiKey } from '@/lib/ai/agent'
+import { runAgentStream, hasApiKey } from '@/lib/ai/agent'
 import { requireUser, isAuthErr, facilityAllowed } from '@/lib/ai/auth'
 
 export const runtime = 'nodejs'
 export const maxDuration = 60
 
+// 成功時は text/plain のストリーム（トークン逐次配信）、エラー時は JSON({reply}) を返す。
+// クライアント(ai-drawer)は Content-Type で分岐する。
 export async function POST(req: NextRequest) {
   const auth = await requireUser(req)
   if (isAuthErr(auth)) return NextResponse.json({ reply: auth.error }, { status: auth.status })
@@ -16,8 +18,10 @@ export async function POST(req: NextRequest) {
     if (!facilityAllowed(auth, facility)) {
       return NextResponse.json({ reply: 'この施設を閲覧する権限がありません。' }, { status: 403 })
     }
-    const text = await runAgent(messages, facility, auth.facilities)
-    return NextResponse.json({ reply: text || '回答の生成に時間がかかりました。質問を具体的にして再度お試しください。' })
+    const stream = await runAgentStream(messages, facility)
+    return new Response(stream, {
+      headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', 'X-Accel-Buffering': 'no' },
+    })
   } catch (err) {
     const m = err instanceof Error ? err.message : String(err)
     return NextResponse.json({ reply: `エラー: ${m}` }, { status: 500 })

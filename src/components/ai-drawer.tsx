@@ -90,11 +90,31 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
         headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
         body: JSON.stringify({ messages: next, facility: current }),
       })
-      const data = await res.json()
-      setMessages((m) => [...m, { role: 'assistant', content: data.reply ?? 'エラー' }])
+      const ctype = res.headers.get('content-type') || ''
+      // エラー時は JSON({reply})。成功時は text/plain のストリーム。
+      if (!res.ok || !res.body || ctype.includes('application/json')) {
+        const data = await res.json().catch(() => ({ reply: '通信エラーが発生しました' }))
+        setMessages((m) => [...m, { role: 'assistant', content: data.reply ?? 'エラー' }])
+        setLoading(false)
+        return
+      }
+      // ストリーム: 空のassistantメッセージを追加し、届いたトークンを逐次追記（loadingは維持＝入力無効）
+      setMessages((m) => [...m, { role: 'assistant', content: '' }])
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let acc = ''
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        acc += decoder.decode(value, { stream: true })
+        setMessages((m) => { const c = m.slice(); c[c.length - 1] = { role: 'assistant', content: acc }; return c })
+      }
+      if (!acc.trim()) {
+        setMessages((m) => { const c = m.slice(); c[c.length - 1] = { role: 'assistant', content: '回答の生成に時間がかかりました。質問を具体的にして再度お試しください。' }; return c })
+      }
+      setLoading(false)
     } catch {
       setMessages((m) => [...m, { role: 'assistant', content: '通信エラーが発生しました' }])
-    } finally {
       setLoading(false)
     }
   }
@@ -138,7 +158,7 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
             </div>
           </div>
         ))}
-        {loading && (
+        {loading && (messages.length === 0 || messages[messages.length - 1].role === 'user') && (
           <div className="flex justify-start">
             <div className="px-3 py-2 rounded-lg text-sm" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>
               <span className="inline-block w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--accent)' }} /> 考え中...

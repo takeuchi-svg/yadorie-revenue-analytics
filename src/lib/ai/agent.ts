@@ -145,11 +145,20 @@ const CHAT_CHART_SPEC = `【chartコードブロックの仕様】
 \`\`\`
 type は "bar" か "line"。x はX軸キー、series は系列(keyは数値、labelは表示名)、data は行配列。数値は生の数(円・件数等、記号なし)。グラフ用データもquery_dataの実データから作る。`
 
-// 会話を実行して最終テキストを返す。
-// 【方式】往復ゼロ: この施設の直近データを先にまとめて渡し、tool往復なしの「1回のLLM呼び出し」で答える。
-//   → query_dataを最大8往復する旧方式はチャットには遅すぎ・60秒タイムアウトの原因だったため廃止。
-//   （runQuery/TOOL/loadAiCatalog は将来のディープ分析モード用に残置。現行チャットは未使用）
-// allowedFacilities: 施設の閲覧可否は呼び出し側(route)で検証済み。パックは選択施設1つ分。
+// チャットのシステムブロック（人格＋この施設の直近データパック＋簡潔ガード）を組み立てる。
+// 往復ゼロ方式: この施設の直近データを先に丸ごと渡し、tool往復なしで答える（旧8往復方式は廃止）。
+// （runQuery/TOOL/loadAiCatalog は将来のディープ分析モード用に残置。現行チャットは未使用）
+async function buildChatSystem(sb: any, facility?: string): Promise<Anthropic.TextBlockParam[]> {
+  // 回答の長さガード: 長文生成で60秒に近づき通信エラー/切れになるのを防ぐ（簡潔＝速い）
+  const BREVITY = `【回答の長さ】簡潔に。要点は2〜4点に絞り、冗長な列挙・前置き・過度な言い換えを避ける。表は必要な列・行だけ、グラフは最大1つ。全体で概ね900字以内を目安に、長くなりそうなら「まず要点→必要なら深掘りを提案」の形にする。`
+  const dataBlock = facility ? await fetchChatContext(sb, facility) : ''
+  const runtime = dataBlock
+    ? `${CHAT_CHART_SPEC}\n\n${BREVITY}\n\n【現在の施設の直近データ（この実データのみを根拠に答える。ここに無い指標・他施設は「今は手元にない」と述べ、推測の数値は作らない）】\n${dataBlock}\n\n${PRODUCTIVITY_NOTE}`
+    : `${CHAT_CHART_SPEC}\n\n${BREVITY}\n\n（施設が未選択のため実データがありません。施設の選択をやさしく促してください）`
+  return buildSystemBlocks(sb, facility, { runtime })
+}
+
+// 非ストリーム（ゴールデン質問の一括実行など、全文を待つ用途）。allowedFacilitiesはroute側で検証済み。
 export async function runAgent(
   messages: { role: 'user' | 'assistant'; content: string }[],
   facility?: string,
@@ -158,18 +167,38 @@ export async function runAgent(
   void allowedFacilities
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
   const sb = makeSupabase()
-  // 回答の長さガード: 長文生成で60秒に近づき通信エラー/切れになるのを防ぐ（簡潔＝速い）
-  const BREVITY = `【回答の長さ】簡潔に。要点は2〜4点に絞り、冗長な列挙・前置き・過度な言い換えを避ける。表は必要な列・行だけ、グラフは最大1つ。全体で概ね900字以内を目安に、長くなりそうなら「まず要点→必要なら深掘りを提案」の形にする。`
-  const dataBlock = facility ? await fetchChatContext(sb, facility) : ''
-  const runtime = dataBlock
-    ? `${CHAT_CHART_SPEC}\n\n${BREVITY}\n\n【現在の施設の直近データ（この実データのみを根拠に答える。ここに無い指標・他施設は「今は手元にない」と述べ、推測の数値は作らない）】\n${dataBlock}\n\n${PRODUCTIVITY_NOTE}`
-    : `${CHAT_CHART_SPEC}\n\n${BREVITY}\n\n（施設が未選択のため実データがありません。施設の選択をやさしく促してください）`
-  // 層1(人格)→層2(共通ナレッジ)→層3(施設プロフィール＋直近データ)。層1+層2はprompt cache対象
-  const system = await buildSystemBlocks(sb, facility, { runtime })
+  const system = await buildChatSystem(sb, facility)
   const msgs: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }))
-  // 上限は 4000（≒生成40〜50秒以内に収め60秒タイムアウトを避ける）。簡潔指示と併用。
   const resp = await client.messages.create({ model: MODEL, max_tokens: 4000, system, messages: msgs })
   return resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
+}
+
+// ストリーム（チャットUI用）。トークンを逐次配信＝書きながら表示で体感高速、長文でも待たされ感が消える。
+export async function runAgentStream(
+  messages: { role: 'user' | 'assistant'; content: string }[],
+  facility?: string,
+): Promise<ReadableStream<Uint8Array>> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+  const sb = makeSupabase()
+  const system = await buildChatSystem(sb, facility)
+  const msgs: Anthropic.MessageParam[] = messages.map((m) => ({ role: m.role, content: m.content }))
+  const encoder = new TextEncoder()
+  return new ReadableStream<Uint8Array>({
+    async start(controller) {
+      try {
+        const s = client.messages.stream({ model: MODEL, max_tokens: 4000, system, messages: msgs })
+        for await (const ev of s) {
+          if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') {
+            controller.enqueue(encoder.encode(ev.delta.text))
+          }
+        }
+      } catch (e) {
+        controller.enqueue(encoder.encode(`\n\n[エラー: ${e instanceof Error ? e.message : String(e)}]`))
+      } finally {
+        controller.close()
+      }
+    },
+  })
 }
 
 // ============================================================
@@ -300,7 +329,7 @@ export async function runInsight(
   ])
   const prompt = promptTpl.replaceAll('{month}', month)
   const resp = await client.messages.create({
-    model: MODEL, max_tokens: 8000, system,
+    model: MODEL, max_tokens: 4000, system,
     messages: [{ role: 'user', content: `${prompt}\n\n【実データ】\n${dataBlock}` }],
   })
   const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
