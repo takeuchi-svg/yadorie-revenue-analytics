@@ -61,7 +61,9 @@ export default function ShiftPage() {
   const [timeEdit, setTimeEdit] = useState<{ staff: string; date: string; shiftId: number; start: string; end: string; brk: number } | null>(null)  // #3 時間帯ミニ編集(休憩付き)
   const [ganttDate, setGanttDate] = useState<string | null>(null)  // #4 日別ガント
   const [zoom, setZoom] = useState(1)          // 文字サイズ拡大（年長者対策）
-  const [fullscreen, setFullscreen] = useState(false)  // 全画面表示
+  const [fullscreen, setFullscreen] = useState(false)  // 全画面表示（ネイティブfullscreen）
+  const fsRef = useRef<HTMLDivElement>(null)
+  const [memoPop, setMemoPop] = useState<{ text: string; x: number; y: number } | null>(null)  // メモのホバー表示
   const [spotOpen, setSpotOpen] = useState(false)
   const [spotName, setSpotName] = useState(''); const [spotWage, setSpotWage] = useState<number | ''>('')
 
@@ -71,7 +73,10 @@ export default function ShiftPage() {
   const roleMap = useMemo(() => { const o: Record<number, Role> = {}; roles.forEach((r) => { o[r.role_id] = r }); return o }, [roles])
   const dayIdx = useMemo(() => { const o: Record<string, number> = {}; days.forEach((d, i) => { o[d.date] = i }); return o }, [days])
 
-  // #3 セルの勤務時間帯（役割分割があればその範囲、無ければパターン既定）を 'H:MM–H:MM' で
+  // 時間帯: 役割分割があればその範囲。無ければ開始(パターン)＋実働＋休憩で終了を算出
+  //   → 時間数を直接変えると終了時刻が自動で伸びる（#E）
+  const hmMin = (m: number) => { const x = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}` }
+  const toMinS = (t: string) => (+t.slice(0, 2)) * 60 + (+t.slice(3, 5))
   const cellTimeRange = (c?: Cell): string => {
     if (!c) return ''
     const segs = c.shiftId != null ? segByShift[c.shiftId] : undefined
@@ -81,8 +86,16 @@ export default function ShiftPage() {
       return `${starts[0]}–${ends[ends.length - 1]}`
     }
     const p = c.patternId != null ? patMap[c.patternId] : null
-    if (p?.start_time && p?.end_time) return `${p.start_time.slice(0, 5)}–${p.end_time.slice(0, 5)}`
+    if (p?.start_time) { const s = toMinS(p.start_time.slice(0, 5)); return `${hmMin(s)}–${hmMin(s + (c.minutes || 0) + (p.break_minutes || 0))}` }
     return ''
+  }
+  // セルの休憩（時間）: 役割分割の合計 or パターン既定
+  const cellBreakH = (c?: Cell): number => {
+    if (!c) return 0
+    const segs = c.shiftId != null ? segByShift[c.shiftId] : undefined
+    if (segs && segs.length) return segs.reduce((a, s) => a + (s.break_minutes || 0), 0) / 60
+    const p = c.patternId != null ? patMap[c.patternId] : null
+    return (p?.break_minutes || 0) / 60
   }
 
   const reload = useCallback(async () => {
@@ -390,6 +403,13 @@ export default function ShiftPage() {
   }
 
   const printShift = () => window.print()
+  const enterFull = () => { fsRef.current?.requestFullscreen?.().catch(() => setFullscreen(true)) }
+  const exitFull = () => { if (document.fullscreenElement) document.exitFullscreen?.(); else setFullscreen(false) }
+  useEffect(() => {
+    const h = () => setFullscreen(!!document.fullscreenElement)
+    document.addEventListener('fullscreenchange', h)
+    return () => document.removeEventListener('fullscreenchange', h)
+  }, [])
 
   const patOptions = useMemo(() => ({ work: patterns.filter((p) => p.pattern_type === '勤務'), off: patterns.filter((p) => p.pattern_type === '休日') }), [patterns])
   const wdColor = (wd: number) => (wd === 0 ? 'var(--red)' : wd === 6 ? 'var(--accent)' : 'var(--text-dim)')
@@ -410,7 +430,7 @@ export default function ShiftPage() {
             <button onClick={() => setZoom((z) => Math.max(0.8, +(z - 0.1).toFixed(2)))} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }} title="文字を小さく">A−</button>
             <button onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(2)))} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }} title="文字を大きく">A+</button>
           </div>
-          <button onClick={() => setFullscreen(true)} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>全画面</button>
+          <button onClick={enterFull} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>全画面</button>
           <button onClick={printShift} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>PDF/印刷</button>
           <button onClick={copyPrevMonth} disabled={saving} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>前月コピー</button>
           <button onClick={() => setSpotOpen(true)} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>スポット追加</button>
@@ -426,11 +446,25 @@ export default function ShiftPage() {
         <Empty message="この施設に従業員がいません。勤怠CSVを取り込むか、スポット追加で登録してください。" />
       ) : (
         <>
+          {/* 全画面ラッパ: 稼働前提＋シフト表を一体で（ネイティブfullscreenでサイドバー等も消える） */}
+          <div ref={fsRef} className={fullscreen ? 'p-3 overflow-auto h-full' : ''} style={fullscreen ? { background: 'var(--bg)' } : undefined}>
+            {fullscreen && (
+              <div className="flex items-center gap-2 mb-2 flex-wrap">
+                <span className="text-sm font-semibold">{currentFacility?.name ?? current} — {month} シフト表</span>
+                <div className="ml-auto flex items-center gap-1">
+                  <button onClick={() => setZoom((z) => Math.max(0.8, +(z - 0.1).toFixed(2)))} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }} title="文字を小さく">A−</button>
+                  <span className="text-xs w-10 text-center" style={{ color: 'var(--text-dim)' }}>{Math.round(zoom * 100)}%</span>
+                  <button onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(2)))} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }} title="文字を大きく">A+</button>
+                  <button onClick={printShift} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>PDF/印刷</button>
+                  <button onClick={exitFull} className={btnGhost} style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>✕ 全画面を閉じる</button>
+                </div>
+              </div>
+            )}
           {/* 稼働前提・メモ */}
           <details className="card mb-4" style={{ padding: '8px 12px' }} open>
             <summary className="text-sm font-semibold cursor-pointer" style={{ color: 'var(--text-dim)' }}>稼働前提・メモ</summary>
             <div className="overflow-x-auto mt-2">
-              <table className="text-xs border-separate" style={{ borderSpacing: 0 }}>
+              <table className="text-xs border-separate" style={{ borderSpacing: 0, zoom }}>
                 <thead>
                   <tr>
                     <th className="px-2 py-1 sticky left-0" style={{ minWidth: 132, background: 'var(--surface)' }} />
@@ -449,7 +483,10 @@ export default function ShiftPage() {
                       {days.map((d) => { const r = ctx[d.date]; return (
                         <td key={d.date} className="px-1 py-1 text-center" style={{ minWidth: 52, borderTop: '1px solid var(--border)' }}>
                           {kind === 'budget' ? (<div>{r?.budget_rooms ?? '-'}<div style={{ fontSize: 10, color: 'var(--text-dim)' }}>{r?.budget_guests ?? ''}</div></div>)
-                          : kind === 'memo' ? (<input className="field text-center" style={{ width: 46, fontSize: 10, padding: 2 }} title={r?.memo ?? ''} value={r?.memo ?? ''} onChange={(e) => setCtxField(d.date, { memo: e.target.value })} />)
+                          : kind === 'memo' ? (<input className="field text-center" style={{ width: 46, fontSize: 10, padding: 2 }} value={r?.memo ?? ''}
+                              onChange={(e) => setCtxField(d.date, { memo: e.target.value })}
+                              onMouseEnter={(e) => { const m = ctx[d.date]?.memo; if (m && m.trim()) { const rc = e.currentTarget.getBoundingClientRect(); setMemoPop({ text: m, x: rc.left, y: rc.bottom + 4 }) } }}
+                              onMouseLeave={() => setMemoPop(null)} />)
                           : (<input type="number" min={0} className="field text-center" style={{ width: 40, fontSize: 11, padding: 2 }} value={(kind === 'onhand' ? r?.onhand_rooms : r?.forecast_rooms) ?? ''} onChange={(e) => setCtxField(d.date, kind === 'onhand' ? { onhand_rooms: e.target.value === '' ? null : Number(e.target.value) } : { forecast_rooms: e.target.value === '' ? null : Number(e.target.value) })} />)}
                         </td>) })}
                     </tr>
@@ -470,21 +507,8 @@ export default function ShiftPage() {
             {paintBrush !== null && <span className="text-[10px]" style={{ color: 'var(--accent)' }}>← セルをクリック/ドラッグで塗る（もう一度押すと解除）</span>}
           </div>
 
-          {/* 月グリッド（全画面ラップ） */}
-          <div className={fullscreen ? 'fixed inset-0 z-40 p-3 flex flex-col' : ''} style={fullscreen ? { background: 'var(--bg)' } : undefined}>
-            {fullscreen && (
-              <div className="flex items-center gap-2 mb-2 flex-wrap">
-                <span className="text-sm font-semibold">{currentFacility?.name ?? current} — {month} シフト表</span>
-                <div className="ml-auto flex items-center gap-1">
-                  <button onClick={() => setZoom((z) => Math.max(0.8, +(z - 0.1).toFixed(2)))} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }} title="文字を小さく">A−</button>
-                  <span className="text-xs w-10 text-center" style={{ color: 'var(--text-dim)' }}>{Math.round(zoom * 100)}%</span>
-                  <button onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(2)))} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }} title="文字を大きく">A+</button>
-                  <button onClick={printShift} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>PDF/印刷</button>
-                  <button onClick={() => setFullscreen(false)} className={btnGhost} style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>✕ 閉じる</button>
-                </div>
-              </div>
-            )}
-            <div className={`card overflow-auto shift-print ${fullscreen ? 'flex-1' : ''}`} style={{ maxHeight: fullscreen ? 'none' : 'calc(100vh - 280px)' }}>
+          {/* 月グリッド */}
+          <div className="card overflow-auto shift-print" style={{ maxHeight: fullscreen ? 'calc(100vh - 110px)' : 'calc(100vh - 280px)' }}>
             <table className="text-xs border-separate" style={{ borderSpacing: 0, zoom }}>
               <thead>
                 <tr>
@@ -509,6 +533,7 @@ export default function ShiftPage() {
                         const isWork = p?.pattern_type === '勤務'; const selected = sel.has(ck(s.staff_code, d.date))
                         const hasSeg = c?.shiftId != null && (segByShift[c.shiftId]?.length ?? 0) > 1
                         const timeRange = isWork ? cellTimeRange(c) : ''
+                        const brkH = isWork ? cellBreakH(c) : 0
                         return (
                           <td key={d.date} className="px-0.5 h-10" title={isWork ? 'ダブルクリックで役割分割' : undefined}
                             onMouseDown={(e) => {
@@ -530,7 +555,7 @@ export default function ShiftPage() {
                             {timeRange && (
                               <div onClick={(ev) => { ev.stopPropagation(); openTimeEditor(s.staff_code, d.date) }}
                                 className="text-center cursor-pointer" style={{ fontSize: 9, lineHeight: 1.15, color: 'var(--text-dim)', marginTop: 1 }}
-                                title="クリックで時間帯を編集">{timeRange}</div>
+                                title="クリックで時間帯を編集">{timeRange}{brkH > 0 ? ` (休${brkH.toFixed(1)})` : ''}</div>
                             )}
                           </td>
                         )
@@ -616,6 +641,11 @@ export default function ShiftPage() {
         </div>
       )}
 
+      {/* メモのホバー全文表示 */}
+      {memoPop && (
+        <div className="fixed z-50 p-2 rounded text-[11px]" style={{ left: memoPop.x, top: memoPop.y, maxWidth: 280, background: 'var(--surface)', border: '1px solid var(--border)', whiteSpace: 'pre-wrap', boxShadow: '0 4px 14px rgba(0,0,0,0.2)', color: 'var(--text)' }}>{memoPop.text}</div>
+      )}
+
       {/* #3 時間帯ミニ編集 */}
       {timeEdit && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.5)' }} onClick={() => setTimeEdit(null)}>
@@ -655,9 +685,9 @@ export default function ShiftPage() {
           const raw = (c.shiftId != null ? segByShift[c.shiftId] : null) ?? []
           let segs: GSeg[]
           if (raw.length) segs = raw.map((sg) => { const a = toMin(sg.start_time.slice(0, 5)); let e = toMin(sg.end_time.slice(0, 5)); if (e <= a) e += 1440; return { role_id: sg.role_id, start: a, end: e, label: roleMap[sg.role_id]?.role_name ?? '' } })
-          else if (p?.start_time && p?.end_time) { const a = toMin(p.start_time.slice(0, 5)); let e = toMin(p.end_time.slice(0, 5)); if (e <= a) e += 1440; segs = [{ role_id: p.default_role_id ?? 0, start: a, end: e, label: '' }] }
+          else if (p?.start_time) { const a = toMin(p.start_time.slice(0, 5)); const e = a + (c.minutes || 0) + (p.break_minutes || 0); segs = [{ role_id: p.default_role_id ?? 0, start: a, end: e, label: '' }] }
           else segs = []
-          if (segs.length) rows.push({ name: s.name ?? s.staff_code, segs, draggable: c.shiftId != null && segs.length === 1, shiftId: c.shiftId ?? null, staff: s.staff_code, date: ganttDate, brk: raw[0]?.break_minutes ?? p?.break_minutes ?? 0 })
+          if (segs.length) rows.push({ name: s.name ?? s.staff_code, segs, draggable: segs.length === 1, shiftId: c.shiftId ?? null, staff: s.staff_code, date: ganttDate, brk: raw[0]?.break_minutes ?? p?.break_minutes ?? 0 })
         }
         let lo = 24 * 60, hi = 0
         for (const r of rows) for (const sg of r.segs) { lo = Math.min(lo, sg.start); hi = Math.max(hi, sg.end) }
@@ -666,18 +696,20 @@ export default function ShiftPage() {
         const span = hi - lo || 1
         const ticks: number[] = []; for (let t = lo; t <= hi; t += 60) ticks.push(t)
         const fmt = (m: number) => { const x = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}` }
-        const startDrag = (e: React.MouseEvent, row: GRow, edge: 'start' | 'end') => {
+        const startDrag = async (e: React.MouseEvent, row: GRow, edge: 'start' | 'end') => {
           e.preventDefault(); e.stopPropagation()
-          if (row.shiftId == null) return
           const track = (e.currentTarget as HTMLElement).closest('[data-track]') as HTMLElement | null
           if (!track) return
-          if (!segByShift[row.shiftId]?.length) {
+          const rc = track.getBoundingClientRect()
+          // 未保存セルはここで確定して shift_id を得る（保存ボタンを押さなくてもドラッグ可）
+          let shiftId = row.shiftId
+          if (shiftId == null) { shiftId = await ensureShiftId(row.staff, row.date); if (shiftId == null) return }
+          if (!segByShift[shiftId]?.length) {
             const sg = row.segs[0]
             const seed: ShiftSegment = { seq: 1, role_id: sg.role_id || (roles[0]?.role_id ?? 0), start_time: fmt(sg.start), end_time: fmt(sg.end), break_minutes: row.brk, work_minutes: segMinutes(fmt(sg.start), fmt(sg.end), row.brk) }
-            setSegByShift((prev) => ({ ...prev, [row.shiftId as number]: [seed] }))
+            setSegByShift((prev) => ({ ...prev, [shiftId as number]: [seed] }))
           }
-          const rc = track.getBoundingClientRect()
-          dragRef.current = { shiftId: row.shiftId, edge, rectLeft: rc.left, rectWidth: rc.width, lo, hi, staff: row.staff, date: row.date }
+          dragRef.current = { shiftId, edge, rectLeft: rc.left, rectWidth: rc.width, lo, hi, staff: row.staff, date: row.date }
         }
         const dd = days.find((x) => x.date === ganttDate)
         return (
@@ -707,6 +739,10 @@ export default function ShiftPage() {
                               title={`${fmt(sg.start)}–${fmt(sg.end)} ${sg.label}`}>
                               {r.draggable && <div onMouseDown={(e) => startDrag(e, r, 'start')} className="absolute left-0 top-0 bottom-0" style={{ width: 9, cursor: 'ew-resize', background: 'rgba(255,255,255,0.4)', borderRadius: '4px 0 0 4px' }} title="ドラッグで開始を調整" />}
                               <span className="px-1 truncate">{fmt(sg.start)}–{fmt(sg.end)}{sg.label ? ` ${sg.label}` : ''}</span>
+                              {r.brk > 0 && j === 0 && (sg.end - sg.start) > 0 && (
+                                <div className="absolute pointer-events-none" title={`休憩 ${(r.brk / 60).toFixed(1)}h`}
+                                  style={{ left: '50%', top: 3, bottom: 3, width: `${Math.max(6, Math.min(80, (r.brk / (sg.end - sg.start)) * 100))}%`, transform: 'translateX(-50%)', background: 'repeating-linear-gradient(45deg, rgba(0,0,0,0.28), rgba(0,0,0,0.28) 3px, transparent 3px, transparent 6px)', borderRadius: 2 }} />
+                              )}
                               {r.draggable && <div onMouseDown={(e) => startDrag(e, r, 'end')} className="absolute right-0 top-0 bottom-0" style={{ width: 9, cursor: 'ew-resize', background: 'rgba(255,255,255,0.4)', borderRadius: '0 4px 4px 0' }} title="ドラッグで終了を調整" />}
                             </div>
                           ))}
