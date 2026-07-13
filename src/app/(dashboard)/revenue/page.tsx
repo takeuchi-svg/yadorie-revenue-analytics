@@ -140,11 +140,6 @@ export default function RevenuePage() {
           </button>
         ))}
       </div>
-      <p className="text-xs mb-4" style={{ color: 'var(--text-dim)' }}>
-        {isLincoln
-          ? `${basis === 'ci' ? 'CI日（チェックイン月）' : '予約日'}ベース・ステイシー（PMS・C/O確定＝freee計上基準の精算額）`
-          : 'CI日（チェックイン月）ベース・PMS予約データ（このタブは日付基準の切替なし）'}
-      </p>
 
       {loading ? <Loading /> : loadError ? <LoadError message={loadError} /> : (
         <>

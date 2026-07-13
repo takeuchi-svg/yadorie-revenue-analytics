@@ -13,12 +13,11 @@ import FeedbackTab from './feedback'
 type Tab = 'core' | 'kpi' | 'glossary' | 'standard_pl' | 'golden' | 'feedback'
 const TABS: { k: Tab; label: string; ownerOnly?: boolean }[] = [
   { k: 'core', label: 'プロンプト・ナレッジ' },
-  { k: 'kpi', label: 'KPI辞書' },
-  { k: 'glossary', label: '用語集' },
   { k: 'standard_pl', label: '基準PL' },
   { k: 'golden', label: 'ゴールデン質問' },
   { k: 'feedback', label: '改善要望', ownerOnly: true },
 ]
+// KPI辞書・用語集は「辞書」ページ(/dict)へ移設。オーナーはそこで編集できる。
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface Item {

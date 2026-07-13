@@ -173,16 +173,12 @@ export default function FacilityProfile() {
   return (
     <section className="card p-6 mt-6">
       <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-        <h2 className="text-lg font-semibold">施設プロフィール（AI分析の前提情報）</h2>
+        <h2 className="text-lg font-semibold">施設プロフィール</h2>
         <button onClick={saveProfile} disabled={saving || !dirty}
           className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50">
           {dirty ? 'プロフィールを保存' : '保存済み'}
         </button>
       </div>
-      <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>
-        {currentFacility?.name ?? current} の「意図・方針」を記録します（数値・実態は入力不要＝実績DBが事実を語ります）。
-        入力内容はクチコミAI分析・改善レポート・AIチャットの前提として自動的に読み込まれます。
-      </p>
 
       {/* アラート */}
       {(currentMonthMissing || requiredMissing.length > 0) && (
@@ -248,14 +244,14 @@ export default function FacilityProfile() {
                     {/* 月別客室数の上書き（改装時のみ・旧設定から統合） */}
                     <div className="mt-4 rounded-md p-3" style={{ border: '1px solid var(--border)' }}>
                       <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-                        <label className="text-xs font-medium" style={{ color: 'var(--text-dim)' }}>月別客室数（改装時のみ・空欄=総客室数 {totalRooms || '-'} を使用）</label>
+                        <label className="text-xs font-medium" style={{ color: 'var(--text-dim)' }}>月別客室数（毎年・全月入力。空欄の月は総客室数 {totalRooms || '-'} を使用）</label>
                         {opFys.length > 0 && (
                           <select className="field px-2 py-1 text-xs" value={opFy} onChange={(e) => setOpFy(e.target.value)}>
                             {opFys.map((y) => <option key={y} value={y}>{y}年度</option>)}
                           </select>
                         )}
                       </div>
-                      <p className="text-[10px] mb-2" style={{ color: 'var(--text-dim)' }}>改装等で部屋数が変わる月だけ入力。稼働日数は販売実績のある日数から自動算出のため入力不要です。</p>
+                      <p className="text-[10px] mb-2" style={{ color: 'var(--text-dim)' }}>毎年、各月の客室数を入力してください（改装・季節休館などで月ごとに変わる分を反映）。稼働日数は販売実績のある日数から自動算出のため入力不要です。</p>
                       <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
                         {fyMonths(opFy).map((m) => (
                           <div key={m}>
@@ -305,7 +301,7 @@ export default function FacilityProfile() {
           <button onClick={() => setShowAdd((v) => !v)}
             className="px-3 py-1 text-xs rounded-md text-white hover:opacity-90" style={{ background: 'var(--accent)' }}>＋ 今月の取組を追加</button>
         </div>
-        <p className="text-[11px] mb-2" style={{ color: 'var(--text-dim)' }}>「何をやったか」の事実だけを記録します。うまくいったか等の主観は書きません（効果はAIが実績データと突合して判定します）。過去分は編集不可。</p>
+        <p className="text-[11px] mb-2" style={{ color: 'var(--text-dim)' }}>「何をやったか」の事実だけを記録します。うまくいったか等の主観は書きません。過去分は編集不可。</p>
 
         {showAdd && (
           <div className="rounded-md p-3 mb-3 space-y-2" style={{ background: 'var(--surface2)' }}>

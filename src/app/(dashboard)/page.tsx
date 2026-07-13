@@ -334,9 +334,6 @@ export default function OverviewPage() {
               </tbody>
             </table>
           </div>
-          <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
-            ※ OCC（稼働率）は販売数集計表（確定販売室数）ベース。室泊・売上はPMS予約ベース（チェックイン月に計上＝freee計上基準）。客単価は人泊単価（売上÷人泊数）。
-          </p>
         </>
       )}
     </div>

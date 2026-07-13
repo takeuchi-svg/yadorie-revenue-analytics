@@ -600,10 +600,18 @@ export default function ShiftPage() {
           </div>
 
           {msg && <p className="text-sm mt-3" style={{ color: msg.startsWith('Error') ? 'var(--red)' : 'var(--green)' }}>{msg}</p>}
-          <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
-            セル=パターン選択＋時間手修正。<b>Shift+クリックで範囲選択→コピー</b>し、<b>貼付先の左上をクリック→貼付</b>で形のまま複製（⌘/Ctrl+C・V可。単一セルは範囲選択に塗りつぶし）。<b>勤務セルをダブルクリックで役割分割</b>。
-            スポットの実働は保存時に実績(raw_attendance_daily/manual)へ記録され総労働時間・KPIに反映。人件費は計画ベースの月次合計のみ表示。
-          </p>
+          <div className="text-xs mt-3 leading-relaxed" style={{ color: 'var(--text-dim)' }}>
+            <div className="font-semibold mb-1" style={{ color: 'var(--text)' }}>使い方</div>
+            <ul className="space-y-0.5" style={{ listStyle: 'disc', paddingLeft: 18 }}>
+              <li>セルでパターン（日勤・休など）を選び、<b>時間数は直接編集</b>できます（時間数を増やすと終了時刻も自動で伸びます）</li>
+              <li>時間帯「9:00–17:00」を<b>クリックで開始・終了・休憩を編集</b>。勤務セルを<b>ダブルクリックで役割分割</b>（1日を複数役割に）</li>
+              <li><b>ペイント</b>：上の「ペイント」でパターンを選び、セルをなぞって連続入力</li>
+              <li><b>コピー</b>：Shiftを押しながらドラッグで範囲選択 → コピー → 貼付先の左上をクリックで形のまま複製（Ctrl+C / Ctrl+V 可）</li>
+              <li><b>1日コピー</b>：日付にカーソルを当てて「コ」でその日の全員をコピー → 別の日で「貼」</li>
+              <li>日付を<b>クリックでその日のガント</b>（時間帯の重なり）を表示。バーの端をドラッグで15分調整</li>
+            </ul>
+            <p className="mt-1">※ スポットの実働は保存時に勤怠実績へ記録され、労働時間・KPIに反映されます。人件費は計画ベースの月次合計です。</p>
+          </div>
 
           {/* 役割分割モーダル（T08）※全画面でも出るよう fsRef 内に配置 */}
       {segEdit && (
