@@ -6,6 +6,7 @@ import { ToastProvider } from './toast'
 import AuthGuard from './auth-guard'
 import Sidebar from './sidebar'
 import AiDrawer, { SparkleIcon } from './ai-drawer'
+import TopbarFacility from './topbar-facility'
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const [leftOpen, setLeftOpen] = useState(true)
@@ -25,11 +26,14 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
                 className="px-2 py-1 rounded-md text-sm hover:opacity-80" style={{ color: 'var(--text-dim)', border: '1px solid var(--border)' }}>
                 {leftOpen ? '«' : '»'}
               </button>
-              <button onClick={() => setAiOpen((v) => !v)} title="AIアシスタント"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm"
-                style={{ background: aiOpen ? 'var(--accent)' : 'var(--surface)', color: aiOpen ? '#fff' : 'var(--text)', border: '1px solid var(--border)' }}>
-                <SparkleIcon size={16} /> AI
-              </button>
+              <div className="flex items-center gap-3 min-w-0">
+                <TopbarFacility />
+                <button onClick={() => setAiOpen((v) => !v)} title="AIアシスタント"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm shrink-0"
+                  style={{ background: aiOpen ? 'var(--accent)' : 'var(--surface)', color: aiOpen ? '#fff' : 'var(--text)', border: '1px solid var(--border)' }}>
+                  <SparkleIcon size={16} /> AI
+                </button>
+              </div>
             </div>
             <div className="flex-1">{children}</div>
           </main>

@@ -161,9 +161,8 @@ export default function OverviewPage() {
     <div className="p-6">
       <div className="flex items-start justify-between mb-6 gap-4 flex-wrap">
         <div>
-          <h1 className="text-2xl font-bold mb-1">Overview</h1>
           <p className="text-sm" style={{ color: 'var(--text-dim)' }}>
-            {currentFacility?.name ?? current}{latest ? ` ・ ${latest.month}` : ''}
+            {latest ? latest.month : ''}
           </p>
         </div>
         {/* 灯からの季節の一言（§6） */}

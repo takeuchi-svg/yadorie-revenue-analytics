@@ -47,7 +47,6 @@ export default function DictPage() {
   return (
     <div className="p-6">
       <div className="mb-4">
-        <h1 className="text-2xl font-bold mb-1">辞書</h1>
         <p className="text-sm" style={{ color: 'var(--text-dim)' }}>
           KPI・指標の定義と社内用語。灯（AI）もこの定義に沿って回答します。{isOwner && '（オーナーは下書き→公開で編集できます）'}
         </p>

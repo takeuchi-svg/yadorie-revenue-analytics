@@ -1,7 +1,7 @@
 'use client'
 
 export function PageHeader({
-  title, subtitle, month, months, onMonth,
+  month, months, onMonth,
 }: {
   title: string
   subtitle: string
@@ -9,17 +9,12 @@ export function PageHeader({
   months?: string[]
   onMonth?: (m: string) => void
 }) {
+  if (!months || months.length === 0 || !onMonth) return null
   return (
-    <div className="flex items-end justify-between mb-6">
-      <div>
-        <h1 className="text-2xl font-bold mb-1">{title}</h1>
-        <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{subtitle}</p>
-      </div>
-      {months && months.length > 0 && onMonth && (
-        <select className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => onMonth(e.target.value)}>
-          {months.map((m) => <option key={m} value={m}>{m}</option>)}
-        </select>
-      )}
+    <div className="flex items-center justify-end mb-6">
+      <select className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => onMonth(e.target.value)}>
+        {months.map((m) => <option key={m} value={m}>{m}</option>)}
+      </select>
     </div>
   )
 }

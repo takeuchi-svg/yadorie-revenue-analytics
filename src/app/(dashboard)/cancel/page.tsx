@@ -120,10 +120,6 @@ export default function CancelPage() {
   return (
     <div className="p-6">
       <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold mb-1">CXL ＆ LT分析</h1>
-          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current}・チェックイン{month === 'all' ? '全期間' : month}</p>
-        </div>
         <select className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)}>
           <option value="all">全期間</option>
           {months.map((m) => <option key={m} value={m}>{m}</option>)}

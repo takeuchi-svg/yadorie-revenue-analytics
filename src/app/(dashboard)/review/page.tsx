@@ -264,12 +264,6 @@ export default function ReviewPage() {
   return (
     <div className="p-6">
       <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold mb-1">クチコミ・満足度</h1>
-          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current}
-            <span className="ml-2 text-[10px] px-2 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>じゃらん+一休+楽天+アンケート</span>
-          </p>
-        </div>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
             {(['1', '3', '12'] as const).map((v) => (

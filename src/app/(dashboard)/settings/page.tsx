@@ -89,7 +89,6 @@ export default function SettingsPage() {
   return (
     <div className="p-6 max-w-4xl">
       <div className="flex items-end justify-between mb-6 flex-wrap gap-3">
-        <h1 className="text-2xl font-bold">Settings</h1>
         <div>
           <label className="block text-[10px] mb-1 tracking-wide" style={{ color: 'var(--text-dim)' }}>設定対象の施設</label>
           <div className="min-w-56"><FacilitySelect options={facilities} value={current} onChange={setCurrent} /></div>

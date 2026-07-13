@@ -223,10 +223,6 @@ export default function DailyPage() {
   return (
     <div className="p-6">
       <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold mb-1">日別売上</h1>
-          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current}</p>
-        </div>
         <div className="flex items-center gap-2">
           <input type="date" className="field px-3 py-1.5 text-sm" value={from} onChange={(e) => setFrom(e.target.value)} />
           <span style={{ color: 'var(--text-dim)' }}>〜</span>

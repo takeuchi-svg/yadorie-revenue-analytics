@@ -32,10 +32,6 @@ export default function RatePage() {
   return (
     <div className="p-6">
       <div className="flex items-end justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold mb-1">Rate Control</h1>
-          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current}</p>
-        </div>
         {snapshots.length > 0 && (
           <div>
             <label className="block text-[10px] mb-1" style={{ color: 'var(--text-dim)' }}>スナップショット日</label>

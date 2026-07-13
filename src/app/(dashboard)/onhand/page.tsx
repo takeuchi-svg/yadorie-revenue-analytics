@@ -107,13 +107,6 @@ export default function OnhandPage() {
 
   return (
     <div className="p-6">
-      <div className="mb-4">
-        <h1 className="text-2xl font-bold mb-1">予約状況（オンハンド）</h1>
-        <p className="text-sm" style={{ color: 'var(--text-dim)' }}>
-          {currentFacility?.name ?? current}・{cm} 以降の予約の入り具合（ステイシー予約情報の最新スナップショット）
-        </p>
-      </div>
-
       {loading ? <Loading /> : loadError ? <LoadError message={loadError} /> : rows.length === 0 ? (
         <Empty message="将来月の予約情報CSV（未チェックイン分）を /upload からアップロードしてください" />
       ) : (

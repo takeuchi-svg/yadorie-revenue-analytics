@@ -442,10 +442,6 @@ export default function ShiftPage() {
       {/* 印刷/PDF: シフト表だけを横向きで出力（張り出し用） */}
       <style>{`@media print { body * { visibility: hidden !important; } .shift-print, .shift-print * { visibility: visible !important; } .shift-print { position: absolute !important; left: 0; top: 0; width: auto !important; max-height: none !important; overflow: visible !important; box-shadow: none !important; } .shift-print table { zoom: 1 !important; } @page { size: A4 landscape; margin: 8mm; } }`}</style>
       <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold mb-1">シフト・労務</h1>
-          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>{currentFacility?.name ?? current}</p>
-        </div>
         <div className="flex items-center gap-2 flex-wrap">
           <input type="month" className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)} />
           <div className="flex items-center gap-0.5">

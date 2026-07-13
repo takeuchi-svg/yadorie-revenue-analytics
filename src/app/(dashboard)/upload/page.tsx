@@ -413,8 +413,6 @@ export default function UploadPage() {
   return (
     <div className="min-h-screen p-6" style={{ background: 'var(--bg)' }}>
       <div className="max-w-4xl mx-auto">
-        <h1 className="text-2xl font-bold mb-4">データアップロード</h1>
-
         {/* Tabs */}
         <div className="flex gap-1 mb-5">
           {([['sales', '売上データ'], ['pl', 'PL実績'], ['attendance', '勤怠'], ['review', 'クチコミ']] as const).map(([k, label]) => (
