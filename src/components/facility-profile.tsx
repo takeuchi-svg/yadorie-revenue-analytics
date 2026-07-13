@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase/client'
 import { useFacility } from '@/lib/facility-context'
 import { PROFILE_SECTIONS, INITIATIVE_CATEGORIES, FACILITY_TYPES, concreteness, GAUGE_COLORS } from '@/lib/facility-profile-def'
+import { useToast } from '@/components/toast'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface Initiative { id: number; year_month: string; category: string | null; title: string; description: string | null; status: string | null; created_by: string | null }
@@ -44,6 +45,7 @@ function Gauge({ text }: { text: string }) {
 
 export default function FacilityProfile() {
   const { current, currentFacility } = useFacility()
+  const toast = useToast()
   const [profile, setProfile] = useState<Record<string, any>>({})
   const [totalRooms, setTotalRooms] = useState<number | ''>('')  // dim_facility.total_rooms（旧・設定/施設マスタから統合）
   const [opRooms, setOpRooms] = useState<Record<string, number | ''>>({})  // 月別客室数の上書き（改装時のみ・旧設定から統合）
@@ -55,7 +57,6 @@ export default function FacilityProfile() {
   const [seasonalDirty, setSeasonalDirty] = useState(false)
   const [initiatives, setInitiatives] = useState<Initiative[]>([])
   const [saving, setSaving] = useState(false)
-  const [msg, setMsg] = useState('')
   // 取組追加フォーム
   const [showAdd, setShowAdd] = useState(false)
   const [niCat, setNiCat] = useState<string>('食事')
@@ -104,7 +105,7 @@ export default function FacilityProfile() {
   const setField = (k: string, v: any) => { setProfile((prev) => ({ ...prev, [k]: v })); setDirty(true) }
 
   const saveProfile = async () => {
-    setSaving(true); setMsg('')
+    setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
     const row: Record<string, any> = { facility: current, updated_at: new Date().toISOString(), updated_by: user?.email ?? null }
     for (const sec of PROFILE_SECTIONS) for (const f of sec.fields) row[f.key] = profile[f.key] || null
@@ -128,33 +129,33 @@ export default function FacilityProfile() {
       e3 = r.error
     }
     const err = error ?? e2 ?? e3
-    setMsg(err ? `Error: ${err.message}` : 'プロフィールを保存しました')
+    toast(err ? `エラー: ${err.message}` : 'プロフィールを保存しました', err ? 'error' : 'success')
     if (!err) setDirty(false)
     setSaving(false)
   }
 
   const saveSeasonal = async () => {
-    setSaving(true); setMsg('')
+    setSaving(true)
     const rows = Object.entries(seasonal).filter(([, v]) => v.trim() !== '')
       .map(([m, note]) => ({ facility: current, month: Number(m), note, updated_at: new Date().toISOString() }))
     const { error } = rows.length
       ? await supabase.from('raw_seasonality_note').upsert(rows, { onConflict: 'facility,month' })
       : { error: null }
-    setMsg(error ? `Error: ${error.message}` : '繁閑理由を保存しました')
+    toast(error ? `エラー: ${error.message}` : '繁閑理由を保存しました', error ? 'error' : 'success')
     if (!error) setSeasonalDirty(false)
     setSaving(false)
   }
 
   const addInitiative = async () => {
-    if (!niTitle.trim()) { setMsg('取組の見出しを入力してください'); return }
-    setSaving(true); setMsg('')
+    if (!niTitle.trim()) { toast('取組の見出しを入力してください', 'error'); return }
+    setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
     const { error } = await supabase.from('raw_facility_initiative').insert({
       facility: current, year_month: thisMonth(), category: niCat,
       title: niTitle.trim(), description: niDesc.trim() || null, status: niStatus,
       created_by: user?.email ?? null,
     })
-    setMsg(error ? `Error: ${error.message}` : '取組を記録しました')
+    toast(error ? `エラー: ${error.message}` : '取組を記録しました', error ? 'error' : 'success')
     if (!error) { setShowAdd(false); setNiTitle(''); setNiDesc(''); reload() }
     setSaving(false)
   }
@@ -354,7 +355,6 @@ export default function FacilityProfile() {
         )}
       </div>
 
-      {msg && <p className="text-sm mt-3" style={{ color: msg.startsWith('Error') ? 'var(--red)' : 'var(--green)' }}>{msg}</p>}
     </section>
   )
 }

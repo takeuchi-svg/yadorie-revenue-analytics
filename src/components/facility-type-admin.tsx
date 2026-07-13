@@ -6,13 +6,14 @@ import { useEffect, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { FACILITY_TYPES } from '@/lib/facility-profile-def'
+import { useToast } from '@/components/toast'
 
 export default function FacilityTypeAdmin() {
   const { facilities } = useFacility()
+  const toast = useToast()
   const [types, setTypes] = useState<Record<string, string>>({})
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [msg, setMsg] = useState('')
 
   useEffect(() => {
     supabase.from('dim_facility_profile').select('facility, facility_type').then(({ data }) => {
@@ -25,12 +26,12 @@ export default function FacilityTypeAdmin() {
   const setType = (f: string, v: string) => { setTypes((p) => ({ ...p, [f]: v })); setDirty(true) }
 
   const save = async () => {
-    setSaving(true); setMsg('')
+    setSaving(true)
     // 施設タイプ列のみをupsert（他のプロフィール列は触らない）
     const rows = facilities.map((f) => ({ facility: f.facility, facility_type: types[f.facility] || null, updated_at: new Date().toISOString() }))
     const { error } = await supabase.from('dim_facility_profile').upsert(rows, { onConflict: 'facility' })
     setSaving(false)
-    setMsg(error ? 'エラー: ' + error.message : '施設タイプを保存しました')
+    toast(error ? 'エラー: ' + error.message : '施設タイプを保存しました', error ? 'error' : 'success')
     if (!error) setDirty(false)
   }
 
@@ -78,7 +79,6 @@ export default function FacilityTypeAdmin() {
         </table>
       </div>
 
-      {msg && <p className="text-sm mt-3" style={{ color: msg.startsWith('エラー') ? 'var(--red)' : 'var(--green)' }}>{msg}</p>}
     </section>
   )
 }

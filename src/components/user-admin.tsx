@@ -3,14 +3,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
+import { useToast } from '@/components/toast'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface UserRow { user_id: string; email: string; role: string; can_view_wage?: boolean; facilities: string[] }
 
 export default function UserAdmin() {
   const { facilities } = useFacility()
+  const toast = useToast()
   const [users, setUsers] = useState<UserRow[]>([])
-  const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   // 新規
   const [email, setEmail] = useState('')
@@ -32,7 +33,7 @@ export default function UserAdmin() {
 
   const reload = useCallback(async () => {
     const r = await call('list')
-    if (r.error) { setMsg(r.error); return }
+    if (r.error) { toast(r.error, 'error'); return }
     setUsers(r.users ?? [])
     const ef: Record<string, Set<string>> = {}
     ;(r.users ?? []).forEach((u: UserRow) => { ef[u.user_id] = new Set(u.facilities) })
@@ -42,23 +43,23 @@ export default function UserAdmin() {
   useEffect(() => { reload() }, [reload])
 
   const create = async () => {
-    if (!email) { setMsg('メールアドレスを入力してください'); return }
-    setBusy(true); setMsg('')
+    if (!email) { toast('メールアドレスを入力してください', 'error'); return }
+    setBusy(true)
     // パスワード空欄＝招待メール送信（本人がリンクからパスワード設定）。入力時＝即時発行
     const r = password
       ? await call('create', { email, password, role, facilities: [...newFacs] })
       : await call('invite', { email, role, facilities: [...newFacs], redirectTo: `${window.location.origin}/reset-password` })
     setBusy(false)
-    if (r.error) { setMsg('エラー: ' + r.error); return }
-    setMsg(password ? '発行しました' : '招待メールを送信しました'); setEmail(''); setPassword(''); setRole('member'); setNewFacs(new Set())
+    if (r.error) { toast('エラー: ' + r.error, 'error'); return }
+    toast(password ? 'アカウントを発行しました' : `${email} に招待メールを送信しました`); setEmail(''); setPassword(''); setRole('member'); setNewFacs(new Set())
     reload()
   }
 
   const sendReset = async (targetEmail: string) => {
-    setBusy(true); setMsg('')
+    setBusy(true)
     const r = await call('sendReset', { email: targetEmail, redirectTo: `${window.location.origin}/reset-password` })
     setBusy(false)
-    setMsg(r.error ? 'エラー: ' + r.error : `${targetEmail} に再設定メールを送信しました`)
+    toast(r.error ? 'エラー: ' + r.error : `${targetEmail} に再設定メールを送信しました`, r.error ? 'error' : 'success')
   }
 
   const toggle = (set: Set<string>, f: string) => { const n = new Set(set); n.has(f) ? n.delete(f) : n.add(f); return n }
@@ -110,7 +111,7 @@ export default function UserAdmin() {
                 <span className="text-xs px-2 py-1 rounded-md font-semibold" style={{ background: 'var(--accent)', color: '#fff' }}>オーナー</span>
               ) : (
                 <select className="field px-2 py-1 text-xs" value={u.role}
-                  onChange={async (e) => { await call('setRole', { user_id: u.user_id, role: e.target.value }); reload() }}>
+                  onChange={async (e) => { await call('setRole', { user_id: u.user_id, role: e.target.value }); toast('権限を変更しました'); reload() }}>
                   <option value="member">一般</option>
                   <option value="admin">管理者</option>
                 </select>
@@ -118,14 +119,14 @@ export default function UserAdmin() {
               {u.role === 'member' && (
                 <label className="flex items-center gap-1 text-xs cursor-pointer" style={{ color: 'var(--text-dim)' }} title="ON: 割当施設の従業員の賃金・個人別人件費を閲覧/編集できる">
                   <input type="checkbox" checked={!!u.can_view_wage}
-                    onChange={async (e) => { await call('setWagePerm', { user_id: u.user_id, can_view_wage: e.target.checked }); reload() }} />
+                    onChange={async (e) => { await call('setWagePerm', { user_id: u.user_id, can_view_wage: e.target.checked }); toast('給与閲覧権限を変更しました'); reload() }} />
                   給与閲覧
                 </label>
               )}
               <button onClick={() => sendReset(u.email)} disabled={busy}
                 className="ml-auto text-xs px-2 py-1 rounded-md disabled:opacity-50" style={{ color: 'var(--text-dim)', border: '1px solid var(--border)' }}
                 title="このユーザーにパスワード再設定メールを送信">再設定メール</button>
-              <button onClick={async () => { if (confirm(`${u.email} を削除しますか？`)) { await call('delete', { user_id: u.user_id }); reload() } }}
+              <button onClick={async () => { if (confirm(`${u.email} を削除しますか？`)) { await call('delete', { user_id: u.user_id }); toast(`${u.email} を削除しました`); reload() } }}
                 className="text-xs px-2 py-1 rounded-md" style={{ color: 'var(--red)', border: '1px solid var(--border)' }}>削除</button>
             </div>
             {u.role === 'member' && (
@@ -139,7 +140,7 @@ export default function UserAdmin() {
                     </label>
                   ))}
                 </div>
-                <button onClick={async () => { await call('setFacilities', { user_id: u.user_id, facilities: [...(editFacs[u.user_id] ?? [])] }); setMsg('施設割当を保存しました'); reload() }}
+                <button onClick={async () => { await call('setFacilities', { user_id: u.user_id, facilities: [...(editFacs[u.user_id] ?? [])] }); toast('施設割当を保存しました'); reload() }}
                   className="text-xs px-3 py-1 rounded-md text-white" style={{ background: 'var(--accent)' }}>施設割当を保存</button>
               </div>
             )}
@@ -152,7 +153,6 @@ export default function UserAdmin() {
         ))}
       </div>
 
-      {msg && <p className="text-sm mt-3" style={{ color: msg.startsWith('エラー') ? 'var(--red)' : 'var(--green)' }}>{msg}</p>}
     </section>
   )
 }

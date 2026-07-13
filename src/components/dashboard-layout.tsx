@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from 'react'
 import { FacilityProvider } from '@/lib/facility-context'
+import { ToastProvider } from './toast'
 import AuthGuard from './auth-guard'
 import Sidebar from './sidebar'
 import AiDrawer, { SparkleIcon } from './ai-drawer'
@@ -13,6 +14,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   return (
     <AuthGuard>
       <FacilityProvider>
+        <ToastProvider>
         <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg)' }}>
           {leftOpen && <Sidebar />}
           <main className="flex-1 min-w-0 overflow-auto flex flex-col" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
@@ -33,6 +35,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
           </main>
           {aiOpen && <AiDrawer onClose={() => setAiOpen(false)} />}
         </div>
+        </ToastProvider>
       </FacilityProvider>
     </AuthGuard>
   )

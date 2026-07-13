@@ -6,15 +6,7 @@ import { supabase } from '@/lib/supabase/client'
 import { FacilitySelect } from '@/components/facility-select'
 import UserAdmin from '@/components/user-admin'
 import FacilityTypeAdmin from '@/components/facility-type-admin'
-
-interface OtaRow {
-  id?: number
-  facility: string
-  month: string
-  ota: string
-  metric: string
-  value: number | null
-}
+import { useToast } from '@/components/toast'
 
 interface StaffWage {
   staff_code: string
@@ -29,66 +21,17 @@ interface StaffWage {
   contracted_monthly_hours: number | null
 }
 
-const OTA_LIST = ['楽天トラベル', 'じゃらん', '一休', 'Booking.com', 'Expedia', '自社HP'] as const
-const OTA_METRICS = [
-  { key: 'ad_cost', label: '広告費' },
-  { key: 'commission', label: '手数料' },
-  { key: 'coupon', label: 'クーポン負担' },
-] as const
-
 export default function SettingsPage() {
-  const { current, currentFacility, isAdmin, facilities, setCurrent } = useFacility()
-  const [otaData, setOtaData] = useState<OtaRow[]>([])
-  const [otaMonth, setOtaMonth] = useState(() => {
-    const now = new Date()
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  })
+  const { current, currentFacility, isAdmin, isOwner, facilities, setCurrent } = useFacility()
+  const toast = useToast()
   const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState('')
   // 従業員 賃金設定（シフト・労務）
   const [staffWages, setStaffWages] = useState<StaffWage[]>([])
   const [wagePermitted, setWagePermitted] = useState(true)
-  // 生産性手動入力
-  const [prodMonth, setProdMonth] = useState(() => {
-    const now = new Date()
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
-  })
-  const [dispatchNotes, setDispatchNotes] = useState('')
-
-  useEffect(() => {
-    if (!current || !otaMonth) return
-    supabase
-      .from('dim_ota_marketing')
-      .select('*')
-      .eq('facility', current)
-      .eq('month', otaMonth)
-      .then(({ data }) => {
-        const rows = (data as OtaRow[]) ?? []
-        const full: OtaRow[] = []
-        for (const ota of OTA_LIST) {
-          for (const m of OTA_METRICS) {
-            const existing = rows.find((r) => r.ota === ota && r.metric === m.key)
-            full.push(existing ?? { facility: current, month: otaMonth, ota, metric: m.key, value: null })
-          }
-        }
-        setOtaData(full)
-      })
-  }, [current, otaMonth])
-
-  // 生産性メモ: 選択施設×月の値を読み込み
-  // ※「みなし残業超の残業代」「派遣・その他の労働時間」の手入力はT13で廃止
-  //   （勤怠・賃金から mart_labor_cost_monthly で自動算出。二重計上防止のため入力欄は撤去）
-  useEffect(() => {
-    if (!current || !prodMonth) return
-    supabase.from('dim_productivity_manual').select('dispatch_other_notes').eq('facility', current).eq('month', prodMonth).maybeSingle()
-      .then(({ data }) => {
-        setDispatchNotes((data as { dispatch_other_notes: string | null } | null)?.dispatch_other_notes ?? '')
-      })
-  }, [current, prodMonth])
 
   // 従業員 賃金設定: 従業員(dim_staff) + 賃金(dim_staff_wage・給与権限者のみ読める) をマージ
   useEffect(() => {
-    if (!current) return
+    if (!current || !isOwner) return
     ;(async () => {
       // 自分の給与閲覧権限（app_userは本人行のみ読める）
       try {
@@ -124,7 +67,7 @@ export default function SettingsPage() {
     setStaffWages((prev) => prev.map((s) => (s.staff_code === code ? { ...s, ...patch } : s)))
 
   const saveStaffWages = async () => {
-    setSaving(true); setMessage('')
+    setSaving(true)
     // 賃金 → dim_staff_wage / スポットフラグ → dim_staff
     const wageRows = staffWages.map((s) => ({
       staff_code: s.staff_code,
@@ -139,48 +82,7 @@ export default function SettingsPage() {
     const { error } = await supabase.from('dim_staff_wage').upsert(wageRows, { onConflict: 'staff_code' })
     const { error: e2 } = await supabase.from('dim_staff').upsert(spotRows, { onConflict: 'staff_code' })
     const err = error ?? e2
-    setMessage(err ? `Error: ${err.message}` : `賃金設定を保存しました（${wageRows.length}名）`)
-    setSaving(false)
-  }
-
-  const saveProd = async () => {
-    setSaving(true); setMessage('')
-    const { error } = await supabase.from('dim_productivity_manual').upsert({
-      facility: current, month: prodMonth,
-      dispatch_other_notes: dispatchNotes || null,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'facility,month' })
-    setMessage(error ? `Error: ${error.message}` : 'メモを保存しました')
-    setSaving(false)
-  }
-
-  const updateOta = (ota: string, metric: string, value: string) => {
-    setOtaData(otaData.map((r) =>
-      r.ota === ota && r.metric === metric
-        ? { ...r, value: value === '' ? null : Number(value) }
-        : r
-    ))
-  }
-
-  const saveOta = async () => {
-    setSaving(true)
-    setMessage('')
-    const rows = otaData.filter((r) => r.value !== null)
-    if (rows.length === 0) {
-      setMessage('入力データがありません')
-      setSaving(false)
-      return
-    }
-    const { error } = await supabase
-      .from('dim_ota_marketing')
-      .upsert(rows.map((r) => ({
-        facility: r.facility,
-        month: r.month,
-        ota: r.ota,
-        metric: r.metric,
-        value: r.value,
-      })), { onConflict: 'facility,month,ota,metric' })
-    setMessage(error ? `Error: ${error.message}` : 'OTAマーケティング費用を保存しました')
+    toast(err ? `エラー: ${err.message}` : `賃金設定を保存しました（${wageRows.length}名）`, err ? 'error' : 'success')
     setSaving(false)
   }
 
@@ -199,61 +101,8 @@ export default function SettingsPage() {
         総客室数・施設プロフィールの編集は <a href="/profile" style={{ color: 'var(--accent)' }}>施設プロフィール</a> ページに移動しました。
       </p>
 
-      {/* OTA Marketing */}
-      <section className="card p-6 mt-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">OTAマーケティング費用</h2>
-          <div className="flex items-center gap-2">
-            <input
-              type="month"
-              className="field px-3 py-1.5 text-sm"
-              value={otaMonth}
-              onChange={(e) => setOtaMonth(e.target.value)}
-            />
-            <button
-              onClick={saveOta}
-              disabled={saving}
-              className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50"
-            >
-              保存
-            </button>
-          </div>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-[var(--surface2)] text-left text-[var(--text-dim)]">
-                <th className="px-3 py-2">OTA</th>
-                {OTA_METRICS.map((m) => (
-                  <th key={m.key} className="px-3 py-2">{m.label}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {OTA_LIST.map((ota) => (
-                <tr key={ota} style={{ borderTop: '1px solid var(--border)' }}>
-                  <td className="px-3 py-1.5 font-medium whitespace-nowrap">{ota}</td>
-                  {OTA_METRICS.map((m) => {
-                    const row = otaData.find((r) => r.ota === ota && r.metric === m.key)
-                    return (
-                      <td key={m.key} className="px-3 py-1.5">
-                        <input
-                          type="number"
-                          className="field px-2 py-1 text-sm w-28"
-                          value={row?.value ?? ''}
-                          onChange={(e) => updateOta(ota, m.key, e.target.value)}
-                        />
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      {/* 従業員 賃金設定（シフト・労務） */}
+      {/* 従業員 賃金設定（シフト・労務）※オーナーのみ閲覧・編集 */}
+      {isOwner && (
       <section className="card p-6 mt-6">
         <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
           <h2 className="text-lg font-semibold">従業員 賃金設定（シフト・労務）</h2>
@@ -330,31 +179,6 @@ export default function SettingsPage() {
           </table>
         </div>
       </section>
-
-      {/* 生産性メモ（旧: 手動入力。2項目はT13で自動算出に切替済み） */}
-      <section className="card p-6 mt-6">
-        <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-          <h2 className="text-lg font-semibold">生産性 メモ（月別）</h2>
-          <div className="flex items-center gap-2">
-            <input type="month" className="field px-3 py-1.5 text-sm" value={prodMonth} onChange={(e) => setProdMonth(e.target.value)} />
-            <button onClick={saveProd} disabled={saving}
-              className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50">保存</button>
-          </div>
-        </div>
-        <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>
-          「みなし残業超の残業代」「派遣・その他の労働時間」は、勤怠実績と賃金設定から<strong>自動算出</strong>に切り替わりました（手入力は廃止・二重計上防止）。ここでは補足メモのみ残せます。
-        </p>
-        <div>
-          <label className="block text-sm font-medium mb-1" style={{ color: 'var(--text-dim)' }}>備考（派遣・その他に関するメモ）</label>
-          <input type="text" className="field px-3 py-2 text-sm w-full"
-            value={dispatchNotes} onChange={(e) => setDispatchNotes(e.target.value)} />
-        </div>
-      </section>
-
-      {message && (
-        <p className={`mt-4 text-sm ${message.startsWith('Error') ? 'text-red-600' : 'text-green-600'}`}>
-          {message}
-        </p>
       )}
 
       {/* 施設タイプ一括設定・ユーザー管理（管理者のみ） */}
