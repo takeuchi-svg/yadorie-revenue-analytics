@@ -58,11 +58,15 @@ const BOTTOM_TOOLS: { href: string; label: string }[] = [
 
 export default function Sidebar() {
   const pathname = usePathname()
-  const { facilities, current, setCurrent, isAdmin } = useFacility()
+  const { facilities, current, setCurrent, isOwner } = useFacility()
   const router = useRouter()
   const [openGroup, setOpenGroup] = useState<string | null>(null)
-  // 管理者/オーナーのみ「灯の頭の中」を表示（ページ側でも権限ガード）
-  const bottomTools = isAdmin ? [...BOTTOM_TOOLS, { href: '/knowledge', label: '灯の頭の中' }] : BOTTOM_TOOLS
+  // 辞書(KPI辞書・用語集)は全員閲覧可。「灯の頭の中」はオーナーのみ（ページ側でも権限ガード）
+  const bottomTools = [
+    ...BOTTOM_TOOLS,
+    { href: '/dict', label: '辞書' },
+    ...(isOwner ? [{ href: '/knowledge', label: '灯の頭の中' }] : []),
+  ]
 
   const handleLogout = async () => {
     await supabase.auth.signOut()

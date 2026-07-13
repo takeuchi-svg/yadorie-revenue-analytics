@@ -16,6 +16,7 @@ interface FacilityContextType {
   setCurrent: (code: string) => void
   currentFacility: Facility | null
   isAdmin: boolean
+  isOwner: boolean   // owner=克樹さんのみ（灯の頭の中の編集権限）
 }
 
 const FacilityContext = createContext<FacilityContextType>({
@@ -24,6 +25,7 @@ const FacilityContext = createContext<FacilityContextType>({
   setCurrent: () => {},
   currentFacility: null,
   isAdmin: false,
+  isOwner: false,
 })
 
 const COOKIE_KEY = 'currentFacility'
@@ -43,6 +45,7 @@ export function FacilityProvider({ children }: { children: ReactNode }) {
   const [facilities, setFacilities] = useState<Facility[]>([])
   const [current, setCurrent] = useState<string>('')
   const [isAdmin, setIsAdmin] = useState(false)
+  const [isOwner, setIsOwner] = useState(false)
 
   useEffect(() => {
     ;(async () => {
@@ -52,12 +55,14 @@ export function FacilityProvider({ children }: { children: ReactNode }) {
 
       // フェイルクローズ: 権限が確認できない場合は「施設ゼロのmember」扱い（誤って全施設を見せない）
       let admin = false
+      let owner = false
       let allowed: Facility[] = []
       try {
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
           const { data: au, error } = await supabase.from('app_user').select('role').eq('user_id', user.id).maybeSingle()
           if (error) throw error
+          owner = au?.role === 'owner'
           admin = au?.role === 'admin' || au?.role === 'owner'
           if (admin) {
             allowed = all
@@ -67,9 +72,10 @@ export function FacilityProvider({ children }: { children: ReactNode }) {
             allowed = all.filter((f) => set.has(f.facility))
           }
         }
-      } catch { admin = false; allowed = [] }
+      } catch { admin = false; owner = false; allowed = [] }
 
       setIsAdmin(admin)
+      setIsOwner(owner)
       setFacilities(allowed)
       if (allowed.length > 0) {
         const saved = readFacilityCookie()
@@ -87,7 +93,7 @@ export function FacilityProvider({ children }: { children: ReactNode }) {
   const currentFacility = facilities.find((f) => f.facility === current) ?? null
 
   return (
-    <FacilityContext.Provider value={{ facilities, current, setCurrent: handleSetCurrent, currentFacility, isAdmin }}>
+    <FacilityContext.Provider value={{ facilities, current, setCurrent: handleSetCurrent, currentFacility, isAdmin, isOwner }}>
       {children}
     </FacilityContext.Provider>
   )

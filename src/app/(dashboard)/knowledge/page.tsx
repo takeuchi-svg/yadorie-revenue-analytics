@@ -156,7 +156,7 @@ export default function KnowledgePage() {
     return g
   }, [items])
 
-  const canManage = role === 'owner' || role === 'admin'
+  const canManage = role === 'owner'
 
   return (
     <div className="p-6">
@@ -170,7 +170,7 @@ export default function KnowledgePage() {
 
       {!canManage ? (
         <div className="card p-6" style={{ borderColor: 'var(--yellow)' }}>
-          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>この画面はオーナー／管理者のみが利用できます。</p>
+          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>この画面はオーナーのみが利用できます。</p>
         </div>
       ) : (
         <>
