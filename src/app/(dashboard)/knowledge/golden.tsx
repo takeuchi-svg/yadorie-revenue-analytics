@@ -98,7 +98,7 @@ export default function GoldenTab() {
                 <span className="text-[10px] px-2 py-0.5 rounded shrink-0" style={{ background: catColor(row.category), color: '#fff' }}>{catLabel(row.category)}</span>
                 <div className="flex-1">
                   <p className="text-sm font-medium">{row.question}</p>
-                  {row.facility && <span className="text-[10px]" style={{ color: 'var(--text-dim)' }}>施設: {row.facility}</span>}
+                  {row.facility && <span className="text-[10px]" style={{ color: 'var(--text-dim)' }}>宿: {row.facility}</span>}
                 </div>
                 <button onClick={() => runOne(row)} disabled={a?.loading} className="px-2 py-1 rounded text-xs shrink-0" style={{ border: '1px solid var(--border)', color: 'var(--accent)' }}>{a?.loading ? '…' : '実行'}</button>
                 {canEdit && <button onClick={() => setEdit({ ...row })} className="px-2 py-1 rounded text-xs shrink-0" style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>編集</button>}
@@ -147,7 +147,7 @@ export default function GoldenTab() {
               </div>
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="block text-[11px] mb-1" style={{ color: 'var(--text-dim)' }}>施設（空=既定FRY）</label>
+                  <label className="block text-[11px] mb-1" style={{ color: 'var(--text-dim)' }}>宿（空=既定FRY）</label>
                   <input value={edit.facility ?? ''} onChange={(e) => setEdit({ ...edit, facility: e.target.value })} className="field w-full text-sm p-2" />
                 </div>
                 <div style={{ width: 90 }}>

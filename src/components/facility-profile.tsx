@@ -1,7 +1,7 @@
 'use client'
 
-// 施設プロフィール（AIコンテキスト基盤）F2-F4
-// 正本: docs/要件定義書_施設プロフィール_AIコンテキスト.md
+// 宿プロフィール（AIコンテキスト基盤）F2-F4
+// 正本: docs/要件定義書_宿プロフィール_AIコンテキスト.md
 //   - プロフィール: セクション別アコーディオン＋上書き保存＋具体性ゲージ(R1)
 //   - 繁閑理由: 暦月1〜12のインライン編集(upsert)
 //   - 取組履歴: 追記のみ（編集・削除は当月分のみ許可）＋当月未記入アラート
@@ -47,7 +47,7 @@ export default function FacilityProfile() {
   const { current, currentFacility } = useFacility()
   const toast = useToast()
   const [profile, setProfile] = useState<Record<string, any>>({})
-  const [totalRooms, setTotalRooms] = useState<number | ''>('')  // dim_facility.total_rooms（旧・設定/施設マスタから統合）
+  const [totalRooms, setTotalRooms] = useState<number | ''>('')  // dim_facility.total_rooms（旧・設定/宿マスタから統合）
   const [opRooms, setOpRooms] = useState<Record<string, number | ''>>({})  // 月別客室数の上書き（改装時のみ・旧設定から統合）
   const [opFy, setOpFy] = useState('')
   const [opFys, setOpFys] = useState<string[]>([])
@@ -111,9 +111,9 @@ export default function FacilityProfile() {
     for (const sec of PROFILE_SECTIONS) for (const f of sec.fields) row[f.key] = profile[f.key] || null
     row.price_min = profile.price_min || null
     row.price_max = profile.price_max || null
-    row.facility_type = profile.facility_type || null   // 基準PL照合用の施設タイプ
+    row.facility_type = profile.facility_type || null   // 基準PL照合用の宿タイプ
     const { error } = await supabase.from('dim_facility_profile').upsert(row, { onConflict: 'facility' })
-    // 総客室数は dim_facility（旧・設定/施設マスタから統合。予実の在庫数等で使用）
+    // 総客室数は dim_facility（旧・設定/宿マスタから統合。予実の在庫数等で使用）
     const { error: e2 } = await supabase.from('dim_facility')
       .update({ total_rooms: totalRooms === '' ? null : Number(totalRooms), updated_at: new Date().toISOString() })
       .eq('facility', current)
@@ -173,7 +173,7 @@ export default function FacilityProfile() {
   return (
     <section className="card p-6 mt-6">
       <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-        <h2 className="text-lg font-semibold">施設プロフィール</h2>
+        <h2 className="text-lg font-semibold">宿プロフィール</h2>
         <button onClick={saveProfile} disabled={saving || !dirty}
           className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50">
           {dirty ? 'プロフィールを保存' : '保存済み'}
@@ -218,7 +218,7 @@ export default function FacilityProfile() {
                   <>
                     <div className="flex gap-4 flex-wrap">
                       <div>
-                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-dim)' }}>施設タイプ（基準PL・横断比較の区分）</label>
+                        <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-dim)' }}>宿タイプ（基準PL・横断比較の区分）</label>
                         <select className="field px-3 py-1.5 text-sm" style={{ minWidth: 180 }}
                           value={profile.facility_type ?? ''} onChange={(e) => setField('facility_type', e.target.value)}>
                           <option value="">（未設定）</option>

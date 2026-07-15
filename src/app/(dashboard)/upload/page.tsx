@@ -38,7 +38,7 @@ interface FileEntry {
 }
 
 export default function UploadPage() {
-  const { facilities: allowedFacilities } = useFacility()  // 権限のある施設のみ（RLSと整合）
+  const { facilities: allowedFacilities } = useFacility()  // 権限のある宿のみ（RLSと整合）
   const [files, setFiles] = useState<FileEntry[]>([])
   const [facilityList, setFacilityList] = useState<
     { facility: string; name: string; short_name: string | null; rooms_json: unknown }[]
@@ -65,7 +65,7 @@ export default function UploadPage() {
   const handleRevFiles = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return
     const facility = globalFacility
-    if (!facility) { alert('上部の「デフォルト施設」を選択してください（クチコミの帰属施設）'); return }
+    if (!facility) { alert('上部の「デフォルト宿」を選択してください（クチコミの帰属宿）'); return }
     for (const file of Array.from(fileList)) {
       try {
         const text = decodeCp932(await file.arrayBuffer())
@@ -102,7 +102,7 @@ export default function UploadPage() {
   // 楽天 集計値の保存
   const saveRakuten = async () => {
     const facility = globalFacility
-    if (!facility) { setRkMsg('デフォルト施設を選択してください'); return }
+    if (!facility) { setRkMsg('デフォルト宿を選択してください'); return }
     if (!rkMonth) { setRkMsg('対象月を選択してください'); return }
     const axis: Record<string, number> = {}
     for (const [k, v] of Object.entries(rkAxes)) if (v !== '') axis[k] = Number(v)
@@ -116,11 +116,11 @@ export default function UploadPage() {
     setRkMsg(error ? `Error: ${error.message}` : `楽天集計値を保存しました（${rkMonth}）`)
   }
 
-  // 勤怠CSV（Touch On Time / HTML）取込: 全施設一括。施設選択は不要。
+  // 勤怠CSV（Touch On Time / HTML）取込: 全宿一括。宿選択は不要。
   const handleAttFiles = async (fileList: FileList | null) => {
     if (!fileList || fileList.length === 0) return
     setAttUploading(true)
-    // 施設マッピングをDBから取得（データ駆動。施設追加はdim_facility_mappingに行追加で完結）
+    // 宿マッピングをDBから取得（データ駆動。宿追加はdim_facility_mappingに行追加で完結）
     let mapping: FacilityMapping | undefined
     try {
       const { data } = await supabase.from('dim_facility_mapping').select('attendance_code, attendance_name, facility')
@@ -153,7 +153,7 @@ export default function UploadPage() {
           const { error } = await supabase.from('dim_staff').upsert(staffPayload.slice(i, i + 500), { onConflict: 'staff_code' })
           if (error) throw error
         }
-        // 日次勤怠 upsert（未マッピング施設=nullの行は除外。同日同施設は上書き）
+        // 日次勤怠 upsert（未マッピング宿=nullの行は除外。同日同宿は上書き）
         const attPayload = rows.filter((r) => r.work_facility != null)
         const unmapped = rows.length - attPayload.length
         for (let i = 0; i < attPayload.length; i += 500) {
@@ -173,7 +173,7 @@ export default function UploadPage() {
     if (!fileList || fileList.length === 0) return
     if (facilityList.length === 0) await loadFacilities()
     const facility = globalFacility
-    if (!facility) { alert('上部の「デフォルト施設」を選択してください'); return }
+    if (!facility) { alert('上部の「デフォルト宿」を選択してください'); return }
     setPlUploading(true)
     for (const file of Array.from(fileList)) {
       const entry: PlEntry = { name: file.name, fy: '', rows: 0, status: 'processing' }
@@ -184,7 +184,7 @@ export default function UploadPage() {
         const { fiscalYear, rows } = parsePlCsv(text)
         if (!fiscalYear || rows.length === 0) throw new Error('PLを解析できませんでした（フォーマット要確認）')
         const payload = rows.map((r) => ({ ...r, facility }))
-        // 上書き: 同一 施設×年度 を削除してから投入
+        // 上書き: 同一 宿×年度 を削除してから投入
         await supabase.from('actual_monthly').delete().eq('facility', facility).eq('fiscal_year', fiscalYear)
         for (let i = 0; i < payload.length; i += 500) {
           const { error } = await supabase.from('actual_monthly').insert(payload.slice(i, i + 500))
@@ -207,7 +207,7 @@ export default function UploadPage() {
       .from('dim_facility')
       .select('facility, name, short_name, rooms_json')
       .order('facility')
-    // 権限のある施設のみ表示（memberが書込不可の施設を選んでRLSエラーになるのを防ぐ）
+    // 権限のある宿のみ表示（memberが書込不可の宿を選んでRLSエラーになるのを防ぐ）
     const allowed = new Set(allowedFacilities.map((f) => f.facility))
     const list = ((data ?? []) as { facility: string; name: string; short_name: string | null; rooms_json: unknown }[])
       .filter((f) => allowed.size === 0 || allowed.has(f.facility))
@@ -287,7 +287,7 @@ export default function UploadPage() {
           prev.map((f, idx) =>
             idx === i ? { ...f, status: 'error', error: isLincoln
               ? 'リンカーン（予約検索）は廃止されました。ステイシーの「予約情報」CSVをご利用ください'
-              : '施設またはファイル種別が未設定' } : f
+              : '宿またはファイル種別が未設定' } : f
           )
         )
         continue
@@ -423,9 +423,9 @@ export default function UploadPage() {
           ))}
         </div>
 
-        {/* Facility selector（勤怠は全施設一括のため不要） */}
+        {/* Facility selector（勤怠は全宿一括のため不要） */}
         <div className="mb-4 flex items-center gap-4" style={{ display: tab === 'attendance' ? 'none' : undefined }}>
-          <label className="text-sm font-medium" style={{ color: 'var(--text-dim)' }}>デフォルト施設:</label>
+          <label className="text-sm font-medium" style={{ color: 'var(--text-dim)' }}>デフォルト宿:</label>
           <select
             className="field px-3 py-1.5 text-sm"
             value={globalFacility}
@@ -524,7 +524,7 @@ export default function UploadPage() {
                     onChange={(e) => setFileFacility(idx, e.target.value)}
                     disabled={entry.status === 'done' || entry.status === 'processing'}
                   >
-                    <option value="">施設</option>
+                    <option value="">宿</option>
                     {facilityList.map((f) => (
                       <option key={f.facility} value={f.facility}>
                         {f.short_name ?? f.facility}
@@ -565,7 +565,7 @@ export default function UploadPage() {
           <>
             <p className="text-sm mb-3" style={{ color: 'var(--text-dim)' }}>
               月次推移：損益計算書のCSVをアップロードします（会計の実績）。年度はファイル内の期間から自動判定し、
-              <strong>同一施設×年度を上書き</strong>します。実績が入っている月のみ取り込みます（進行期の未来月はスキップ）。
+              <strong>同一宿×年度を上書き</strong>します。実績が入っている月のみ取り込みます（進行期の未来月はスキップ）。
             </p>
             <label
               className="border-2 border-dashed rounded-lg p-12 text-center transition-colors card block cursor-pointer"
@@ -605,8 +605,8 @@ export default function UploadPage() {
           <>
             <p className="text-sm mb-3" style={{ color: 'var(--text-dim)' }}>
               勤怠CSV（Touch On Time の日次出力／拡張子.xls・実体HTML）を取り込みます。
-              <strong>1ファイル＝1日分・全施設</strong>。月末に1ヶ月分（約30ファイル）をまとめて選択してください。
-              施設マッピング・ヘルプ按分は自動。<strong>同日同施設はUPSERT（上書き）</strong>のため再取込しても重複しません。
+              <strong>1ファイル＝1日分・全宿</strong>。月末に1ヶ月分（約30ファイル）をまとめて選択してください。
+              宿マッピング・ヘルプ按分は自動。<strong>同日同宿はUPSERT（上書き）</strong>のため再取込しても重複しません。
             </p>
             <label
               className="border-2 border-dashed rounded-lg p-12 text-center transition-colors card block cursor-pointer"
@@ -633,7 +633,7 @@ export default function UploadPage() {
                       <div className="text-xs mt-0.5" style={{ color: 'var(--text-dim)' }}>
                         {p.status === 'done' && (<>
                           {p.workDate} ・ {p.rows}件投入 ・ 従業員{p.staff}名
-                          {p.skipped ? <span style={{ color: 'var(--yellow)' }}>　⚠ 未マッピング所属 {p.skipped}行スキップ（新施設/新部署の可能性。要マッピング追加）</span> : null}
+                          {p.skipped ? <span style={{ color: 'var(--yellow)' }}>　⚠ 未マッピング所属 {p.skipped}行スキップ（新宿/新部署の可能性。要マッピング追加）</span> : null}
                         </>)}
                         {p.status === 'error' && <span style={{ color: 'var(--red)' }}>{p.error}</span>}
                         {p.status === 'processing' && '処理中...'}
@@ -652,7 +652,7 @@ export default function UploadPage() {
             <p className="text-sm mb-3" style={{ color: 'var(--text-dim)' }}>
               じゃらん・一休のクチコミCSVを取り込みます（ファイル内容から自動判別）。
               <strong>ドロップ→プレビュー確認→「取込確定」</strong>の順。同一クチコミは上書き（重複しません）。
-              帰属施設は上部の「デフォルト施設」です。
+              帰属宿は上部の「デフォルト宿」です。
             </p>
             <label
               className="border-2 border-dashed rounded-lg p-10 text-center transition-colors card block cursor-pointer"
@@ -722,7 +722,7 @@ export default function UploadPage() {
                 </div>
                 <div className="flex-1 min-w-40">
                   <label className="block text-xs mb-1" style={{ color: 'var(--text-dim)' }}>エリア順位（任意）</label>
-                  <input type="text" className="field px-3 py-1.5 text-sm w-full" placeholder="例: 54位/104施設" value={rkRanking} onChange={(e) => setRkRanking(e.target.value)} />
+                  <input type="text" className="field px-3 py-1.5 text-sm w-full" placeholder="例: 54位/104宿" value={rkRanking} onChange={(e) => setRkRanking(e.target.value)} />
                 </div>
               </div>
               <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-3">

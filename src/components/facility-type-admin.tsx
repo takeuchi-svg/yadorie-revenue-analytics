@@ -1,6 +1,6 @@
 'use client'
 
-// 施設タイプ一括設定（管理者向け）。全施設のタイプを1画面で割り当てて保存。
+// 宿タイプ一括設定（管理者向け）。全宿のタイプを1画面で割り当てて保存。
 // 保存先: dim_facility_profile.facility_type（灯の基準PL照合・横断比較に使用）。
 import { useEffect, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
@@ -27,11 +27,11 @@ export default function FacilityTypeAdmin() {
 
   const save = async () => {
     setSaving(true)
-    // 施設タイプ列のみをupsert（他のプロフィール列は触らない）
+    // 宿タイプ列のみをupsert（他のプロフィール列は触らない）
     const rows = facilities.map((f) => ({ facility: f.facility, facility_type: types[f.facility] || null, updated_at: new Date().toISOString() }))
     const { error } = await supabase.from('dim_facility_profile').upsert(rows, { onConflict: 'facility' })
     setSaving(false)
-    toast(error ? 'エラー: ' + error.message : '施設タイプを保存しました', error ? 'error' : 'success')
+    toast(error ? 'エラー: ' + error.message : '宿タイプを保存しました', error ? 'error' : 'success')
     if (!error) setDirty(false)
   }
 
@@ -40,22 +40,22 @@ export default function FacilityTypeAdmin() {
   return (
     <section className="card p-6 mt-6">
       <div className="flex items-center justify-between mb-1 flex-wrap gap-2">
-        <h2 className="text-lg font-semibold">施設タイプ一括設定</h2>
+        <h2 className="text-lg font-semibold">宿タイプ一括設定</h2>
         <button onClick={save} disabled={saving || !dirty}
           className="px-4 py-1.5 bg-[var(--accent)] text-white rounded-md text-sm hover:opacity-90 disabled:opacity-50">
           {dirty ? '保存' : '保存済み'}
         </button>
       </div>
       <p className="text-xs mb-3" style={{ color: 'var(--text-dim)' }}>
-        各施設のタイプ（7区分）を設定します。灯が基準PL（施設タイプ別の目標水準）に照らして水準評価するのに使います。
-        {unsetCount > 0 && <span style={{ color: 'var(--red)' }}>　未設定 {unsetCount} 施設</span>}
+        各宿のタイプ（7区分）を設定します。灯が基準PL（宿タイプ別の目標水準）に照らして水準評価するのに使います。
+        {unsetCount > 0 && <span style={{ color: 'var(--red)' }}>　未設定 {unsetCount} 宿</span>}
       </p>
 
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr style={{ color: 'var(--text-dim)' }}>
-              <th className="text-left font-medium px-2 py-1">施設</th>
+              <th className="text-left font-medium px-2 py-1">宿</th>
               <th className="text-left font-medium px-2 py-1">タイプ</th>
             </tr>
           </thead>

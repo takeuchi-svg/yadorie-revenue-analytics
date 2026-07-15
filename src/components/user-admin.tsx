@@ -18,7 +18,7 @@ export default function UserAdmin() {
   const [password, setPassword] = useState('')
   const [role, setRole] = useState('member')
   const [newFacs, setNewFacs] = useState<Set<string>>(new Set())
-  // 編集中の施設割当
+  // 編集中の宿割当
   const [editFacs, setEditFacs] = useState<Record<string, Set<string>>>({})
 
   const call = useCallback(async (action: string, payload: any = {}) => {
@@ -75,8 +75,8 @@ export default function UserAdmin() {
           <input className="field px-3 py-1.5 text-sm" placeholder="メールアドレス" value={email} onChange={(e) => setEmail(e.target.value)} />
           <input className="field px-3 py-1.5 text-sm" placeholder="初期パスワード（空欄で招待メール）" value={password} onChange={(e) => setPassword(e.target.value)} />
           <select className="field px-3 py-1.5 text-sm" value={role} onChange={(e) => setRole(e.target.value)}>
-            <option value="member">一般（指定施設のみ）</option>
-            <option value="admin">管理者（全施設＋ユーザー管理）</option>
+            <option value="member">一般（指定宿のみ）</option>
+            <option value="admin">管理者（全宿＋ユーザー管理）</option>
           </select>
           <button onClick={create} disabled={busy} className="px-4 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>
             {password ? '発行' : '招待メール送信'}
@@ -87,7 +87,7 @@ export default function UserAdmin() {
         </p>
         {role === 'member' && (
           <div>
-            <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>閲覧できる施設を選択:</p>
+            <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>閲覧できる宿を選択:</p>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-x-3 gap-y-1 max-h-40 overflow-y-auto text-xs">
               {facilities.map((f) => (
                 <label key={f.facility} className="flex items-center gap-1.5 cursor-pointer">
@@ -117,7 +117,7 @@ export default function UserAdmin() {
                 </select>
               )}
               {u.role === 'member' && (
-                <label className="flex items-center gap-1 text-xs cursor-pointer" style={{ color: 'var(--text-dim)' }} title="ON: 割当施設の従業員の賃金・個人別人件費を閲覧/編集できる">
+                <label className="flex items-center gap-1 text-xs cursor-pointer" style={{ color: 'var(--text-dim)' }} title="ON: 割当宿の従業員の賃金・個人別人件費を閲覧/編集できる">
                   <input type="checkbox" checked={!!u.can_view_wage}
                     onChange={async (e) => { await call('setWagePerm', { user_id: u.user_id, can_view_wage: e.target.checked }); toast('給与閲覧権限を変更しました'); reload() }} />
                   給与閲覧
@@ -140,13 +140,13 @@ export default function UserAdmin() {
                     </label>
                   ))}
                 </div>
-                <button onClick={async () => { await call('setFacilities', { user_id: u.user_id, facilities: [...(editFacs[u.user_id] ?? [])] }); toast('施設割当を保存しました'); reload() }}
-                  className="text-xs px-3 py-1 rounded-md text-white" style={{ background: 'var(--accent)' }}>施設割当を保存</button>
+                <button onClick={async () => { await call('setFacilities', { user_id: u.user_id, facilities: [...(editFacs[u.user_id] ?? [])] }); toast('宿割当を保存しました'); reload() }}
+                  className="text-xs px-3 py-1 rounded-md text-white" style={{ background: 'var(--accent)' }}>宿割当を保存</button>
               </div>
             )}
             {(u.role === 'admin' || u.role === 'owner') && (
               <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
-                全施設を閲覧できます{u.role === 'owner' ? '（オーナー: AIナレッジ・プロンプトの編集権限を持ちます）' : ''}
+                全宿を閲覧できます{u.role === 'owner' ? '（オーナー: AIナレッジ・プロンプトの編集権限を持ちます）' : ''}
               </p>
             )}
           </div>

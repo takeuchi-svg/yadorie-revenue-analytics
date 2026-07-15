@@ -461,7 +461,7 @@ export default function ShiftPage() {
       </div>
 
       {loading ? <Loading /> : staff.length === 0 ? (
-        <Empty message="この施設に従業員がいません。勤怠CSVを取り込むか、スポット追加で登録してください。" />
+        <Empty message="この宿に従業員がいません。勤怠CSVを取り込むか、スポット追加で登録してください。" />
       ) : (
         <>
           {/* 全画面ラッパ: 稼働前提＋シフト表を一体で（ネイティブfullscreenでサイドバー等も消える） */}

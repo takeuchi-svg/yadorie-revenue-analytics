@@ -1,8 +1,8 @@
 'use client'
 
-// 全社Core（経営者の右腕）: 全27施設を横断。(A)サマリKPI +(B)施設ヒートマップ。
+// 全社Core（経営者の右腕）: 全27宿を横断。(A)サマリKPI +(B)宿ヒートマップ。
 // 権限=owner限定（ページ側ガード＋サイドバーもowner出し分け。実データ保護はDBのRLS）。
-// PLは company-data 経由で施設ごとに pl-compute を適用 → 施設別ページ(yojitsu)と数字一致。
+// PLは company-data 経由で宿ごとに pl-compute を適用 → 宿別ページ(yojitsu)と数字一致。
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
@@ -84,7 +84,7 @@ function QualField({ label, v }: { label: string; v: string | null }) {
   return <div className="mb-2"><div className="text-[10px]" style={{ color: 'var(--text-dim)' }}>{label}</div><div className="text-sm">{v}</div></div>
 }
 
-// G4: 課題施設ドリルダウン（1段目=数字の自動異常 / 2段目=定性背景 / 施設別ページへ導線）
+// G4: 課題宿ドリルダウン（1段目=数字の自動異常 / 2段目=定性背景 / 宿別ページへ導線）
 function DrilldownModal({ m, agg, showYoY, qual, qualLoading, onClose, onOpenFacility }:
   { m: FacilityMetrics; agg: ScopeAggregate; showYoY: boolean; qual: FacilityQualitative | null; qualLoading: boolean
     onClose: () => void; onOpenFacility: (facility: string, path: string) => void }) {
@@ -131,7 +131,7 @@ function DrilldownModal({ m, agg, showYoY, qual, qualLoading, onClose, onOpenFac
             {qualLoading ? (
               <p className="text-sm" style={{ color: 'var(--text-dim)' }}>読み込み中...</p>
             ) : !hasQual ? (
-              <p className="text-sm p-3 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>定性情報は未登録です。施設プロフィール・取組履歴を記録すると、数字の背景が結びつきます。</p>
+              <p className="text-sm p-3 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>定性情報は未登録です。宿プロフィール・取組履歴を記録すると、数字の背景が結びつきます。</p>
             ) : (
               <div>
                 <QualField label="中核価値" v={qual!.coreValue} />
@@ -162,10 +162,10 @@ function DrilldownModal({ m, agg, showYoY, qual, qualLoading, onClose, onOpenFac
             )}
           </div>
 
-          {/* 導線: 施設別ページへ */}
+          {/* 導線: 宿別ページへ */}
           <div className="flex gap-2 pt-1">
             <button onClick={() => onOpenFacility(m.facility, '/yojitsu')}
-              className="px-4 py-1.5 rounded-md text-sm text-white" style={{ background: 'var(--accent)' }}>この施設の予実（PL）を開く</button>
+              className="px-4 py-1.5 rounded-md text-sm text-white" style={{ background: 'var(--accent)' }}>この宿の予実（PL）を開く</button>
             <button onClick={() => onOpenFacility(m.facility, '/')}
               className="px-4 py-1.5 rounded-md text-sm" style={{ background: 'var(--surface2)', color: 'var(--text)' }}>概要を開く</button>
           </div>
@@ -175,8 +175,8 @@ function DrilldownModal({ m, agg, showYoY, qual, qualLoading, onClose, onOpenFac
   )
 }
 
-// G5: 2軸クロス分析（散布図・施設タイプ色分け）
-// 軸メトリクス定義（get=施設からの値, fmt=表示）
+// G5: 2軸クロス分析（散布図・宿タイプ色分け）
+// 軸メトリクス定義（get=宿からの値, fmt=表示）
 type AxisDef = { key: string; label: string; get: (m: FacilityMetrics) => number | null; fmt: (v: number) => string }
 const AXES: AxisDef[] = [
   { key: 'satisfaction', label: '満足度', get: (m) => m.satisfaction, fmt: (v) => v.toFixed(2) },
@@ -255,7 +255,7 @@ function CrossAnalysis({ rows }: { rows: FacilityMetrics[] }) {
         </div>
       </div>
       {plotted === 0 ? (
-        <p className="text-sm py-8 text-center" style={{ color: 'var(--text-dim)' }}>この2軸で描画できる施設がありません（データ欠損）。別の軸をお試しください。</p>
+        <p className="text-sm py-8 text-center" style={{ color: 'var(--text-dim)' }}>この2軸で描画できる宿がありません（データ欠損）。別の軸をお試しください。</p>
       ) : (
         <ResponsiveContainer width="100%" height={340}>
           <ScatterChart margin={{ top: 10, right: 16, bottom: 24, left: 8 }}>
@@ -274,7 +274,7 @@ function CrossAnalysis({ rows }: { rows: FacilityMetrics[] }) {
         </ResponsiveContainer>
       )}
       <p className="text-[11px] mt-2" style={{ color: 'var(--text-dim)' }}>
-        バブル=施設（色=施設タイプ・大きさ=売上）。例: 満足度が高いのに客単価が低い＝価値を価格化できていない伸びしろ。満足度×人件費率＝効率化しすぎてサービスが痩せていないか。
+        バブル=宿（色=宿タイプ・大きさ=売上）。例: 満足度が高いのに客単価が低い＝価値を価格化できていない伸びしろ。満足度×人件費率＝効率化しすぎてサービスが痩せていないか。
       </p>
     </div>
   )
@@ -378,7 +378,7 @@ export default function CompanyPage() {
   const agg = useMemo(() => (ds ? aggregateScope(ds, scope) : null), [ds, scope])
   const showYoY = scope !== 'new'
 
-  // スコープ内の施設（ヒートマップ行）
+  // スコープ内の宿（ヒートマップ行）
   const rows = useMemo(() => {
     if (!ds) return []
     return ds.facilities.filter((m) => (scope === 'all' ? true : m.cls === scope))
@@ -425,7 +425,7 @@ export default function CompanyPage() {
   if (!isOwner) return (
     <div className="p-6">
       <div className="card p-6 text-sm" style={{ color: 'var(--text-dim)' }}>
-        この画面（全社Core）は<strong>オーナーのみ</strong>が利用できます。施設別の分析は左メニューからご利用ください。
+        この画面（全社Core）は<strong>オーナーのみ</strong>が利用できます。宿別の分析は左メニューからご利用ください。
       </div>
     </div>
   )
@@ -457,7 +457,7 @@ export default function CompanyPage() {
             {months.map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         )}
-        {agg && <span className="text-xs" style={{ color: 'var(--text-dim)' }}>{STORE_SCOPE_LABEL[scope]} {agg.count}施設</span>}
+        {agg && <span className="text-xs" style={{ color: 'var(--text-dim)' }}>{STORE_SCOPE_LABEL[scope]} {agg.count}宿</span>}
       </div>
 
       {loading ? <Loading /> : loadError ? <LoadError message={loadError} /> : !ds || ds.facilities.length === 0 ? (
@@ -475,7 +475,7 @@ export default function CompanyPage() {
             </div>
             {insightErr && <p className="text-xs mb-2" style={{ color: 'var(--red)' }}>{insightErr}</p>}
             {insight ? <AssistantContent content={insight} />
-              : !insightBusy && <p className="text-sm" style={{ color: 'var(--text-dim)' }}>「生成」で、灯が全社を読んで“注力すべき施設と理由”をまとめます（予算対比・前年対比の両面から）。</p>}
+              : !insightBusy && <p className="text-sm" style={{ color: 'var(--text-dim)' }}>「生成」で、灯が全社を読んで“注力すべき宿と理由”をまとめます（予算対比・前年対比の両面から）。</p>}
             {insightAt && <p className="text-[10px] mt-2" style={{ color: 'var(--text-dim)' }}>最終生成: {insightAt.slice(0, 16).replace('T', ' ')}</p>}
           </div>
 
@@ -491,9 +491,9 @@ export default function CompanyPage() {
             </div>
           )}
 
-          {/* (B) 施設ヒートマップ */}
+          {/* (B) 宿ヒートマップ */}
           <div className="flex items-center justify-between mb-2">
-            <div className="text-sm font-semibold">施設ヒートマップ</div>
+            <div className="text-sm font-semibold">宿ヒートマップ</div>
             <div className="text-[11px]" style={{ color: 'var(--text-dim)' }}>
               各セル: 実額 ／ 予=予算差・比 ／ 前=前年差・比。色は{colorMode === 'budget' ? '予算比' : '前年比'}基準。列見出しクリックでソート・行クリックで課題ドリルダウン。
             </div>
@@ -502,7 +502,7 @@ export default function CompanyPage() {
             <table className="w-full text-sm border-separate" style={{ borderSpacing: 0 }}>
               <thead>
                 <tr style={{ color: 'var(--text-dim)' }}>
-                  <th className="px-3 py-2.5 text-left whitespace-nowrap sticky left-0 top-0 z-30" style={{ background: 'var(--surface2)', borderRight: '2px solid var(--border)' }}>施設</th>
+                  <th className="px-3 py-2.5 text-left whitespace-nowrap sticky left-0 top-0 z-30" style={{ background: 'var(--surface2)', borderRight: '2px solid var(--border)' }}>宿</th>
                   {cols.map((c) => (
                     <th key={c.key} onClick={() => clickSort(c.key)}
                       className="px-2.5 py-2.5 text-right whitespace-nowrap sticky top-0 z-20 cursor-pointer select-none"
@@ -537,7 +537,7 @@ export default function CompanyPage() {
           <CrossAnalysis rows={rows} />
 
           <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
-            金額=万円。売上/営業利益/GOPは施設ごとにPL明細から再計算（予実ページと同一）。人件費率=人件費(PL)÷売上、生産性=売上÷総労働時間、OCC=全日ベース。
+            金額=万円。売上/営業利益/GOPは宿ごとにPL明細から再計算（予実ページと同一）。人件費率=人件費(PL)÷売上、生産性=売上÷総労働時間、OCC=全日ベース。
             満足度=クチコミ総合(3ヶ月平滑)。全店/既存店/新店は開業13ヶ月ルール（新店は前年比を非表示）。人件費率・生産性・満足度・NPSの色はスコープ平均比。
           </p>
         </>

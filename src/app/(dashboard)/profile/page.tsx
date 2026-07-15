@@ -1,6 +1,6 @@
 'use client'
 
-// 施設プロフィール（設定から「ビュー」へ昇格。宿の意図・物語のホーム）
+// 宿プロフィール（設定から「ビュー」へ昇格。宿の意図・物語のホーム）
 import { useFacility } from '@/lib/facility-context'
 import FacilityProfile from '@/components/facility-profile'
 

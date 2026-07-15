@@ -1,8 +1,8 @@
 'use client'
 
 // YADORIE Core サイドバー
+// 表示モードで2系統: 各宿（宿別の分析・運営）/ 全社（全社Core。owner のみ）。
 // グループにホバー/クリックで右横にサブメニュー（フライアウト）が開く（freee風）。
-// サブを持たないグループ（顧客満足度）は直接リンク。
 import Link from 'next/link'
 import { useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
@@ -13,12 +13,13 @@ import { FacilitySelect } from '@/components/facility-select'
 interface NavItem { href: string; label: string; disabled?: boolean; note?: string }
 interface NavGroup { key: string; label: string; href?: string; items?: NavItem[] }
 
+// ---- 各宿モードのナビ ----
 const NAV_GROUPS: NavGroup[] = [
   {
     key: 'view', label: 'ビュー',
     items: [
       { href: '/', label: '概要' },
-      { href: '/profile', label: '施設プロフィール' },
+      { href: '/profile', label: '宿プロフィール' },
     ],
   },
   {
@@ -50,7 +51,12 @@ const NAV_GROUPS: NavGroup[] = [
   },
 ]
 
-// 左下に固定するツール（施設選択の下・ログアウトの上）
+// ---- 全社モードのナビ（owner のみ） ----
+const COMPANY_GROUPS: NavGroup[] = [
+  { key: 'company-dash', label: '全社ダッシュボード', href: '/company' },
+]
+
+// 左下に固定するツール（各宿モード）
 const BOTTOM_TOOLS: { href: string; label: string }[] = [
   { href: '/upload', label: 'アップロード' },
   { href: '/settings', label: '設定' },
@@ -58,19 +64,24 @@ const BOTTOM_TOOLS: { href: string; label: string }[] = [
 
 export default function Sidebar() {
   const pathname = usePathname()
-  const { facilities, current, setCurrent, isOwner } = useFacility()
+  const { facilities, current, setCurrent, isOwner, mode, setMode, canCompany } = useFacility()
   const router = useRouter()
   const [openGroup, setOpenGroup] = useState<string | null>(null)
+
+  const company = mode === 'company'
+  const navGroups = company ? COMPANY_GROUPS : NAV_GROUPS
   // 辞書(KPI辞書・用語集)は全員閲覧可。「灯の頭の中」はオーナーのみ（ページ側でも権限ガード）
-  const bottomTools = [
-    ...BOTTOM_TOOLS,
-    { href: '/dict', label: '辞書' },
-    ...(isOwner ? [{ href: '/knowledge', label: '灯の頭の中' }] : []),
-  ]
-  // 全社Core（経営者の右腕）はオーナーのみ。ビューの直後に top-level で差し込む（ページ側でも権限ガード）
-  const navGroups: NavGroup[] = isOwner
-    ? [NAV_GROUPS[0], { key: 'company', label: '全社', href: '/company' }, ...NAV_GROUPS.slice(1)]
-    : NAV_GROUPS
+  const bottomTools = company
+    ? [
+        { href: '/company-settings', label: '全社設定' },
+        { href: '/dict', label: '辞書' },
+        ...(isOwner ? [{ href: '/knowledge', label: '灯の頭の中' }] : []),
+      ]
+    : [
+        ...BOTTOM_TOOLS,
+        { href: '/dict', label: '辞書' },
+        ...(isOwner ? [{ href: '/knowledge', label: '灯の頭の中' }] : []),
+      ]
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -86,14 +97,29 @@ export default function Sidebar() {
       className="flex flex-col h-screen shrink-0"
       style={{ width: 220, background: 'var(--surface)', borderRight: '1px solid var(--border)' }}
     >
-      {/* Logo（クリックで概要トップへ） */}
-      <Link href="/" onMouseEnter={() => setOpenGroup(null)} className="block px-4 py-4 hover:opacity-80 transition-opacity" style={{ borderBottom: '1px solid var(--border)' }}>
+      {/* Logo（クリックでモードのトップへ） */}
+      <Link href={company ? '/company' : '/'} onMouseEnter={() => setOpenGroup(null)} className="block px-4 py-4 hover:opacity-80 transition-opacity" style={{ borderBottom: '1px solid var(--border)' }}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/yadorie-logo.png" alt="YADORIE宿GROUP" style={{ height: 30, width: 'auto' }} />
         <div className="text-[10px] mt-1.5 tracking-wide" style={{ color: 'var(--text-dim)' }}>
           Core — 宿の数だけ、ストーリー。
         </div>
       </Link>
+
+      {/* モード切替タブ（owner のみ） */}
+      {canCompany && (
+        <div className="px-3 pt-3">
+          <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+            {([['company', '全社'], ['facility', '各宿']] as const).map(([m, label]) => (
+              <button key={m} onClick={() => { setMode(m); setOpenGroup(null); router.push(m === 'company' ? '/company' : '/') }}
+                className="flex-1 px-3 py-1.5 text-xs font-medium transition-colors"
+                style={{ background: mode === m ? 'var(--accent)' : 'transparent', color: mode === m ? '#fff' : 'var(--text-dim)' }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Nav（グループ＋フライアウト） */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-visible" onMouseLeave={() => setOpenGroup(null)}>
@@ -159,17 +185,19 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* 左下固定: 施設選択 → アップロード/設定 → ログアウト */}
+      {/* 左下固定: 宿選択(各宿モードのみ) → ツール → ログアウト */}
       <div className="p-3 space-y-3 shrink-0" style={{ borderTop: '1px solid var(--border)' }}>
-        <div>
-          <label className="block text-[10px] mb-1 tracking-wide" style={{ color: 'var(--text-dim)' }}>
-            施設
-          </label>
-          <FacilitySelect options={facilities} value={current} onChange={setCurrent} />
-          {facilities.length > 12 && (
-            <p className="mt-1 text-[10px]" style={{ color: 'var(--text-dim)' }}>{facilities.length}施設・検索可</p>
-          )}
-        </div>
+        {!company && (
+          <div>
+            <label className="block text-[10px] mb-1 tracking-wide" style={{ color: 'var(--text-dim)' }}>
+              宿
+            </label>
+            <FacilitySelect options={facilities} value={current} onChange={setCurrent} />
+            {facilities.length > 12 && (
+              <p className="mt-1 text-[10px]" style={{ color: 'var(--text-dim)' }}>{facilities.length}宿・検索可</p>
+            )}
+          </div>
+        )}
 
         <div className="space-y-0.5">
           {bottomTools.map((item) => {

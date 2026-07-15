@@ -208,7 +208,7 @@ export default function ReviewPage() {
 
   const npsTrend = useMemo(() => (data?.nps ?? []).slice().sort((a, b) => a.month.localeCompare(b.month)).map((r) => ({ month: r.month.slice(2), nps: r.nps_score })), [data])
 
-  // 改善レポートのキャッシュ読込（施設×終端月×ウィンドウ）
+  // 改善レポートのキャッシュ読込（宿×終端月×ウィンドウ）
   useEffect(() => {
     if (!current || !activeMonth) { setInsights([]); return }
     supabase.from('raw_improvement_insight')
@@ -552,7 +552,7 @@ export default function ReviewPage() {
           </div>
 
           <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
-            スコアは5点満点に正規化し、総合評価はベイズ平滑化（事前分布=施設24ヶ月平均・k=10）の3ヶ月ローリング値。n&lt;5は参考値バッジ。
+            スコアは5点満点に正規化し、総合評価はベイズ平滑化（事前分布=宿24ヶ月平均・k=10）の3ヶ月ローリング値。n&lt;5は参考値バッジ。
             楽天は宿カルテ集計値（別扱い）。改善候補はAI定性分析（C4）から自動抽出。
           </p>
         </>

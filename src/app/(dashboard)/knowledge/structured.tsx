@@ -46,9 +46,9 @@ const CONFIGS: Record<Kind, Config> = {
   },
   standard_pl: {
     title: '基準PL', newLabel: '＋ 基準値を追加', rowId: (r) => r.id,
-    cols: [{ k: 'facility_type', label: '施設タイプ' }, { k: 'item_key', label: '項目' }, { k: 'value', label: '目標値' }, { k: 'unit', label: '単位' }],
+    cols: [{ k: 'facility_type', label: '宿タイプ' }, { k: 'item_key', label: '項目' }, { k: 'value', label: '目標値' }, { k: 'unit', label: '単位' }],
     fields: [
-      { k: 'facility_type', label: '施設タイプ', type: 'select', options: TYPE_OPTS, idOnly: true, required: true },
+      { k: 'facility_type', label: '宿タイプ', type: 'select', options: TYPE_OPTS, idOnly: true, required: true },
       { k: 'item_key', label: '項目キー（cogs_ratio / labor_ratio 等）', idOnly: true, required: true },
       { k: 'value', label: '目標値（率は 0.28 のように小数）', type: 'number' },
       { k: 'unit', label: '単位（ratio / yen など）' },

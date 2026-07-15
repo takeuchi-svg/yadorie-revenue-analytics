@@ -77,7 +77,7 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
 
   useEffect(() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }) }, [messages, loading])
 
-  // 会話メモリ: 履歴API呼び出し（(ユーザー×施設)単位）
+  // 会話メモリ: 履歴API呼び出し（(ユーザー×宿)単位）
   const historyCall = async (payload: Record<string, unknown>) => {
     const { data: { session } } = await supabase.auth.getSession()
     return fetch('/api/chat-history', {
@@ -90,7 +90,7 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
     if (content.trim()) historyCall({ action: 'append', role, content }).catch(() => {})
   }
 
-  // 施設切替・初回オープンで履歴を復元
+  // 宿切替・初回オープンで履歴を復元
   useEffect(() => {
     let alive = true
     setMessages([])
@@ -171,7 +171,7 @@ export default function AiDrawer({ onClose }: { onClose: () => void }) {
           <button onClick={newThread} disabled={loading || messages.length === 0}
             className="text-[11px] px-2 py-1 rounded-md hover:opacity-80 disabled:opacity-40"
             style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}
-            title="この施設の相談を区切って新しく始める（過去は残ります）">＋ 新しい相談</button>
+            title="この宿の相談を区切って新しく始める（過去は残ります）">＋ 新しい相談</button>
           <button onClick={onClose} className="text-lg leading-none px-2 hover:opacity-70" style={{ color: 'var(--text-dim)' }}>✕</button>
         </div>
       </div>

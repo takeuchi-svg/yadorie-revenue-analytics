@@ -1,12 +1,12 @@
 'use client'
-// 検索付き施設セレクタ。70施設規模でも素のselectのように長大にならず、
+// 検索付き宿セレクタ。70宿規模でも素のselectのように長大にならず、
 // 名称/短縮名/コードでインクリメンタル絞り込みできる。
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 export interface FacilityOption { facility: string; name: string; short_name?: string | null }
 
 export function FacilitySelect({
-  options, value, onChange, placeholder = '施設を選択', className = '',
+  options, value, onChange, placeholder = '宿を選択', className = '',
 }: {
   options: FacilityOption[]
   value: string

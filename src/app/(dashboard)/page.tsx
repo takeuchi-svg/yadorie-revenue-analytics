@@ -48,7 +48,7 @@ export default function OverviewPage() {
   const [loading, setLoading] = useState(true)
   const [initiativeMissing, setInitiativeMissing] = useState(false)
 
-  // 施設プロフィール: 当月の取組が未記録なら督促（テーブル未作成時は無視）
+  // 宿プロフィール: 当月の取組が未記録なら督促（テーブル未作成時は無視）
   useEffect(() => {
     if (!current) return
     const ym = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
@@ -185,7 +185,7 @@ export default function OverviewPage() {
           {initiativeMissing && (
             <div className="card p-3 mb-4 text-xs flex items-center gap-2" style={{ borderColor: 'var(--yellow)' }}>
               <span className="px-1.5 py-0.5 rounded text-white text-[10px]" style={{ background: 'var(--red)' }}>未記録</span>
-              <span style={{ color: 'var(--text-dim)' }}>支配人、今月の「取組履歴」がまだのようです。小さなことでも記録しておくと、わたしの分析がもっとお役に立てます（設定 → 施設プロフィール）。— 灯</span>
+              <span style={{ color: 'var(--text-dim)' }}>支配人、今月の「取組履歴」がまだのようです。小さなことでも記録しておくと、わたしの分析がもっとお役に立てます（設定 → 宿プロフィール）。— 灯</span>
             </div>
           )}
           {/* KPI Cards (6, per UI spec) */}

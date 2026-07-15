@@ -40,7 +40,7 @@ const PROMPT_LABEL: Record<string, string> = {
   issue: '課題と対策',
   review_analyze: 'クチコミ トピック抽出',
   review_insight: 'クチコミ 改善レポート',
-  profile_context_template: '施設プロフィール 前文',
+  profile_context_template: '宿プロフィール 前文',
 }
 const KNOW_LABEL: Record<string, string> = {
   persona: '灯の人格（層1）',

@@ -10,6 +10,9 @@ interface Facility {
   total_rooms: number | null
 }
 
+// 表示モード: 全社（全社Core）/ 各宿（従来の宿別）。全社は owner のみ。
+export type ViewMode = 'company' | 'facility'
+
 interface FacilityContextType {
   facilities: Facility[]
   current: string
@@ -17,6 +20,9 @@ interface FacilityContextType {
   currentFacility: Facility | null
   isAdmin: boolean
   isOwner: boolean   // owner=克樹さんのみ（灯の頭の中の編集権限）
+  mode: ViewMode
+  setMode: (m: ViewMode) => void
+  canCompany: boolean  // 全社モードに入れるか（=owner）
 }
 
 const FacilityContext = createContext<FacilityContextType>({
@@ -26,26 +32,32 @@ const FacilityContext = createContext<FacilityContextType>({
   currentFacility: null,
   isAdmin: false,
   isOwner: false,
+  mode: 'facility',
+  setMode: () => {},
+  canCompany: false,
 })
 
 const COOKIE_KEY = 'currentFacility'
+const MODE_COOKIE = 'viewMode'
 
-function readFacilityCookie(): string | null {
+function readCookie(key: string): string | null {
   if (typeof document === 'undefined') return null
-  const match = document.cookie.match(/(?:^|;\s*)currentFacility=([^;]+)/)
+  const match = document.cookie.match(new RegExp(`(?:^|;\\s*)${key}=([^;]+)`))
   return match ? decodeURIComponent(match[1]) : null
 }
-
-function writeFacilityCookie(code: string) {
+function writeCookie(key: string, value: string) {
   if (typeof document === 'undefined') return
-  document.cookie = `${COOKIE_KEY}=${encodeURIComponent(code)}; path=/; max-age=31536000; samesite=lax`
+  document.cookie = `${key}=${encodeURIComponent(value)}; path=/; max-age=31536000; samesite=lax`
 }
+const readFacilityCookie = () => readCookie(COOKIE_KEY)
+const writeFacilityCookie = (code: string) => writeCookie(COOKIE_KEY, code)
 
 export function FacilityProvider({ children }: { children: ReactNode }) {
   const [facilities, setFacilities] = useState<Facility[]>([])
   const [current, setCurrent] = useState<string>('')
   const [isAdmin, setIsAdmin] = useState(false)
   const [isOwner, setIsOwner] = useState(false)
+  const [mode, setModeState] = useState<ViewMode>('facility')
 
   useEffect(() => {
     ;(async () => {
@@ -82,6 +94,8 @@ export function FacilityProvider({ children }: { children: ReactNode }) {
         const valid = allowed.find((f) => f.facility === saved)
         setCurrent(valid ? saved! : allowed[0].facility)
       }
+      // 全社モードは owner のみ。ownerかつCookieが'company'なら全社で開始、それ以外は各宿。
+      setModeState(owner && readCookie(MODE_COOKIE) === 'company' ? 'company' : 'facility')
     })()
   }, [])
 
@@ -89,11 +103,19 @@ export function FacilityProvider({ children }: { children: ReactNode }) {
     setCurrent(code)
     writeFacilityCookie(code)
   }
+  const handleSetMode = (m: ViewMode) => {
+    const next = m === 'company' && !isOwner ? 'facility' : m  // 非ownerは全社に入れない
+    setModeState(next)
+    writeCookie(MODE_COOKIE, next)
+  }
 
   const currentFacility = facilities.find((f) => f.facility === current) ?? null
 
   return (
-    <FacilityContext.Provider value={{ facilities, current, setCurrent: handleSetCurrent, currentFacility, isAdmin, isOwner }}>
+    <FacilityContext.Provider value={{
+      facilities, current, setCurrent: handleSetCurrent, currentFacility, isAdmin, isOwner,
+      mode, setMode: handleSetMode, canCompany: isOwner,
+    }}>
       {children}
     </FacilityContext.Provider>
   )
