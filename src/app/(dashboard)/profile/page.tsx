@@ -5,11 +5,12 @@
 // タブ1=既存プロフィール編集。他3タブは順次実装（月次会議=Phase2、修繕投資/人員計画=別テーマ）。
 import { useState } from 'react'
 import FacilityProfile from '@/components/facility-profile'
+import MeetingTab from '@/components/meeting-tab'
 
 type Tab = 'profile' | 'meeting' | 'capex' | 'staffing'
 const TABS: { key: Tab; label: string; ready: boolean }[] = [
   { key: 'profile', label: 'プロフィール', ready: true },
-  { key: 'meeting', label: '月次会議', ready: false },
+  { key: 'meeting', label: '月次会議', ready: true },
   { key: 'capex', label: '修繕投資計画', ready: false },
   { key: 'staffing', label: '人員計画', ready: false },
 ]
@@ -40,7 +41,7 @@ export default function ProfilePage() {
       </div>
 
       {tab === 'profile' && <FacilityProfile />}
-      {tab === 'meeting' && <ComingSoon label="月次会議" />}
+      {tab === 'meeting' && <MeetingTab />}
       {tab === 'capex' && <ComingSoon label="修繕投資計画" />}
       {tab === 'staffing' && <ComingSoon label="人員計画" />}
     </div>

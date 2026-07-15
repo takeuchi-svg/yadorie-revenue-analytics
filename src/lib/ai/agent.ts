@@ -337,6 +337,25 @@ export async function runCompanyInsight(month: string, material: string): Promis
   return text
 }
 
+// 月次会議パック（B9）: 材料(クライアント算出)を渡して1回生成。施設プロフィール(層3)も注入。
+export async function runMeetingPack(facility: string, month: string, material: string): Promise<string> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+  const sb = makeSupabase()
+  const RUNTIME = `【この依頼の進め方】query_dataツールは使わず、ユーザーメッセージの【会議データ】のみを根拠にする（推測の数値は作らない）。金額は万円、率は%。月は'YYYY-MM'。`
+  const [system, promptTpl] = await Promise.all([
+    buildSystemBlocks(sb, facility, { runtime: RUNTIME }),
+    getPrompt(sb, 'meeting_pack'),
+  ])
+  const prompt = promptTpl.replaceAll('{month}', month)
+  const resp = await client.messages.create({
+    model: MODEL, max_tokens: 4000, thinking: NO_THINKING, system,
+    messages: [{ role: 'user', content: `${prompt}\n\n【会議データ】\n${material}` }],
+  })
+  const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
+  if (!text) throw new Error(`AIが空の応答を返しました（stop_reason=${resp.stop_reason ?? '不明'}）`)
+  return text
+}
+
 // kind='summary'|'issue' の本文を1回のLLM呼び出しで生成
 export async function runInsight(
   kind: 'summary' | 'issue',

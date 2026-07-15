@@ -47,13 +47,16 @@ export default function OverviewPage() {
   const [channels, setChannels] = useState<ChannelRow[]>([])
   const [loading, setLoading] = useState(true)
   const [initiativeMissing, setInitiativeMissing] = useState(false)
+  const [meetingMissing, setMeetingMissing] = useState(false)
 
-  // 宿プロフィール: 当月の取組が未記録なら督促（テーブル未作成時は無視）
+  // 宿プロフィール: 当月の取組・会議記録が未記録なら督促（テーブル未作成時は無視）
   useEffect(() => {
     if (!current) return
     const ym = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`
     supabase.from('raw_facility_initiative').select('id').eq('facility', current).eq('year_month', ym).limit(1)
       .then(({ data, error }) => setInitiativeMissing(!error && (data ?? []).length === 0))
+    supabase.from('raw_meeting_record').select('id').eq('facility', current).eq('year_month', ym).limit(1)
+      .then(({ data, error }) => setMeetingMissing(!error && (data ?? []).length === 0))
   }, [current])
 
   useEffect(() => {
@@ -186,6 +189,12 @@ export default function OverviewPage() {
             <div className="card p-3 mb-4 text-xs flex items-center gap-2" style={{ borderColor: 'var(--yellow)' }}>
               <span className="px-1.5 py-0.5 rounded text-white text-[10px]" style={{ background: 'var(--red)' }}>未記録</span>
               <span style={{ color: 'var(--text-dim)' }}>支配人、今月の「取組履歴」がまだのようです。小さなことでも記録しておくと、わたしの分析がもっとお役に立てます（ビュー → 宿プロフィール）。— 灯</span>
+            </div>
+          )}
+          {meetingMissing && (
+            <div className="card p-3 mb-4 text-xs flex items-center gap-2" style={{ borderColor: 'var(--yellow)' }}>
+              <span className="px-1.5 py-0.5 rounded text-white text-[10px]" style={{ background: 'var(--red)' }}>未記録</span>
+              <span style={{ color: 'var(--text-dim)' }}>支配人、今月の「月次会議」の記録がまだのようです。会議の後に残しておくと、翌月の振り返りに活きます（ビュー → 宿プロフィール → 月次会議）。— 灯</span>
             </div>
           )}
           {/* KPI Cards (6, per UI spec) */}

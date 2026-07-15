@@ -41,6 +41,9 @@ const PROMPT_LABEL: Record<string, string> = {
   review_analyze: 'クチコミ トピック抽出',
   review_insight: 'クチコミ 改善レポート',
   profile_context_template: '宿プロフィール 前文',
+  company_insight: '全社モード 所見',
+  meeting_pack: '月次会議 会議パック',
+  meeting_extract: '月次会議 構造化抽出',
 }
 const KNOW_LABEL: Record<string, string> = {
   persona: '灯の人格（層1）',
