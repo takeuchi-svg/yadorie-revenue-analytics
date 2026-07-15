@@ -5,10 +5,11 @@
 // PLは company-data 経由で施設ごとに pl-compute を適用 → 施設別ページ(yojitsu)と数字一致。
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { supabase } from '@/lib/supabase/client'
 import { useFacility } from '@/lib/facility-context'
 import { fetchAll } from '@/lib/supabase/fetch-all'
-import { fmtNum, fmtYenM, pct } from '@/lib/ui'
+import { fmtNum, fmtYenM, pct, CHART_AXIS } from '@/lib/ui'
 import { Loading, Empty, LoadError } from '@/components/page-bits'
 import {
   loadCompanyData, aggregateScope, detectAnomalies, loadFacilityQualitative,
@@ -169,6 +170,111 @@ function DrilldownModal({ m, agg, showYoY, qual, qualLoading, onClose, onOpenFac
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// G5: 2軸クロス分析（散布図・施設タイプ色分け）
+// 軸メトリクス定義（get=施設からの値, fmt=表示）
+type AxisDef = { key: string; label: string; get: (m: FacilityMetrics) => number | null; fmt: (v: number) => string }
+const AXES: AxisDef[] = [
+  { key: 'satisfaction', label: '満足度', get: (m) => m.satisfaction, fmt: (v) => v.toFixed(2) },
+  { key: 'guestUnit', label: '客単価', get: (m) => m.guestUnit, fmt: (v) => `¥${fmtNum(v)}` },
+  { key: 'laborRatio', label: '人件費率', get: (m) => rate(m.labor.act, m.sales.act), fmt: pct },
+  { key: 'budgetRate', label: '予算達成率(売上)', get: (m) => rate(m.sales.act, m.sales.bud), fmt: pct },
+  { key: 'yoyRate', label: '前年比(売上)', get: (m) => rate(m.sales.act, m.sales.prior), fmt: pct },
+  { key: 'occ', label: 'OCC(稼働率)', get: (m) => m.occ, fmt: pct },
+  { key: 'oiRate', label: '営業利益率', get: (m) => rate(m.operatingIncome.act, m.sales.act), fmt: pct },
+  { key: 'prod', label: '生産性(人時売上)', get: (m) => rate(m.revenue, m.workHours), fmt: (v) => `¥${fmtNum(v)}` },
+  { key: 'nps', label: 'NPS', get: (m) => m.nps, fmt: (v) => v.toFixed(1) },
+]
+const PRESETS: { label: string; x: string; y: string }[] = [
+  { label: '満足度 × 客単価', x: 'satisfaction', y: 'guestUnit' },
+  { label: '満足度 × 人件費率', x: 'satisfaction', y: 'laborRatio' },
+  { label: '予算達成率 × 前年比', x: 'budgetRate', y: 'yoyRate' },
+]
+const TYPE_COLORS: Record<string, string> = {
+  '小規模旅館': '#D85A30', '温泉旅館': '#1D9E75', '小規模都市型ホテル': '#378ADD', '中規模旅館': '#7F77DD',
+  '都市型ホテル': '#D4537E', '高級旅館': '#c9a227', '大規模旅館': '#5AB3A6',
+}
+const typeColor = (t: string) => TYPE_COLORS[t] ?? '#888780'
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function ScatterTip({ active, payload }: any) {
+  if (!active || !payload?.length) return null
+  const p = payload[0].payload
+  return (
+    <div className="text-xs px-2.5 py-1.5 rounded" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="font-medium">{p.name}</div>
+      <div style={{ color: 'var(--text-dim)' }}>{p.type}</div>
+      <div>{p.xLabel}: {p.xf}</div>
+      <div>{p.yLabel}: {p.yf}</div>
+      <div style={{ color: 'var(--text-dim)' }}>売上: {p.z == null ? '—' : fmtYenM(p.z)}</div>
+    </div>
+  )
+}
+
+function CrossAnalysis({ rows }: { rows: FacilityMetrics[] }) {
+  const [xKey, setXKey] = useState('satisfaction')
+  const [yKey, setYKey] = useState('guestUnit')
+  const xAxis = AXES.find((a) => a.key === xKey) ?? AXES[0]
+  const yAxis = AXES.find((a) => a.key === yKey) ?? AXES[1]
+
+  const groups = useMemo(() => {
+    const g: Record<string, any[]> = {}
+    for (const m of rows) {
+      const xv = xAxis.get(m), yv = yAxis.get(m)
+      if (xv == null || yv == null) continue
+      const t = m.facilityType ?? '未設定'
+      ;(g[t] ??= []).push({ x: xv, y: yv, z: m.sales.act, name: m.name, type: t, xf: xAxis.fmt(xv), yf: yAxis.fmt(yv), xLabel: xAxis.label, yLabel: yAxis.label })
+    }
+    return g
+  }, [rows, xAxis, yAxis])
+  const plotted = Object.values(groups).reduce((s, a) => s + a.length, 0)
+
+  return (
+    <div className="card p-4 mt-6">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div className="text-sm font-semibold">2軸クロス分析</div>
+        <div className="flex items-center gap-2 flex-wrap">
+          {PRESETS.map((p) => (
+            <button key={p.label} onClick={() => { setXKey(p.x); setYKey(p.y) }}
+              className="text-[11px] px-2 py-1 rounded" style={{ background: xKey === p.x && yKey === p.y ? 'var(--accent)' : 'var(--surface2)', color: xKey === p.x && yKey === p.y ? '#fff' : 'var(--text-dim)' }}>
+              {p.label}
+            </button>
+          ))}
+          <span className="text-[11px]" style={{ color: 'var(--text-dim)' }}>X</span>
+          <select className="field px-2 py-1 text-xs" value={xKey} onChange={(e) => setXKey(e.target.value)}>
+            {AXES.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
+          </select>
+          <span className="text-[11px]" style={{ color: 'var(--text-dim)' }}>Y</span>
+          <select className="field px-2 py-1 text-xs" value={yKey} onChange={(e) => setYKey(e.target.value)}>
+            {AXES.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
+          </select>
+        </div>
+      </div>
+      {plotted === 0 ? (
+        <p className="text-sm py-8 text-center" style={{ color: 'var(--text-dim)' }}>この2軸で描画できる施設がありません（データ欠損）。別の軸をお試しください。</p>
+      ) : (
+        <ResponsiveContainer width="100%" height={340}>
+          <ScatterChart margin={{ top: 10, right: 16, bottom: 24, left: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#efe6d6" />
+            <XAxis type="number" dataKey="x" name={xAxis.label} {...CHART_AXIS} tickFormatter={xAxis.fmt}
+              label={{ value: xAxis.label, position: 'insideBottom', offset: -12, fill: '#927e6a', fontSize: 11 }} />
+            <YAxis type="number" dataKey="y" name={yAxis.label} {...CHART_AXIS} tickFormatter={yAxis.fmt}
+              label={{ value: yAxis.label, angle: -90, position: 'insideLeft', fill: '#927e6a', fontSize: 11 }} width={64} />
+            <ZAxis type="number" dataKey="z" range={[60, 460]} name="売上" />
+            <Tooltip cursor={{ strokeDasharray: '3 3' }} content={<ScatterTip />} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            {Object.entries(groups).map(([t, data]) => (
+              <Scatter key={t} name={t} data={data} fill={typeColor(t)} fillOpacity={0.75} />
+            ))}
+          </ScatterChart>
+        </ResponsiveContainer>
+      )}
+      <p className="text-[11px] mt-2" style={{ color: 'var(--text-dim)' }}>
+        バブル=施設（色=施設タイプ・大きさ=売上）。例: 満足度が高いのに客単価が低い＝価値を価格化できていない伸びしろ。満足度×人件費率＝効率化しすぎてサービスが痩せていないか。
+      </p>
     </div>
   )
 }
@@ -377,6 +483,9 @@ export default function CompanyPage() {
               </tbody>
             </table>
           </div>
+
+          {/* (E) 2軸クロス分析 */}
+          <CrossAnalysis rows={rows} />
 
           <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
             金額=¥M（百万円）。売上/営業利益/GOPは施設ごとにPL明細から再計算（予実ページと同一）。人件費率=人件費(PL)÷売上、生産性=売上÷総労働時間、OCC=全日ベース。
