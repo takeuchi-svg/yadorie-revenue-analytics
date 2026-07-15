@@ -16,6 +16,12 @@ export function fmtYenM(n: number | null | undefined): string {
   return `¥${(n / 1e6).toFixed(2)}M`
 }
 
+// 金額（万円）: 1,360万円（M等の英字省略はしない。全社Coreの標準表記）
+export function fmtMan(n: number | null | undefined): string {
+  if (n === null || n === undefined) return '-'
+  return `${Math.round(n / 1e4).toLocaleString()}万円`
+}
+
 export function pct(n: number | null | undefined): string {
   if (n === null || n === undefined) return '-'
   return `${(n * 100).toFixed(1)}%`

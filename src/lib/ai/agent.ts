@@ -317,6 +317,26 @@ async function fetchChatContext(sb: any, facility: string): Promise<string> {
   ].join('\n')
 }
 
+// 全社モード（G6）: クライアントで算出済みの全社材料を渡し、灯が経営視点の所見を1回で生成。
+// 単一施設前提の runInsight/fetchInsightData とは別経路（facility を渡さず層3=空、company_insight プロンプト）。
+export async function runCompanyInsight(month: string, material: string): Promise<string> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+  const sb = makeSupabase()
+  const RUNTIME = `【この依頼の進め方】query_dataツールは使わず、ユーザーメッセージの【全社実データ】のみを根拠に分析する（推測の数値は作らない）。既存店/新店を区別し、新店は前年比を出さない。金額は万円で表記。`
+  const [system, promptTpl] = await Promise.all([
+    buildSystemBlocks(sb, undefined, { runtime: RUNTIME }),   // facility 未指定＝層3(施設プロフィール)は空
+    getPrompt(sb, 'company_insight'),
+  ])
+  const prompt = promptTpl.replaceAll('{month}', month)
+  const resp = await client.messages.create({
+    model: MODEL, max_tokens: 4000, thinking: NO_THINKING, system,
+    messages: [{ role: 'user', content: `${prompt}\n\n【全社実データ】\n${material}` }],
+  })
+  const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
+  if (!text) throw new Error(`AIが空の応答を返しました（stop_reason=${resp.stop_reason ?? '不明'}）`)
+  return text
+}
+
 // kind='summary'|'issue' の本文を1回のLLM呼び出しで生成
 export async function runInsight(
   kind: 'summary' | 'issue',

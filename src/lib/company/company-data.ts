@@ -15,9 +15,9 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll } from '@/lib/supabase/fetch-all'
-import { fmtNum, pct } from '@/lib/ui'
+import { fmtNum, fmtMan, pct } from '@/lib/ui'
 import { makePlResolver, priorYM, type BudgetRow, type ActualRow } from '@/lib/pl-compute'
-import { classifyFacility, inScope, type FacilityClass, type StoreScope } from '@/lib/company/facility-class'
+import { classifyFacility, inScope, STORE_SCOPE_LABEL, type FacilityClass, type StoreScope } from '@/lib/company/facility-class'
 
 /* ===== 型 ===== */
 // 実績/予算/前年 の三つ組
@@ -174,7 +174,7 @@ const sumTriple = (rows: FacilityMetrics[], pick: (m: FacilityMetrics) => Triple
   }
   return { act: add((t) => t.act), bud: add((t) => t.bud), prior: add((t) => t.prior) }
 }
-const ratio = (a: number | null, b: number | null): number | null => (a != null && b ? a / b : null)
+const ratio = (a: number | null, b: number | null | undefined): number | null => (a != null && b ? a / b : null)
 const sumBy = (rows: FacilityMetrics[], get: (m: FacilityMetrics) => number | null): number | null => {
   let s = 0, any = false
   for (const r of rows) { const v = get(r); if (v != null) { s += v; any = true } }
@@ -221,12 +221,12 @@ export interface Anomaly { label: string; detail: string; badness: number }
 export function detectAnomalies(m: FacilityMetrics, agg: ScopeAggregate, showYoY: boolean): Anomaly[] {
   const out: Anomaly[] = []
   const relMoney = (diff: number, base: number) => Math.min(1, Math.abs(diff) / Math.max(Math.abs(base), 1))
-  const yenM = (v: number) => `${v >= 0 ? '+' : '▲'}¥${Math.abs(v / 1e6).toFixed(1)}M`
+  const signedMan = (v: number) => `${v >= 0 ? '+' : '▲'}${fmtMan(Math.abs(v))}`
   const pushMoney = (name: string, t: Triple) => {
     if (t.act != null && t.bud != null && t.act < t.bud)
-      out.push({ label: `${name}が予算未達`, detail: `予算差 ${yenM(t.act - t.bud)}（実績 ¥${(t.act / 1e6).toFixed(1)}M / 予算 ¥${(t.bud / 1e6).toFixed(1)}M）`, badness: relMoney(t.act - t.bud, t.bud) })
+      out.push({ label: `${name}が予算未達`, detail: `予算差 ${signedMan(t.act - t.bud)}（実績 ${fmtMan(t.act)} / 予算 ${fmtMan(t.bud)}）`, badness: relMoney(t.act - t.bud, t.bud) })
     if (showYoY && t.act != null && t.prior != null && t.act < t.prior)
-      out.push({ label: `${name}が前年割れ`, detail: `前年差 ${yenM(t.act - t.prior)}`, badness: relMoney(t.act - t.prior, t.prior) })
+      out.push({ label: `${name}が前年割れ`, detail: `前年差 ${signedMan(t.act - t.prior)}`, badness: relMoney(t.act - t.prior, t.prior) })
   }
   pushMoney('営業利益', m.operatingIncome)
   pushMoney('売上', m.sales)
@@ -282,4 +282,41 @@ export async function loadFacilityQualitative(sb: SupabaseClient, facility: stri
     initiatives: (((ini as any)?.data ?? []) as FacilityQualitative['initiatives']),
     topics,
   }
+}
+
+/* ===== G6 灯（全社モード）へ渡す材料テキスト ===== */
+// クライアントで算出済みの ds から、全社サマリ＋施設別（悪化指標つき）を圧縮テキスト化。
+// 生の絶対額を全施設分JSONで積むとトークン過多になるため、率/万円に前処理してから渡す。
+export function buildCompanyMaterial(ds: CompanyDataset): string {
+  const clsL = (c: FacilityClass) => (c === 'existing' ? '既存' : c === 'new' ? '新' : '区分不明')
+  const r = (a: number | null, b: number | null | undefined) => { const v = ratio(a, b); return v == null ? '—' : pct(v) }
+  const yen = (v: number | null) => (v == null ? '—' : fmtMan(v))
+  const lines: string[] = [`対象月: ${ds.targetMonth}（前年同月: ${ds.priorMonth}）`, '']
+
+  // 全社サマリ（全店/既存店/新店）
+  lines.push('## 全社サマリ')
+  for (const sc of ['all', 'existing', 'new'] as StoreScope[]) {
+    const a = aggregateScope(ds, sc)
+    if (!a.count) continue
+    const yoy = sc !== 'new'
+    const money = (t: Triple) => `${yen(t.act)}（予算比${r(t.act, t.bud)}${yoy ? ` / 前年比${r(t.act, t.prior)}` : '（新店:前年比なし）'}）`
+    lines.push(`- ${STORE_SCOPE_LABEL[sc]}(${a.count}施設): 売上 ${money(a.sales)} / 営業利益 ${money(a.operatingIncome)} / GOP ${money(a.gop)} / OCC ${a.occ == null ? '—' : pct(a.occ)} / 人件費率 ${a.laborRatio == null ? '—' : pct(a.laborRatio)} / 満足度 ${a.satisfaction?.toFixed(2) ?? '—'} / NPS ${a.nps?.toFixed(1) ?? '—'}`)
+  }
+
+  // 施設別（悪化指標つき）
+  const aggAll = aggregateScope(ds, 'all')
+  lines.push('', '## 施設別（予算比/前年比・機械抽出の注目ポイント）')
+  for (const m of ds.facilities) {
+    const yoy = m.cls !== 'new'
+    const an = detectAnomalies(m, aggAll, yoy).slice(0, 3).map((x) => x.label).join('・')
+    const lr = ratio(m.labor.act, m.sales.act)
+    lines.push(
+      `- ${m.name}（${clsL(m.cls)}${m.facilityType ? '/' + m.facilityType : ''}）: ` +
+      `売上 ${yen(m.sales.act)}（予${r(m.sales.act, m.sales.bud)}${yoy ? `/前${r(m.sales.act, m.sales.prior)}` : ''}）, ` +
+      `営業利益 ${yen(m.operatingIncome.act)}（予${r(m.operatingIncome.act, m.operatingIncome.bud)}${yoy ? `/前${r(m.operatingIncome.act, m.operatingIncome.prior)}` : ''}）, ` +
+      `人件費率 ${lr == null ? '—' : pct(lr)}, OCC ${m.occ == null ? '—' : pct(m.occ)}, 満足度 ${m.satisfaction?.toFixed(2) ?? '—'}, NPS ${m.nps?.toFixed(1) ?? '—'}` +
+      (an ? ` ／注目: ${an}` : ''),
+    )
+  }
+  return lines.join('\n')
 }

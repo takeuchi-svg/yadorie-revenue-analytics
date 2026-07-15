@@ -9,10 +9,11 @@ import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, CartesianGrid, Tooltip, Leg
 import { supabase } from '@/lib/supabase/client'
 import { useFacility } from '@/lib/facility-context'
 import { fetchAll } from '@/lib/supabase/fetch-all'
-import { fmtNum, fmtYenM, pct, CHART_AXIS } from '@/lib/ui'
+import { fmtNum, fmtMan, pct, CHART_AXIS } from '@/lib/ui'
 import { Loading, Empty, LoadError } from '@/components/page-bits'
+import { AssistantContent } from '@/components/ai-drawer'
 import {
-  loadCompanyData, aggregateScope, detectAnomalies, loadFacilityQualitative,
+  loadCompanyData, aggregateScope, detectAnomalies, loadFacilityQualitative, buildCompanyMaterial,
   type CompanyDataset, type FacilityMetrics, type Triple, type ScopeAggregate,
   type FacilityQualitative,
 } from '@/lib/company/company-data'
@@ -28,7 +29,7 @@ function heatBg(dev: number | null): string | undefined {
   return dev >= 0 ? `rgba(34,197,94,${a})` : `rgba(239,68,68,${a})`
 }
 const rate = (a: number | null, b: number | null | undefined): number | null => (a != null && b ? a / b : null)
-const signedM = (v: number | null): string => (v == null ? '' : (v >= 0 ? '+' : '') + fmtYenM(v))
+const signedMan = (v: number | null): string => (v == null ? '' : (v >= 0 ? '+' : '▲') + fmtMan(Math.abs(v)))
 
 /* ---- セル/カード（module-scope。render内定義だと再マウントするため外出し） ---- */
 // 金額メトリクスセル（実額 + 予算比 + 前年比、colorModeで着色）
@@ -41,9 +42,9 @@ function MoneyCell({ t, colorMode, showYoY, higherBetter = true }: { t: Triple; 
   const rColor = (r: number | null) => (r == null ? 'var(--text-dim)' : (r >= 1) === higherBetter ? 'var(--green)' : 'var(--red)')
   return (
     <td className="px-2.5 py-1.5 text-right whitespace-nowrap align-top" style={{ background: heatBg(dev), borderTop: '1px solid var(--border)' }}>
-      <div className="font-medium">{t.act == null ? '—' : fmtYenM(t.act)}</div>
-      <div className="text-[10px]" style={{ color: rColor(rB) }}>予 {signedM(diffB)}{rB != null && ` / ${pct(rB)}`}</div>
-      {showYoY && <div className="text-[10px]" style={{ color: rColor(rY) }}>前 {rY == null ? '—' : `${signedM(diffY)} / ${pct(rY)}`}</div>}
+      <div className="font-medium">{t.act == null ? '—' : fmtMan(t.act)}</div>
+      <div className="text-[10px]" style={{ color: rColor(rB) }}>予 {signedMan(diffB)}{rB != null && ` / ${pct(rB)}`}</div>
+      {showYoY && <div className="text-[10px]" style={{ color: rColor(rY) }}>前 {rY == null ? '—' : `${signedMan(diffY)} / ${pct(rY)}`}</div>}
     </td>
   )
 }
@@ -209,7 +210,7 @@ function ScatterTip({ active, payload }: any) {
       <div style={{ color: 'var(--text-dim)' }}>{p.type}</div>
       <div>{p.xLabel}: {p.xf}</div>
       <div>{p.yLabel}: {p.yf}</div>
-      <div style={{ color: 'var(--text-dim)' }}>売上: {p.z == null ? '—' : fmtYenM(p.z)}</div>
+      <div style={{ color: 'var(--text-dim)' }}>売上: {p.z == null ? '—' : fmtMan(p.z)}</div>
     </div>
   )
 }
@@ -318,6 +319,39 @@ export default function CompanyPage() {
     loadFacilityQualitative(supabase, selected.facility).then(setQual).catch(() => setQual(null)).finally(() => setQualLoading(false))
   }, [selected])
   const openFacility = (facility: string, path: string) => { setCurrent(facility); router.push(path) }
+  // G6 灯（全社モード）所見
+  const [insight, setInsight] = useState('')
+  const [insightAt, setInsightAt] = useState<string | null>(null)
+  const [insightBusy, setInsightBusy] = useState(false)
+  const [insightErr, setInsightErr] = useState('')
+  const authHeader = async (): Promise<Record<string, string>> => {
+    const { data: { session } } = await supabase.auth.getSession()
+    return { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) }
+  }
+  // 対象月のキャッシュ済み所見を読み込む（無ければ空）
+  useEffect(() => {
+    if (!isOwner || !month) return
+    setInsight(''); setInsightErr(''); setInsightAt(null)
+    ;(async () => {
+      try {
+        const res = await fetch('/api/company-insight', { method: 'POST', headers: await authHeader(), body: JSON.stringify({ month }) })
+        const d = await res.json()
+        if (d.content) { setInsight(d.content); setInsightAt(d.updatedAt ?? null) }
+      } catch { /* 読み込み失敗は無視（生成ボタンで再取得可） */ }
+    })()
+  }, [isOwner, month])
+  const genInsight = async () => {
+    if (!ds) return
+    setInsightBusy(true); setInsightErr('')
+    try {
+      const material = buildCompanyMaterial(ds)
+      const res = await fetch('/api/company-insight', { method: 'POST', headers: await authHeader(), body: JSON.stringify({ month, material, force: true }) })
+      const d = await res.json()
+      if (d.error) setInsightErr(d.error)
+      if (d.content) { setInsight(d.content); setInsightAt(new Date().toISOString()) }
+    } catch (e) { setInsightErr(e instanceof Error ? e.message : String(e)) }
+    finally { setInsightBusy(false) }
+  }
 
   // 対象月リスト（売上実績martの月＝運営月。最新をデフォルト）
   useEffect(() => {
@@ -430,12 +464,27 @@ export default function CompanyPage() {
         <Empty message="全社データがありません。PL・売上実績の取込状況をご確認ください。" />
       ) : (
         <>
+          {/* (D) 灯（全社モード）の所見 */}
+          <div className="card p-4 mb-6">
+            <div className="flex items-center justify-between mb-2 gap-2">
+              <div className="text-sm font-semibold">灯（全社モード）の所見</div>
+              <button onClick={genInsight} disabled={insightBusy || !ds}
+                className="px-3 py-1.5 rounded-md text-xs text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>
+                {insightBusy ? '生成中…' : insight ? '再生成' : '生成'}
+              </button>
+            </div>
+            {insightErr && <p className="text-xs mb-2" style={{ color: 'var(--red)' }}>{insightErr}</p>}
+            {insight ? <AssistantContent content={insight} />
+              : !insightBusy && <p className="text-sm" style={{ color: 'var(--text-dim)' }}>「生成」で、灯が全社を読んで“注力すべき施設と理由”をまとめます（予算対比・前年対比の両面から）。</p>}
+            {insightAt && <p className="text-[10px] mt-2" style={{ color: 'var(--text-dim)' }}>最終生成: {insightAt.slice(0, 16).replace('T', ' ')}</p>}
+          </div>
+
           {/* (A) サマリKPI */}
           {agg && (
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
-              <SummaryCard label="売上" act={agg.sales.act} bud={agg.sales.bud} prior={agg.sales.prior} fmt={fmtYenM} showYoY={showYoY} />
-              <SummaryCard label="営業利益" act={agg.operatingIncome.act} bud={agg.operatingIncome.bud} prior={agg.operatingIncome.prior} fmt={fmtYenM} showYoY={showYoY} />
-              <SummaryCard label="GOP" act={agg.gop.act} bud={agg.gop.bud} prior={agg.gop.prior} fmt={fmtYenM} showYoY={showYoY} />
+              <SummaryCard label="売上" act={agg.sales.act} bud={agg.sales.bud} prior={agg.sales.prior} fmt={fmtMan} showYoY={showYoY} />
+              <SummaryCard label="営業利益" act={agg.operatingIncome.act} bud={agg.operatingIncome.bud} prior={agg.operatingIncome.prior} fmt={fmtMan} showYoY={showYoY} />
+              <SummaryCard label="GOP" act={agg.gop.act} bud={agg.gop.bud} prior={agg.gop.prior} fmt={fmtMan} showYoY={showYoY} />
               <SummaryCard label="OCC（稼働率）" act={agg.occ} bud={null} prior={null} fmt={pct} showYoY={showYoY} />
               <SummaryCard label="満足度" act={agg.satisfaction} bud={null} prior={null} fmt={(x) => x.toFixed(2)} showYoY={showYoY} />
               <SummaryCard label="NPS" act={agg.nps} bud={null} prior={null} fmt={(x) => x.toFixed(1)} showYoY={showYoY} />
@@ -488,7 +537,7 @@ export default function CompanyPage() {
           <CrossAnalysis rows={rows} />
 
           <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
-            金額=¥M（百万円）。売上/営業利益/GOPは施設ごとにPL明細から再計算（予実ページと同一）。人件費率=人件費(PL)÷売上、生産性=売上÷総労働時間、OCC=全日ベース。
+            金額=万円。売上/営業利益/GOPは施設ごとにPL明細から再計算（予実ページと同一）。人件費率=人件費(PL)÷売上、生産性=売上÷総労働時間、OCC=全日ベース。
             満足度=クチコミ総合(3ヶ月平滑)。全店/既存店/新店は開業13ヶ月ルール（新店は前年比を非表示）。人件費率・生産性・満足度・NPSの色はスコープ平均比。
           </p>
         </>

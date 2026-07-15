@@ -31,16 +31,15 @@ from (values
   ('AP',        date '2020-09-01'),  -- 安比高原森のホテル
   ('KT',        date '2019-10-01'),  -- 海遊亭
   ('OOH',       date '2025-04-01'),  -- Onn大曲の花火
-  ('KJK',       date '2025-04-01')   -- かじか
+  ('KJK',       date '2025-04-01'),  -- かじか
+  ('OQ',        date '2019-09-01'),  -- OQOQ
+  ('TK',        date '2019-09-01'),  -- 玉井館
+  ('MH',        date '2019-07-01'),  -- 木曽駒高原森のホテル
+  ('GZ',        date '2018-04-01'),  -- 旅館岐山
+  ('NS',        date '2018-04-01')   -- 旅館ぬしや
 ) as v(facility, d)
 where f.facility = v.facility;
 
--- ── 未確定（開業日ヒアリング中）。判明したら日付を入れてコメントを外す ──
---   TK  玉井館            → ????-??-01
---   OQ  OQOQ             → ????-??-01
---   MH  木曽駒高原森のホテル → ????-??-01
---   GZ  旅館岐山          → ????-??-01
---   NS  旅館ぬしや         → ????-??-01
--- opening_date が NULL の施設は「区分不明」として全店集計にのみ含め、既存店/新店の切替対象からは外れます。
+-- 全27施設 opening_date 投入済み（NULL残りなし）。
 
 -- 確認: select facility, name, opening_date from dim_facility order by opening_date nulls last, facility;
