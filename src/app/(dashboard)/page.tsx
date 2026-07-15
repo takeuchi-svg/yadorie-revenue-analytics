@@ -185,7 +185,7 @@ export default function OverviewPage() {
           {initiativeMissing && (
             <div className="card p-3 mb-4 text-xs flex items-center gap-2" style={{ borderColor: 'var(--yellow)' }}>
               <span className="px-1.5 py-0.5 rounded text-white text-[10px]" style={{ background: 'var(--red)' }}>未記録</span>
-              <span style={{ color: 'var(--text-dim)' }}>支配人、今月の「取組履歴」がまだのようです。小さなことでも記録しておくと、わたしの分析がもっとお役に立てます（設定 → 宿プロフィール）。— 灯</span>
+              <span style={{ color: 'var(--text-dim)' }}>支配人、今月の「取組履歴」がまだのようです。小さなことでも記録しておくと、わたしの分析がもっとお役に立てます（ビュー → 宿プロフィール）。— 灯</span>
             </div>
           )}
           {/* KPI Cards (6, per UI spec) */}

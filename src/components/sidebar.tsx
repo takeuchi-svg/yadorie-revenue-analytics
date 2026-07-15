@@ -56,10 +56,9 @@ const COMPANY_GROUPS: NavGroup[] = [
   { key: 'company-dash', label: '全社ダッシュボード', href: '/company' },
 ]
 
-// 左下に固定するツール（各宿モード）
+// 左下に固定するツール（各宿モード）。設定・灯の頭の中は全社サイドバーに集約。
 const BOTTOM_TOOLS: { href: string; label: string }[] = [
   { href: '/upload', label: 'アップロード' },
-  { href: '/settings', label: '設定' },
 ]
 
 export default function Sidebar() {
@@ -80,7 +79,6 @@ export default function Sidebar() {
     : [
         ...BOTTOM_TOOLS,
         { href: '/dict', label: '辞書' },
-        ...(isOwner ? [{ href: '/knowledge', label: '灯の頭の中' }] : []),
       ]
 
   const handleLogout = async () => {

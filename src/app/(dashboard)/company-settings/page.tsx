@@ -1,7 +1,7 @@
 'use client'
 
 // 全社設定（全社Core・owner限定）: 従業員賃金設定 / 宿タイプ一括設定 / ユーザー管理。
-// 各宿固有の設定は各宿モードの「設定」(/settings)・「宿プロフィール」(/profile)へ。
+// 各宿固有の設定は「宿プロフィール」(/profile)へ。
 import { useEffect, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
@@ -101,7 +101,7 @@ export default function CompanySettingsPage() {
     <div className="p-6 max-w-4xl">
       <div className="mb-4">
         <h1 className="text-lg font-semibold">全社設定</h1>
-        <p className="text-xs mt-0.5" style={{ color: 'var(--text-dim)' }}>賃金・宿タイプ・ユーザーの横断管理。各宿固有の設定は「各宿」タブの設定・宿プロフィールへ。</p>
+        <p className="text-xs mt-0.5" style={{ color: 'var(--text-dim)' }}>賃金・宿タイプ・ユーザーの横断管理。各宿固有の設定は「各宿」タブの宿プロフィールへ。</p>
       </div>
 
       {/* 従業員 賃金設定（宿ごと。全社モードには宿セレクタが無いのでここで選ぶ） */}
