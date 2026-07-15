@@ -67,6 +67,10 @@ export default function Sidebar() {
     { href: '/dict', label: '辞書' },
     ...(isOwner ? [{ href: '/knowledge', label: '灯の頭の中' }] : []),
   ]
+  // 全社Core（経営者の右腕）はオーナーのみ。ビューの直後に top-level で差し込む（ページ側でも権限ガード）
+  const navGroups: NavGroup[] = isOwner
+    ? [NAV_GROUPS[0], { key: 'company', label: '全社', href: '/company' }, ...NAV_GROUPS.slice(1)]
+    : NAV_GROUPS
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
@@ -93,7 +97,7 @@ export default function Sidebar() {
 
       {/* Nav（グループ＋フライアウト） */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-visible" onMouseLeave={() => setOpenGroup(null)}>
-        {NAV_GROUPS.map((g) => {
+        {navGroups.map((g) => {
           const active = groupActive(g)
           const open = openGroup === g.key
           const rowStyle = {

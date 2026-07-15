@@ -4,8 +4,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
-import { fmtNum, pct } from '@/lib/ui'
+import { pct } from '@/lib/ui'
 import { Loading, Empty, LoadError } from '@/components/page-bits'
+import {
+  makePlResolver, aggFrom, varCostFrom, calcDeriv, priorYM,
+  COLLAPSIBLE, CAT_TOTALS, DERIVED,
+  fmtVal, fmtDiff, fmtDerivVal, fmtDerivDiff, goodColor,
+  type Agg,
+} from '@/lib/pl-compute'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface BRow { fiscal_year: string; month: string; category: string | null; item_code: string; item_name: string; amount: number | null; sort_order: number | null }
@@ -13,99 +19,7 @@ interface ARow { fiscal_year: string; month: string; item_code: string; actual: 
 interface KpiRow { month: string; guests: number | null; adr: number | null; guest_unit: number | null; companion: number | null }
 interface OccRow { month: string; rooms_sold: number | null; occ: number | null; occ_calendar_days?: number | null; operating_days: number | null }
 
-// 折りたたみ対象カテゴリと、その集計行コード
-const COLLAPSIBLE: Record<string, string> = { '売上': 'sales_total', '原価': 'cogs_total', '人件費': 'labor_total', '販売管理費': 'sga_total' }
-// 集計行（太字・背景）
-const CAT_TOTALS = new Set(['sales_total', 'cogs_total', 'labor_total', 'sga_total', 'gop', 'ebitda', 'operating_income'])
-// 売上実績(mart)から取得するKPI
-const KPI_SALES = new Set(['稼働率', '販売室数', '同伴係数', '宿泊客数', '客単価', '室単価'])
-// %表示の行
-const PERCENT_CODES = new Set(['稼働率', '食材原価率'])
-// 着地年度合計を「合計」せず再計算する比率行
-const RECOMPUTE_CODES = new Set(['稼働率', '客単価', '室単価', '同伴係数'])
-// 年度合計を空欄にする行
-const BLANK_YEAR_CODES = new Set(['食材原価率'])
-
-
-const k = (ym: string, code: string) => `${ym}|${code}`
-const priorYM = (ym: string) => `${Number(ym.slice(0, 4)) - 1}-${ym.slice(5)}`
-
-/* ===== 損益分岐点・原価分析（固変分解） =====
-   原価は全額変動費。水道光熱費は変動30%（固定70%）。賞与は計上月そのまま固定費。
-   固定費は「総費用 − 変動費」の残差で算出（各項目の固変ラベルと一致し二重計上を防ぐ）。 */
-const WATER_VAR_RATIO = 0.30
-// 変動費の非原価項目（原価=cogs_totalは別途全額変動として加算）
-const COST_VAR_ITEMS = ['雑給', '広告宣伝費', '販売促進費', '消耗品費', '修繕費', 'リネン費', '送客手数料', 'カード手数料', '雑費']
-
-type Agg = { sales: number | null; oi: number | null; gop: number | null; guests: number | null; rooms: number | null; varC: number | null }
-
-// 資源解決関数 g(code) から変動費を算出（cogsが無い月は null）
-function varCostFrom(g: (code: string) => number | null): number | null {
-  const cogs = g('cogs_total')
-  if (cogs == null) return null
-  let v = cogs // 原価は全額変動
-  for (const c of COST_VAR_ITEMS) v += g(c) ?? 0
-  // 外注費（変動）: 「外注費」と「外注費（人材/清掃/その他）」は別科目のため全て合算
-  // （実績は外注費＋外注費（人材）が併存、予算は分割科目のみ — フォールバックだと人材分が漏れる）
-  v += (g('外注費') ?? 0) + (g('外注費_人材_') ?? 0) + (g('外注費_清掃_') ?? 0) + (g('外注費_その他_') ?? 0)
-  // 水道光熱費の変動分（30%）
-  v += (g('水道光熱費') ?? 0) * WATER_VAR_RATIO
-  return v
-}
-
-const aggFrom = (g: (code: string) => number | null): Agg => ({
-  sales: g('sales_total'), oi: g('operating_income'), gop: g('gop'),
-  guests: g('宿泊客数'), rooms: g('販売室数'), varC: varCostFrom(g),
-})
-
-// 損益関連KPI（kind: 表示形式 / up: 高いほど良い）
-const DERIVED: { code: string; name: string; kind: 'yen' | 'pct'; up: boolean }[] = [
-  { code: 'bep_sales', name: '損益分岐点売上高', kind: 'yen', up: false },
-  { code: 'bep_ratio', name: '損益分岐点比率', kind: 'pct', up: false },
-  { code: 'fixed_cost', name: '固定費', kind: 'yen', up: false },
-  { code: 'var_cost', name: '変動費', kind: 'yen', up: false },
-  { code: 'var_ratio', name: '変動費率', kind: 'pct', up: false },
-  { code: 'cm_ratio', name: '限界利益率', kind: 'pct', up: true },
-  { code: 'cost_per_guest', name: 'お客様1人あたりの費用', kind: 'yen', up: false },
-  { code: 'varcost_per_guest', name: 'お客様1人あたりの変動費', kind: 'yen', up: false },
-  { code: 'cost_per_room', name: '1部屋あたりの費用', kind: 'yen', up: false },
-  { code: 'varcost_per_room', name: '1部屋あたりの変動費', kind: 'yen', up: false },
-  { code: 'gop_per_guest', name: 'お客様1人あたりのGOP', kind: 'yen', up: true },
-  { code: 'oi_per_guest', name: 'お客様1人あたりの営業利益', kind: 'yen', up: true },
-]
-
-function calcDeriv(code: string, a: Agg): number | null {
-  const { sales, oi, gop, guests, rooms, varC } = a
-  const totalC = sales != null && oi != null ? sales - oi : null // 総費用 = 売上 − 営業利益
-  const fixedC = totalC != null && varC != null ? totalC - varC : null
-  const cmRatio = varC != null && sales ? (sales - varC) / sales : null // 限界利益率
-  const div = (x: number | null, d: number | null | undefined) => (x != null && d ? x / d : null)
-  switch (code) {
-    case 'var_cost': return varC
-    case 'fixed_cost': return fixedC
-    case 'var_ratio': return div(varC, sales)
-    case 'cm_ratio': return cmRatio
-    case 'bep_sales': return fixedC != null && cmRatio ? fixedC / cmRatio : null
-    case 'bep_ratio': return fixedC != null && cmRatio && sales ? fixedC / cmRatio / sales : null
-    case 'cost_per_guest': return div(totalC, guests)
-    case 'varcost_per_guest': return div(varC, guests)
-    case 'cost_per_room': return div(totalC, rooms)
-    case 'varcost_per_room': return div(varC, rooms)
-    case 'gop_per_guest': return div(gop, guests)
-    case 'oi_per_guest': return div(oi, guests)
-  }
-  return null
-}
-
-const fmtDerivVal = (kind: 'yen' | 'pct', v: number | null) => (v == null ? '-' : kind === 'pct' ? pct(v) : fmtNum(v))
-const fmtDerivDiff = (kind: 'yen' | 'pct', v: number | null) => {
-  if (v == null) return '-'
-  const s = v >= 0 ? '+' : ''
-  return kind === 'pct' ? s + (v * 100).toFixed(1) + 'pt' : s + fmtNum(v)
-}
-// 良し悪しの色（up=高いほど良い）
-const goodColor = (v: number | null, base: number, up: boolean) =>
-  v == null ? undefined : (v >= base) === up ? 'var(--green)' : 'var(--red)'
+// 表示分類・再計算ロジック・原価分析は pl-compute（SSOT）に集約。全社Coreと同一コードを共有する。
 
 export default function YojitsuPage() {
   const { current, currentFacility } = useFacility()
@@ -150,111 +64,11 @@ export default function YojitsuPage() {
   const fys = useMemo(() => [...new Set(budget.map((b) => b.fiscal_year))].sort().reverse(), [budget])
   useEffect(() => { if (fys.length && !fys.includes(fy)) setFy(fys[0]) }, [fys, fy])
 
-  const months = useMemo(() => [...new Set(budget.filter((b) => b.fiscal_year === fy).map((b) => b.month))].sort(), [budget, fy])
+  // PL再計算は pl-compute の SSOT に集約（全社Coreと同一ロジック。実績集計行は明細から再計算）
+  const { items, months, actualMonths, hasActual, getBudget, getActual, landingFor, yearLanding, yearBudget } =
+    useMemo(() => makePlResolver({ budget, actual, kpi, occ, opRooms, totalRooms, fy }),
+      [budget, actual, kpi, occ, opRooms, totalRooms, fy])
   useEffect(() => { if (months.length && !months.includes(month)) setMonth(months[0]) }, [months, month])
-
-  // 項目（budget の sort_order 順）
-  const items = useMemo(() => {
-    const seen = new Set<string>(); const list: { code: string; name: string; category: string | null }[] = []
-    for (const b of budget.filter((x) => x.fiscal_year === fy).sort((a, z) => (a.sort_order ?? 0) - (z.sort_order ?? 0))) {
-      if (seen.has(b.item_code)) continue; seen.add(b.item_code)
-      list.push({ code: b.item_code, name: b.item_name, category: b.category })
-    }
-    return list
-  }, [budget, fy])
-
-  // 人件費・販管費の明細コード（実績集計の再計算に使用）
-  const laborCodes = useMemo(() => {
-    const s = new Set(items.filter((i) => i.category === '人件費' && i.code !== 'labor_total').map((i) => i.code))
-    s.add('外注費') // 実績側の総外注費
-    return [...s]
-  }, [items])
-  const sgaCodes = useMemo(() => items.filter((i) => i.category === '販売管理費' && i.code !== 'sga_total').map((i) => i.code), [items])
-
-  // ---- ルックアップマップ ----
-  const budgetMap = useMemo(() => { const m: Record<string, number | null> = {}; budget.forEach((b) => { m[k(b.month, b.item_code)] = b.amount }); return m }, [budget])
-  const actualMap = useMemo(() => { const m: Record<string, number | null> = {}; actual.forEach((a) => { m[k(a.month, a.item_code)] = a.actual }); return m }, [actual])
-  const actualMonths = useMemo(() => new Set(actual.map((a) => a.month)), [actual])
-  const kpiMap = useMemo(() => { const m: Record<string, KpiRow> = {}; kpi.forEach((r) => { m[r.month] = r }); return m }, [kpi])
-  const occMap = useMemo(() => { const m: Record<string, OccRow> = {}; occ.forEach((r) => { m[r.month] = r }); return m }, [occ])
-
-  const getBudget = (code: string, ym: string): number | null => budgetMap[k(ym, code)] ?? null
-  const getDays = (ym: string): number | null => occMap[ym]?.operating_days ?? null  // 稼働日数=販売実績のある日数（martで自動算出）
-  const sumActualRaw = (codes: string[], ym: string): number =>
-    codes.reduce((s, c) => s + (actualMap[k(ym, c)] ?? 0), 0)
-
-  // 実績（集計行は明細から再計算、KPIは売上実績から取得）
-  const getActual = (code: string, ym: string): number | null => {
-    if (!actualMonths.has(ym)) return null
-    switch (code) {
-      case '稼働率': return occMap[ym]?.occ_calendar_days ?? occMap[ym]?.occ ?? null   // 全日ベース優先
-      case '販売室数': return occMap[ym]?.rooms_sold ?? null
-      case '宿泊客数': return kpiMap[ym]?.guests ?? null
-      case '客単価': return kpiMap[ym]?.guest_unit ?? null
-      case '室単価': return kpiMap[ym]?.adr ?? null
-      case '同伴係数': return kpiMap[ym]?.companion ?? null
-      case '稼働日数': return getDays(ym)
-      case '在庫数': { const d = getDays(ym); const r = opRooms[ym] ?? totalRooms; return r != null && d != null ? r * d : null }
-      case '食材原価率': return null // 実績比率は定義が曖昧なため空欄（予算のみ表示）
-      case 'labor_total': return sumActualRaw(laborCodes, ym)
-      case 'sga_total': return sumActualRaw(sgaCodes, ym)
-      case 'gop': {
-        const s = actualMap[k(ym, 'sales_total')], c = actualMap[k(ym, 'cogs_total')]
-        if (s == null || c == null) return null
-        return s - c - sumActualRaw(laborCodes, ym) - sumActualRaw(sgaCodes, ym)
-      }
-      case 'ebitda': {
-        const g = getActual('gop', ym); if (g == null) return null
-        return g - (actualMap[k(ym, '賃借料_旅館_')] ?? 0)
-      }
-      case 'operating_income': {
-        const e = getActual('ebitda', ym); if (e == null) return null
-        return e - (actualMap[k(ym, '減価償却費')] ?? 0)
-      }
-      default: return actualMap[k(ym, code)] ?? null
-    }
-  }
-
-  // 着地（実績がある月は実績、無い月は予算）
-  const landingFor = (code: string, ym: string): number | null =>
-    actualMonths.has(ym) ? getActual(code, ym) : getBudget(code, ym)
-
-  const sumLanding = (code: string): number => months.reduce((s, m) => s + (landingFor(code, m) ?? 0), 0)
-  const sumBudgetYear = (code: string): number => months.reduce((s, m) => s + (getBudget(code, m) ?? 0), 0)
-
-  // 年度合計（着地）
-  const yearLanding = (code: string): number | null => {
-    if (BLANK_YEAR_CODES.has(code)) return null
-    if (RECOMPUTE_CODES.has(code)) {
-      const div = (a: number, b: number) => (b ? a / b : null)
-      if (code === '稼働率') return div(sumLanding('販売室数'), sumLanding('在庫数'))
-      if (code === '客単価') return div(sumLanding('sales_total'), sumLanding('宿泊客数'))
-      if (code === '室単価') return div(sumLanding('sales_total'), sumLanding('販売室数'))
-      if (code === '同伴係数') return div(sumLanding('宿泊客数'), sumLanding('販売室数'))
-    }
-    return sumLanding(code)
-  }
-  const yearBudget = (code: string): number | null => {
-    if (BLANK_YEAR_CODES.has(code) || RECOMPUTE_CODES.has(code)) return null
-    return sumBudgetYear(code)
-  }
-
-  const hasActual = actual.some((a) => a.fiscal_year === fy)
-
-  // 表示フォーマット
-  const fmtVal = (code: string, v: number | null): string => {
-    if (v == null) return '-'
-    if (PERCENT_CODES.has(code)) return pct(v)
-    if (code === '同伴係数') return v.toFixed(2)
-    return fmtNum(v)
-  }
-  const fmtDiff = (code: string, v: number | null): string => {
-    if (v == null) return '-'
-    const sign = v >= 0 ? '+' : ''
-    if (PERCENT_CODES.has(code)) return sign + (v * 100).toFixed(1) + 'pt'
-    if (code === '同伴係数') return sign + v.toFixed(2)
-    return sign + fmtNum(v)
-  }
 
   const toggle = (cat: string) => setCollapsed((p) => { const n = new Set(p); n.has(cat) ? n.delete(cat) : n.add(cat); return n })
   const isHidden = (it: { code: string; category: string | null }) =>
