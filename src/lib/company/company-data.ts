@@ -15,6 +15,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { fetchAll } from '@/lib/supabase/fetch-all'
+import { fmtNum, pct } from '@/lib/ui'
 import { makePlResolver, priorYM, type BudgetRow, type ActualRow } from '@/lib/pl-compute'
 import { classifyFacility, inScope, type FacilityClass, type StoreScope } from '@/lib/company/facility-class'
 
@@ -209,5 +210,76 @@ export function aggregateScope(ds: CompanyDataset, scope: StoreScope): ScopeAggr
     revenuePerHour: ratio(sumBy(rows, (m) => m.revenue), sumBy(rows, (m) => m.workHours)),
     satisfaction: weightedAvg(rows, (m) => m.satisfaction, (m) => m.satisfactionN),
     nps: weightedAvg(rows, (m) => m.nps, (m) => m.npsN),
+  }
+}
+
+/* ===== G4 ドリルダウン1段目: 数字の自動異常特定 ===== */
+// 施設のメトリクスを 予算/前年/全社平均 と照らし、悪化している指標を badness(0..1) 付きで抽出。
+// 灯(全社モード・G6)もこの結果を素材に語るため、company-data 側に純粋関数として置く。
+export interface Anomaly { label: string; detail: string; badness: number }
+
+export function detectAnomalies(m: FacilityMetrics, agg: ScopeAggregate, showYoY: boolean): Anomaly[] {
+  const out: Anomaly[] = []
+  const relMoney = (diff: number, base: number) => Math.min(1, Math.abs(diff) / Math.max(Math.abs(base), 1))
+  const yenM = (v: number) => `${v >= 0 ? '+' : '▲'}¥${Math.abs(v / 1e6).toFixed(1)}M`
+  const pushMoney = (name: string, t: Triple) => {
+    if (t.act != null && t.bud != null && t.act < t.bud)
+      out.push({ label: `${name}が予算未達`, detail: `予算差 ${yenM(t.act - t.bud)}（実績 ¥${(t.act / 1e6).toFixed(1)}M / 予算 ¥${(t.bud / 1e6).toFixed(1)}M）`, badness: relMoney(t.act - t.bud, t.bud) })
+    if (showYoY && t.act != null && t.prior != null && t.act < t.prior)
+      out.push({ label: `${name}が前年割れ`, detail: `前年差 ${yenM(t.act - t.prior)}`, badness: relMoney(t.act - t.prior, t.prior) })
+  }
+  pushMoney('営業利益', m.operatingIncome)
+  pushMoney('売上', m.sales)
+  pushMoney('GOP', m.gop)
+
+  const lr = ratio(m.labor.act, m.sales.act)
+  if (lr != null && agg.laborRatio != null && lr > agg.laborRatio)
+    out.push({ label: '人件費率が全社平均を超過', detail: `${pct(lr)}（全社平均 ${pct(agg.laborRatio)} / +${((lr - agg.laborRatio) * 100).toFixed(1)}pt）`, badness: Math.min(1, (lr - agg.laborRatio) / 0.15) })
+  const lrPrior = ratio(m.labor.prior, m.sales.prior)
+  if (showYoY && lr != null && lrPrior != null && lr > lrPrior)
+    out.push({ label: '人件費率が前年より悪化', detail: `前年 ${pct(lrPrior)} → ${pct(lr)}（+${((lr - lrPrior) * 100).toFixed(1)}pt）`, badness: Math.min(1, (lr - lrPrior) / 0.15) })
+
+  const prod = ratio(m.revenue, m.workHours)
+  if (prod != null && agg.revenuePerHour != null && prod < agg.revenuePerHour)
+    out.push({ label: '生産性が全社平均以下', detail: `¥${fmtNum(prod)}/h（全社平均 ¥${fmtNum(agg.revenuePerHour)}）`, badness: Math.min(1, (agg.revenuePerHour - prod) / Math.max(agg.revenuePerHour, 1)) })
+  if (m.satisfaction != null && agg.satisfaction != null && m.satisfaction < agg.satisfaction)
+    out.push({ label: '満足度が全社平均以下', detail: `${m.satisfaction.toFixed(2)}（全社平均 ${agg.satisfaction.toFixed(2)}）`, badness: Math.min(1, (agg.satisfaction - m.satisfaction) / Math.max(agg.satisfaction, 1)) })
+  if (m.nps != null && agg.nps != null && m.nps < agg.nps)
+    out.push({ label: 'NPSが全社平均以下', detail: `${m.nps.toFixed(1)}（全社平均 ${agg.nps.toFixed(1)}）`, badness: Math.min(1, Math.abs(agg.nps - m.nps) / 50) })
+
+  return out.sort((a, b) => b.badness - a.badness)
+}
+
+/* ===== G4 ドリルダウン2段目: 定性的背景 ===== */
+// 施設プロフィール(意図・方針・NG)＋取組履歴＋クチコミ改善トピックを紐づけ。数字(1段目)と編んで見せる。
+export interface FacilityQualitative {
+  managementPolicy: string | null   // 支配人の運営方針
+  ngItems: string | null            // 避けたいこと・NG
+  seasonalPolicy: string | null     // 季節ごとの取組方針
+  coreValue: string | null          // 中核価値
+  initiatives: { yearMonth: string; category: string | null; title: string; description: string | null; status: string | null }[]
+  topics: { label: string; negative: number }[]   // クチコミ改善トピック(ネガ言及の多い順)
+}
+
+export async function loadFacilityQualitative(sb: SupabaseClient, facility: string): Promise<FacilityQualitative> {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const [p, ini, tp] = await Promise.all([
+    sb.from('dim_facility_profile').select('management_policy, ng_items, seasonal_policy, core_value').eq('facility', facility).maybeSingle(),
+    sb.from('raw_facility_initiative').select('year_month, category, title, description, status').eq('facility', facility).order('year_month', { ascending: false }).limit(8),
+    sb.from('mart_improvement_topics').select('topic_label, negative_mentions, month').eq('facility', facility).order('month', { ascending: false }).limit(40),
+  ])
+  const prof = (p as any)?.data ?? {}
+  const topicMap = new Map<string, number>()
+  ;(((tp as any)?.data ?? []) as { topic_label: string; negative_mentions: number | null }[]).forEach((r) => {
+    if ((r.negative_mentions ?? 0) > 0) topicMap.set(r.topic_label, (topicMap.get(r.topic_label) ?? 0) + (r.negative_mentions ?? 0))
+  })
+  const topics = [...topicMap.entries()].map(([label, negative]) => ({ label, negative })).sort((a, b) => b.negative - a.negative).slice(0, 5)
+  return {
+    managementPolicy: prof.management_policy ?? null,
+    ngItems: prof.ng_items ?? null,
+    seasonalPolicy: prof.seasonal_policy ?? null,
+    coreValue: prof.core_value ?? null,
+    initiatives: (((ini as any)?.data ?? []) as FacilityQualitative['initiatives']),
+    topics,
   }
 }
