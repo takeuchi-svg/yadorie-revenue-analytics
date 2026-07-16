@@ -123,11 +123,6 @@ export default function BudgetDaily({ fy, fyList, onFy }: { fy: number | null; f
     setSaving(false)
   }
 
-  const monthTotal = (m: string) => {
-    let rooms = 0, rev = 0, inv = 0
-    for (const d of monthDates(m)) { const r = rows[d] ?? EMPTY; rooms += num(r.rooms_sold) ?? 0; rev += num(r.total_revenue) ?? 0; inv += num(r.inventory) ?? 0 }
-    return { rooms, rev, occ: inv ? rooms / inv : null }
-  }
   const yearTotal = useMemo(() => {
     let rooms = 0, rev = 0, inv = 0
     for (const d of allDates) { const r = rows[d] ?? EMPTY; rooms += num(r.rooms_sold) ?? 0; rev += num(r.total_revenue) ?? 0; inv += num(r.inventory) ?? 0 }
@@ -175,13 +170,11 @@ export default function BudgetDaily({ fy, fyList, onFy }: { fy: number | null; f
               </tr>
             </thead>
             <tbody>
-              {months.map((m) => {
-                const mt = monthTotal(m)
-                return (
+              {months.map((m) => (
                   <Fragment key={m}>
                     <tr id={`bm-${m}`}>
-                      <td colSpan={11} className="px-2 py-1.5 text-xs font-semibold" style={{ position: 'sticky', top: 30, zIndex: 16, background: 'var(--surface2)', borderTop: '2px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
-                        <span style={{ position: 'sticky', left: 8 }}>{m}　<span style={{ color: 'var(--text-dim)' }}>販売室数 {fmtNum(mt.rooms)} / 売上 {fmtNum(mt.rev)} / OCC {pct(mt.occ)}</span></span>
+                      <td colSpan={11} className="px-2 py-1 text-xs font-semibold" style={{ position: 'sticky', top: 30, zIndex: 16, background: 'var(--surface2)', borderTop: '2px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                        {m}
                       </td>
                     </tr>
                     {monthDates(m).map((d) => {
@@ -206,8 +199,7 @@ export default function BudgetDaily({ fy, fyList, onFy }: { fy: number | null; f
                       )
                     })}
                   </Fragment>
-                )
-              })}
+              ))}
             </tbody>
           </table>
         </div>
