@@ -23,7 +23,7 @@ const fyMonths = (fy: number): string[] => {
 }
 const k = (m: string, code: string) => `${m}|${code}`
 
-export default function BudgetPL({ fy, fyList, onFy }: { fy: number | null; fyList: number[]; onFy: (fy: number) => void }) {
+export default function BudgetPL({ fy, fyList, onFy, locked = false }: { fy: number | null; fyList: number[]; onFy: (fy: number) => void; locked?: boolean }) {
   const { current } = useFacility()
   const toast = useToast()
   const [items, setItems] = useState<Item[]>([])
@@ -119,7 +119,7 @@ export default function BudgetPL({ fy, fyList, onFy }: { fy: number | null; fyLi
         <select className="field px-3 py-1.5 text-sm" value={fy ?? ''} onChange={(e) => onFy(Number(e.target.value))}>
           {fyList.map((y) => <option key={y} value={y}>{y}年度</option>)}
         </select>
-        <button onClick={save} disabled={saving || !items.length} className="ml-auto px-4 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>{saving ? '保存中…' : '保存'}</button>
+        <button onClick={save} disabled={saving || !items.length || locked} className="ml-auto px-4 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>{saving ? '保存中…' : locked ? '🔒 ロック中' : '保存'}</button>
       </div>
       <p className="text-[11px] mb-2" style={{ color: 'var(--text-dim)' }}>
         売上高は日別予算の月次集計から自動で入ります（手入力しません）。原価・人件費・販管費などの費目を月ごとに入力してください。GOP・営業利益は自動計算。各セル下の小さい数字は前年予算です。項目の器は前年度の構成を使っています。
@@ -152,7 +152,7 @@ export default function BudgetPL({ fy, fyList, onFy }: { fy: number | null; fyLi
                           {computed ? (
                             <div className={`px-1 ${total ? 'font-semibold' : ''}`}>{v == null ? '—' : fmtNum(v)}</div>
                           ) : (
-                            <input className="field px-1.5 py-1 text-xs text-right w-full" style={{ minWidth: 76 }} value={amt[k(m, it.code)] ?? ''} onChange={(e) => setCell(m, it.code, e.target.value)} />
+                            <input className="field px-1.5 py-1 text-xs text-right w-full" readOnly={locked} style={{ minWidth: 76 }} value={amt[k(m, it.code)] ?? ''} onChange={(e) => setCell(m, it.code, e.target.value)} />
                           )}
                           <div className="text-[9px] leading-tight" style={{ color: 'var(--text-dim)' }}>{pv == null ? '' : `前 ${fmtNum(pv)}`}</div>
                         </td>

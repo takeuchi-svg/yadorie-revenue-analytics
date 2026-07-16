@@ -57,7 +57,7 @@ function derive(row: Row): Record<string, number | null> {
   }
 }
 
-export default function BudgetDaily({ fy, fyList, onFy }: { fy: number | null; fyList: number[]; onFy: (fy: number) => void }) {
+export default function BudgetDaily({ fy, fyList, onFy, locked = false }: { fy: number | null; fyList: number[]; onFy: (fy: number) => void; locked?: boolean }) {
   const { current, currentFacility } = useFacility()
   const toast = useToast()
   const [jump, setJump] = useState('')
@@ -153,8 +153,8 @@ export default function BudgetDaily({ fy, fyList, onFy }: { fy: number | null; f
         <select className="field px-3 py-1.5 text-sm" value={jump} onChange={(e) => goMonth(e.target.value)}>
           {months.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
-        <button onClick={copyPrevYear} className="text-xs px-3 py-1.5 rounded-md" style={{ background: 'var(--surface2)', color: 'var(--text)' }}>前年同月をコピー</button>
-        <button onClick={save} disabled={saving} className="ml-auto px-4 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>{saving ? '保存中…' : '年間を保存'}</button>
+        <button onClick={copyPrevYear} disabled={locked} className="text-xs px-3 py-1.5 rounded-md disabled:opacity-40" style={{ background: 'var(--surface2)', color: 'var(--text)' }}>前年同月をコピー</button>
+        <button onClick={save} disabled={saving || locked} className="ml-auto px-4 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>{saving ? '保存中…' : locked ? '🔒 ロック中' : '年間を保存'}</button>
       </div>
       <p className="text-[11px] mb-2" style={{ color: 'var(--text-dim)' }}>
         <span style={{ color: '#2563eb' }}>青</span>＝手入力（在庫数・販売室数・同伴係数・客単価）。他は自動計算。各セル下＝前予（前年予算）／前実（前年実績・販売室数と稼働率のみ）。売上合計＝販売室数×同伴係数×客単価（二食込み・付帯抜き）。備考に「休館」でグレー表示。年間 販売室数計 {fmtNum(yearTotal.rooms)} / 売上計 {fmtNum(yearTotal.rev)}。総客室数={totalRooms ?? '—'}。
@@ -192,7 +192,7 @@ export default function BudgetDaily({ fy, fyList, onFy }: { fy: number | null; f
                           return (
                             <td key={mt.key} className="px-1 py-1 text-right align-top" style={{ minWidth: 84 }}>
                               {mt.edit ? (
-                                <input className="field px-1 py-0.5 text-xs text-right w-full" style={{ ...editStyle, minWidth: 64 }} value={row[mt.edit]} onChange={(e) => setCell(d, mt.edit as keyof Row, e.target.value)} />
+                                <input className="field px-1 py-0.5 text-xs text-right w-full" readOnly={locked} style={{ ...editStyle, minWidth: 64 }} value={row[mt.edit]} onChange={(e) => setCell(d, mt.edit as keyof Row, e.target.value)} />
                               ) : (
                                 <div className="px-1">{fmtM(mt.kind, v[mt.key])}</div>
                               )}
@@ -202,7 +202,7 @@ export default function BudgetDaily({ fy, fyList, onFy }: { fy: number | null; f
                             </td>
                           )
                         })}
-                        <td className="px-1 py-1"><input className="field px-1.5 py-1 text-xs w-full" style={{ minWidth: 120 }} value={row.event_note} onChange={(e) => setCell(d, 'event_note', e.target.value)} placeholder="イベント・休館・素泊 等" /></td>
+                        <td className="px-1 py-1"><input className="field px-1.5 py-1 text-xs w-full" readOnly={locked} style={{ minWidth: 120 }} value={row.event_note} onChange={(e) => setCell(d, 'event_note', e.target.value)} placeholder="イベント・休館・素泊 等" /></td>
                       </tr>
                     )
                   })}
