@@ -13,8 +13,20 @@ const SERIES_COLORS = ['#c75b39', '#2e9e6b', '#d98a2b', '#378ADD', '#9168E0', '#
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 function MiniChart({ spec }: { spec: any }) {
-  const series: { key: string; label?: string }[] = spec.series || []
-  const data = spec.data || []
+  const series: { key: string; label?: string }[] = Array.isArray(spec?.series) ? spec.series : []
+  // 灯が dataに「¥13.6M」「1,360万円」「68.5%」等の整形済み文字列を入れることがあるため数値化する。
+  const toNum = (v: any): number | null => {
+    if (typeof v === 'number') return Number.isFinite(v) ? v : null
+    const n = Number(String(v ?? '').replace(/[^0-9.\-]/g, ''))
+    return Number.isFinite(n) && String(v ?? '').match(/[0-9]/) ? n : null
+  }
+  const data = (Array.isArray(spec?.data) ? spec.data : []).map((row: any) => {
+    const o: any = { ...row }
+    for (const s of series) o[s.key] = toNum(row?.[s.key])
+    return o
+  }).filter((o: any) => series.some((s) => o[s.key] != null))
+  // 描画できない指定（系列なし・数値データなし）は空箱を出さずに何も表示しない
+  if (!series.length || !data.length) return null
   const fmtY = (v: number) => (Math.abs(v) >= 1e6 ? `${Math.round(v / 1e5) / 10}M` : Math.abs(v) >= 1000 ? `${Math.round(v / 1000)}k` : `${v}`)
   return (
     <div className="my-2 rounded-md p-2" style={{ background: 'var(--surface2)' }}>

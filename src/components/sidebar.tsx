@@ -20,6 +20,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/', label: '概要' },
       { href: '/profile', label: '宿プロフィール' },
+      { href: '/meeting', label: '月次会議' },
     ],
   },
   {

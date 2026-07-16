@@ -341,7 +341,7 @@ export async function runCompanyInsight(month: string, material: string): Promis
 export async function runMeetingPack(facility: string, month: string, material: string): Promise<string> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
   const sb = makeSupabase()
-  const RUNTIME = `【この依頼の進め方】query_dataツールは使わず、ユーザーメッセージの【会議データ】のみを根拠にする（推測の数値は作らない）。金額は万円、率は%。月は'YYYY-MM'。`
+  const RUNTIME = `【この依頼の進め方】query_dataツールは使わず、ユーザーメッセージの【会議データ】のみを根拠にする（推測の数値は作らない）。金額は万円、率は%。月は'YYYY-MM'。\n\n${CHAT_CHART_SPEC}`
   const [system, promptTpl] = await Promise.all([
     buildSystemBlocks(sb, facility, { runtime: RUNTIME }),
     getPrompt(sb, 'meeting_pack'),
@@ -367,7 +367,7 @@ export async function runInsight(
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
   const sb = makeSupabase()
   // 層1(人格①)＋層2＋層3に、この依頼固有の注意（ツール不使用・実データのみ）を実行時情報として追加
-  const INSIGHT_RUNTIME = `【この依頼の進め方】query_dataツールは使わず、ユーザーメッセージの【実データ】のみを根拠に分析する（推測の数値は作らない）。月は'YYYY-MM'、fiscal_year'2025'=2025/4〜2026/3、occは0-1の稼働率。`
+  const INSIGHT_RUNTIME = `【この依頼の進め方】query_dataツールは使わず、ユーザーメッセージの【実データ】のみを根拠に分析する（推測の数値は作らない）。月は'YYYY-MM'、fiscal_year'2025'=2025/4〜2026/3、occは0-1の稼働率。\n\n${CHAT_CHART_SPEC}`
   const [system, promptTpl, dataBlock] = await Promise.all([
     buildSystemBlocks(sb, facility, { runtime: INSIGHT_RUNTIME }),
     getPrompt(sb, kind),
