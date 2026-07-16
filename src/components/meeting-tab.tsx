@@ -1,6 +1,6 @@
 'use client'
 
-// 月次会議タブ（プロフィール内）: ①会議パック(灯生成・手動+キャッシュ) ②会議記録(自由記述) ③構造化抽出(承認登録)
+// 月次会議タブ（プロフィール内）: ①会議パック(灯生成・手動+キャッシュ) ②会議記録(7カテゴリ×4軸グリッド) ③構造化抽出(承認登録)
 import { useCallback, useEffect, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
@@ -13,8 +13,25 @@ interface MeetingProposal {
   type: 'issue' | 'initiative' | 'policy'
   title?: string; description?: string; category?: string; field?: string; suggestion?: string
 }
-interface Rec { meeting_date: string; attendees: string; review_note: string; discussion_note: string; decision_note: string; task_note: string }
-const EMPTY_REC: Rec = { meeting_date: '', attendees: '', review_note: '', discussion_note: '', decision_note: '', task_note: '' }
+// 会議記録グリッド: 7カテゴリ × 4軸（スプレッドシート⑨施設会議と同構成）
+const CATEGORIES = [
+  { key: 'branding', label: 'ブランディング' },
+  { key: 'satisfaction', label: '顧客満足度' },
+  { key: 'hr_ops', label: '人材・オペレーション' },
+  { key: 'sales_promo', label: '売上・販促' },
+  { key: 'cost', label: '経費' },
+  { key: 'capex', label: '修繕・投資' },
+  { key: 'other', label: 'その他・長期課題' },
+] as const
+const AXES = [
+  { key: 'review', label: '振り返り' },
+  { key: 'forecast', label: '見込み' },
+  { key: 'agenda', label: '議題/提案' },
+  { key: 'memo', label: '議事メモ' },
+] as const
+type Grid = Record<string, Record<string, string>>
+const emptyGrid = (): Grid => Object.fromEntries(CATEGORIES.map((c) => [c.key, {}]))
+
 const FIELD_LABEL: Record<string, string> = {
   management_policy: '支配人の運営方針', core_value: '中核価値', ng_items: '避けたいこと・NG', seasonal_policy: '季節ごとの方針',
 }
@@ -39,7 +56,9 @@ export default function MeetingTab() {
   const [packBusy, setPackBusy] = useState(false)
   const [packErr, setPackErr] = useState('')
   // 会議記録
-  const [rec, setRec] = useState<Rec>(EMPTY_REC)
+  const [meetingDate, setMeetingDate] = useState('')
+  const [attendees, setAttendees] = useState('')
+  const [grid, setGrid] = useState<Grid>(emptyGrid())
   const [saving, setSaving] = useState(false)
   // 構造化抽出
   const [proposals, setProposals] = useState<MeetingProposal[] | null>(null)
@@ -63,12 +82,14 @@ export default function MeetingTab() {
     setProposals(null); setDoneIdx(new Set()); setPackErr('')
     ;(async () => {
       const { data } = await supabase.from('raw_meeting_record')
-        .select('meeting_date, attendees, review_note, discussion_note, decision_note, task_note')
+        .select('meeting_date, attendees, grid')
         .eq('facility', current).eq('year_month', month).maybeSingle()
-      setRec(data ? {
-        meeting_date: data.meeting_date ?? '', attendees: data.attendees ?? '', review_note: data.review_note ?? '',
-        discussion_note: data.discussion_note ?? '', decision_note: data.decision_note ?? '', task_note: data.task_note ?? '',
-      } : EMPTY_REC)
+      setMeetingDate(data?.meeting_date ?? '')
+      setAttendees(data?.attendees ?? '')
+      const g = emptyGrid()
+      const src = (data?.grid ?? {}) as Grid
+      for (const c of CATEGORIES) g[c.key] = { ...(src[c.key] ?? {}) }
+      setGrid(g)
       const r = await authedPost('/api/meeting-pack', { facility: current, month })  // material無し=キャッシュ読込のみ
       setPack(r?.content ?? '')
     })()
@@ -86,7 +107,8 @@ export default function MeetingTab() {
     finally { setPackBusy(false) }
   }, [current, month])
 
-  const set = (k: keyof Rec, v: string) => setRec((p) => ({ ...p, [k]: v }))
+  const setCell = (cat: string, axis: string, v: string) =>
+    setGrid((p) => ({ ...p, [cat]: { ...(p[cat] ?? {}), [axis]: v } }))
 
   const saveRecord = async () => {
     if (!current || !month) return
@@ -94,18 +116,24 @@ export default function MeetingTab() {
     const { data: { user } } = await supabase.auth.getUser()
     const { error } = await supabase.from('raw_meeting_record').upsert({
       facility: current, year_month: month,
-      meeting_date: rec.meeting_date || null, attendees: rec.attendees || null,
-      review_note: rec.review_note || null, discussion_note: rec.discussion_note || null,
-      decision_note: rec.decision_note || null, task_note: rec.task_note || null,
+      meeting_date: meetingDate || null, attendees: attendees || null, grid,
       updated_at: new Date().toISOString(), created_by: user?.email ?? null,
     }, { onConflict: 'facility,year_month' })
     toast(error ? `エラー: ${error.message}` : '会議記録を保存しました', error ? 'error' : 'success')
     setSaving(false)
   }
 
+  // グリッド全文を「カテゴリ/軸」ラベル付きテキスト化（抽出の入力）
+  const gridToText = (): string =>
+    CATEGORIES.map((c) => {
+      const cell = grid[c.key] ?? {}
+      const parts = AXES.map((a) => (cell[a.key] ?? '').trim() ? `[${a.label}] ${cell[a.key].trim()}` : '').filter(Boolean)
+      return parts.length ? `■ ${c.label}\n${parts.join('\n')}` : ''
+    }).filter(Boolean).join('\n\n')
+
   const extract = async () => {
     if (!current || !month) return
-    const text = [rec.review_note, rec.discussion_note, rec.decision_note, rec.task_note].filter(Boolean).join('\n\n')
+    const text = gridToText()
     if (!text.trim()) { toast('会議記録が空です。先に記録を書いてください。', 'error'); return }
     setExtracting(true); setProposals(null); setDoneIdx(new Set())
     const r = await authedPost('/api/meeting-extract', { facility: current, month, text })
@@ -140,7 +168,6 @@ export default function MeetingTab() {
 
   if (!current) return <div className="card p-6 mt-4 text-sm" style={{ color: 'var(--text-dim)' }}>宿を選択してください。</div>
 
-  const ta = 'field w-full text-sm px-3 py-2'
   return (
     <div className="mt-4 space-y-4">
       {/* 月セレクタ */}
@@ -172,29 +199,49 @@ export default function MeetingTab() {
         )}
       </section>
 
-      {/* ② 会議記録（自由記述） */}
+      {/* ② 会議記録（7カテゴリ × 4軸グリッド） */}
       <section className="card p-5">
         <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-          <h3 className="text-sm font-semibold">会議記録（自由記述）</h3>
+          <h3 className="text-sm font-semibold">会議記録</h3>
           <button onClick={saveRecord} disabled={saving || !month}
             className="px-3 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>保存</button>
         </div>
-        <div className="grid grid-cols-2 gap-2 mb-2">
+        <div className="grid grid-cols-2 gap-2 mb-3 max-w-md">
           <div>
             <label className="block text-[10px] mb-0.5" style={{ color: 'var(--text-dim)' }}>開催日</label>
-            <input type="date" className="field px-3 py-1.5 text-sm w-full" value={rec.meeting_date} onChange={(e) => set('meeting_date', e.target.value)} />
+            <input type="date" className="field px-3 py-1.5 text-sm w-full" value={meetingDate} onChange={(e) => setMeetingDate(e.target.value)} />
           </div>
           <div>
             <label className="block text-[10px] mb-0.5" style={{ color: 'var(--text-dim)' }}>参加者</label>
-            <input type="text" className="field px-3 py-1.5 text-sm w-full" value={rec.attendees} onChange={(e) => set('attendees', e.target.value)} placeholder="支配人・総支配人・本社マーケ…" />
+            <input type="text" className="field px-3 py-1.5 text-sm w-full" value={attendees} onChange={(e) => setAttendees(e.target.value)} placeholder="支配人・総支配人・本社…" />
           </div>
         </div>
-        {([['review_note', '実績の振り返り'], ['discussion_note', '議論したいこと・議論内容'], ['decision_note', '決定事項'], ['task_note', 'タスク（記録のみ）']] as [keyof Rec, string][]).map(([k, label]) => (
-          <div key={k} className="mb-2">
-            <label className="block text-[10px] mb-0.5" style={{ color: 'var(--text-dim)' }}>{label}</label>
-            <textarea className={ta} rows={k === 'review_note' || k === 'discussion_note' ? 3 : 2} value={rec[k]} onChange={(e) => set(k, e.target.value)} />
-          </div>
-        ))}
+        <div className="overflow-x-auto">
+          <table className="border-separate" style={{ borderSpacing: 0, minWidth: 860 }}>
+            <thead>
+              <tr>
+                <th className="sticky left-0 z-10 px-2 py-1.5 text-left text-[11px] font-medium" style={{ background: 'var(--surface2)', color: 'var(--text-dim)', minWidth: 120, borderBottom: '1px solid var(--border)' }}>カテゴリ</th>
+                {AXES.map((a) => (
+                  <th key={a.key} className="px-2 py-1.5 text-left text-[11px] font-medium" style={{ background: 'var(--surface2)', color: 'var(--text-dim)', minWidth: 180, borderBottom: '1px solid var(--border)' }}>{a.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {CATEGORIES.map((c) => (
+                <tr key={c.key}>
+                  <td className="sticky left-0 z-10 px-2 py-1.5 text-xs font-medium align-top" style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)', borderRight: '1px solid var(--border)' }}>{c.label}</td>
+                  {AXES.map((a) => (
+                    <td key={a.key} className="px-1 py-1 align-top" style={{ borderBottom: '1px solid var(--border)' }}>
+                      <textarea className="field w-full text-xs px-2 py-1.5" rows={3} style={{ minWidth: 176 }}
+                        value={grid[c.key]?.[a.key] ?? ''} onChange={(e) => setCell(c.key, a.key, e.target.value)} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="text-[10px] mt-1.5" style={{ color: 'var(--text-dim)' }}>自由記述で構いません。構造化は下の「記録から抽出」で灯が行います。</p>
       </section>
 
       {/* ③ 構造化抽出（承認登録） */}
