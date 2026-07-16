@@ -7,7 +7,7 @@ import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import { useToast } from '@/components/toast'
 import { AssistantContent } from '@/components/ai-drawer'
-import { buildMeetingMaterial } from '@/lib/meeting-data'
+import { loadMeetingReport, generateMeetingReport } from '@/lib/meeting-report'
 
 interface MeetingProposal {
   type: 'issue' | 'initiative' | 'policy'
@@ -90,8 +90,7 @@ export default function MeetingTab() {
       const src = (data?.grid ?? {}) as Grid
       for (const c of CATEGORIES) g[c.key] = { ...(src[c.key] ?? {}) }
       setGrid(g)
-      const r = await authedPost('/api/meeting-pack', { facility: current, month })  // material無し=キャッシュ読込のみ
-      setPack(r?.content ?? '')
+      setPack(await loadMeetingReport(current, month))
     })()
   }, [current, month])
 
@@ -99,10 +98,9 @@ export default function MeetingTab() {
     if (!current || !month) return
     setPackBusy(true); setPackErr('')
     try {
-      const material = await buildMeetingMaterial(supabase, current, month)
-      const r = await authedPost('/api/meeting-pack', { facility: current, month, material, force: true })
-      if (r?.error) setPackErr(r.error)
-      setPack(r?.content ?? '')
+      const { content, error } = await generateMeetingReport(current, month)
+      if (error) setPackErr(error)
+      setPack(content)
     } catch (e) { setPackErr(e instanceof Error ? e.message : String(e)) }
     finally { setPackBusy(false) }
   }, [current, month])
@@ -183,7 +181,7 @@ export default function MeetingTab() {
       {/* ① 会議パック */}
       <section className="card p-5">
         <div className="flex items-center justify-between mb-2">
-          <h3 className="text-sm font-semibold">会議パック（灯が編む会議資料）</h3>
+          <h3 className="text-sm font-semibold">月次レポート（灯が編む・概要と同一）</h3>
           <button onClick={generatePack} disabled={packBusy || !month}
             className="px-3 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>
             {packBusy ? '生成中…' : pack ? '再生成' : '生成'}
@@ -195,7 +193,7 @@ export default function MeetingTab() {
         ) : pack ? (
           <div className="text-sm"><AssistantContent content={pack} /></div>
         ) : (
-          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>「生成」で、灯が当月の実績・クチコミ・生産性・先月の取組の効果検証・今月の論点をまとめます。</p>
+          <p className="text-sm" style={{ color: 'var(--text-dim)' }}>「生成」で、灯が当月の実績・クチコミ・生産性・先月の取組の効果・課題と次の一手を一枚にまとめます（概要と同じ内容）。</p>
         )}
       </section>
 

@@ -42,7 +42,7 @@ const PROMPT_LABEL: Record<string, string> = {
   review_insight: 'クチコミ 改善レポート',
   profile_context_template: '宿プロフィール 前文',
   company_insight: '全社モード 所見',
-  meeting_pack: '月次会議 会議パック',
+  meeting_pack: '月次レポート（概要・月次会議で共通）',
   meeting_extract: '月次会議 構造化抽出',
 }
 const KNOW_LABEL: Record<string, string> = {

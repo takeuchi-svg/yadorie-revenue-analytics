@@ -10,11 +10,11 @@ import {
 import { fmtYen, pct, fmtNum, channelColor, CHART_AXIS, chartTooltip } from '@/lib/ui'
 import { AssistantContent, SparkleIcon } from '@/components/ai-drawer'
 import FeedbackButton from '@/components/feedback-button'
+import { loadMeetingReport, generateMeetingReport } from '@/lib/meeting-report'
 import type { MonthlyKpiRow as MonthlyKpi, OccupancyMonthlyRow as OccRow, ChannelRow } from '@/lib/db-types'
 
-// AIサマリ/課題のセッション内キャッシュ（facility|month → 本文）。本体の共有キャッシュはDB(ai_summary/ai_issue)
-const summaryCache = new Map<string, string>()
-const issueCache = new Map<string, string>()
+// 統合月次レポートのセッション内キャッシュ（facility|month → 本文）。共有キャッシュはDB(ai_meeting_pack)
+const reportCache = new Map<string, string>()
 
 // 灯からの季節の一言（YADORIE Core §6。静的・月替わり）
 const SEASONAL_WORDS: Record<number, string> = {
@@ -33,17 +33,14 @@ const SEASONAL_WORDS: Record<number, string> = {
 }
 
 export default function OverviewPage() {
-  const { current, currentFacility } = useFacility()
+  const { current } = useFacility()
   const [kpi, setKpi] = useState<MonthlyKpi[]>([])
   const [occByMonth, setOccByMonth] = useState<Record<string, number | null>>({})
   const [capByMonth, setCapByMonth] = useState<Record<string, number | null>>({})
   const [budgetByMonth, setBudgetByMonth] = useState<Record<string, number | null>>({})
-  const [aiSummary, setAiSummary] = useState('')
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiErr, setAiErr] = useState('')
-  const [aiIssue, setAiIssue] = useState('')
-  const [aiIssueLoading, setAiIssueLoading] = useState(false)
-  const [aiIssueErr, setAiIssueErr] = useState('')
+  const [report, setReport] = useState('')
+  const [reportBusy, setReportBusy] = useState(false)
+  const [reportErr, setReportErr] = useState('')
   const [channels, setChannels] = useState<ChannelRow[]>([])
   const [loading, setLoading] = useState(true)
   const [initiativeMissing, setInitiativeMissing] = useState(false)
@@ -97,49 +94,28 @@ export default function OverviewPage() {
     })
   }, [current])
 
-  // 概要のAIサマリ。生成・保存はサーバー(/api/insight)が担い、DB(ai_summary)に1つだけ保存して全員で共有。
-  // 開いてもキャッシュがあれば再生成しない。再生成ボタン(force)を押した時だけ作り直す。
-  const genSummary = useCallback(async (facility: string, month: string, force = false) => {
+  // 統合月次レポート（実績サマリ＋課題と対策＋会議パックを1本化）。月次会議タブと同一キャッシュ(ai_meeting_pack)を共有。
+  // 開いたらキャッシュを読み、「生成/再生成」ボタンで作り直す。
+  const loadReport = useCallback(async (facility: string, month: string) => {
     const key = `${facility}|${month}`
-    if (!force && summaryCache.has(key)) { setAiSummary(summaryCache.get(key)!); return }
-    setAiLoading(true); setAiSummary(''); setAiErr('')
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const res = await fetch('/api/insight', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
-        body: JSON.stringify({ facility, month, kind: 'summary', force }),
-      })
-      const d = await res.json()
-      const text = d.content || ''
-      setAiSummary(text); if (text) summaryCache.set(key, text)
-      if (!text && d.error) setAiErr(String(d.error))
-    } catch (e) { setAiSummary(''); setAiErr(e instanceof Error ? e.message : String(e)) } finally { setAiLoading(false) }
+    if (reportCache.has(key)) { setReport(reportCache.get(key)!); return }
+    setReport(''); setReportErr('')
+    const text = await loadMeetingReport(facility, month)
+    setReport(text); if (text) reportCache.set(key, text)
   }, [])
-
-  // 概要のAI課題と対策（参考）。サマリと同じく1つだけ保存して全員で共有。
-  const genIssue = useCallback(async (facility: string, month: string, force = false) => {
-    const key = `${facility}|${month}`
-    if (!force && issueCache.has(key)) { setAiIssue(issueCache.get(key)!); return }
-    setAiIssueLoading(true); setAiIssue(''); setAiIssueErr('')
+  const genReport = useCallback(async (facility: string, month: string) => {
+    setReportBusy(true); setReportErr('')
     try {
-      const { data: { session } } = await supabase.auth.getSession()
-      const res = await fetch('/api/insight', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
-        body: JSON.stringify({ facility, month, kind: 'issue', force }),
-      })
-      const d = await res.json()
-      const text = d.content || ''
-      setAiIssue(text); if (text) issueCache.set(key, text)
-      if (!text && d.error) setAiIssueErr(String(d.error))
-    } catch (e) { setAiIssue(''); setAiIssueErr(e instanceof Error ? e.message : String(e)) } finally { setAiIssueLoading(false) }
+      const { content, error } = await generateMeetingReport(facility, month)
+      if (error) setReportErr(String(error))
+      setReport(content); if (content) reportCache.set(`${facility}|${month}`, content)
+    } catch (e) { setReportErr(e instanceof Error ? e.message : String(e)) } finally { setReportBusy(false) }
   }, [])
 
   useEffect(() => {
     const lm = kpi[0]?.month
-    if (current && lm) { genSummary(current, lm); genIssue(current, lm) }
-  }, [current, kpi, genSummary, genIssue])
+    if (current && lm) loadReport(current, lm)
+  }, [current, kpi, loadReport])
 
   const latest = kpi[0]
   const latestOcc = latest ? occByMonth[latest.month] ?? null : null
@@ -218,62 +194,32 @@ export default function OverviewPage() {
             </div>
           )}
 
-          {/* AI実績サマリ */}
+          {/* 灯の月次レポート（実績サマリ・クチコミ・生産性・先月の取組の効果・課題と次の一手を1本化。月次会議と同一・共有キャッシュ） */}
           <div className="card p-4 mb-6" style={{ background: 'linear-gradient(135deg, var(--surface), var(--surface2))', borderColor: 'var(--accent)' }}>
             <div className="flex items-center gap-2 mb-2">
               <SparkleIcon size={16} />
-              <h2 className="text-sm font-semibold">灯からの実績サマリ（{latest?.month}）</h2>
+              <h2 className="text-sm font-semibold">灯の月次レポート（{latest?.month}）</h2>
               <button
-                onClick={() => latest && genSummary(current, latest.month, true)}
-                disabled={aiLoading || !latest}
+                onClick={() => latest && genReport(current, latest.month)}
+                disabled={reportBusy || !latest}
                 className="ml-auto text-xs px-2 py-0.5 rounded-md hover:opacity-80 disabled:opacity-40"
                 style={{ color: 'var(--text-dim)', border: '1px solid var(--border)' }}
-                title="最新データで再生成"
+                title="最新データで生成"
               >
-                ↻ 再生成
+                {reportBusy ? '生成中…' : report ? '↻ 再生成' : '生成'}
               </button>
             </div>
-            {aiLoading ? (
-              <p className="text-sm" style={{ color: 'var(--text-dim)' }}>生成中...</p>
-            ) : aiSummary ? (
+            {reportBusy ? (
+              <p className="text-sm" style={{ color: 'var(--text-dim)' }}>灯が{latest?.month}の実績・クチコミ・生産性・先月の取組を読んでレポートを編んでいます…</p>
+            ) : report ? (
               <>
-                <AssistantContent content={aiSummary} />
-                <div className="mt-2"><FeedbackButton source="summary" question={`${latest?.month ?? ''} 実績サマリ`} answer={aiSummary} facility={current} /></div>
+                <AssistantContent content={report} />
+                <div className="mt-2"><FeedbackButton source="summary" question={`${latest?.month ?? ''} 月次レポート`} answer={report} facility={current} /></div>
               </>
-            ) : aiErr ? (
-              <p className="text-sm" style={{ color: 'var(--red)' }}>生成エラー: {aiErr}</p>
+            ) : reportErr ? (
+              <p className="text-sm" style={{ color: 'var(--red)' }}>生成エラー: {reportErr}</p>
             ) : (
-              <p className="text-sm" style={{ color: 'var(--text-dim)' }}>AIサマリは未生成です（APIキー設定後に表示されます）。</p>
-            )}
-          </div>
-
-          {/* AI分析の課題と対策（参考） */}
-          <div className="card p-4 mb-6" style={{ borderColor: 'var(--border)' }}>
-            <div className="flex items-center gap-2 mb-2">
-              <SparkleIcon size={16} />
-              <h2 className="text-sm font-semibold">灯からの課題と対策（参考）</h2>
-              <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>仮説・参考</span>
-              <button
-                onClick={() => latest && genIssue(current, latest.month, true)}
-                disabled={aiIssueLoading || !latest}
-                className="ml-auto text-xs px-2 py-0.5 rounded-md hover:opacity-80 disabled:opacity-40"
-                style={{ color: 'var(--text-dim)', border: '1px solid var(--border)' }}
-                title="最新データで再生成"
-              >
-                ↻ 再生成
-              </button>
-            </div>
-            {aiIssueLoading ? (
-              <p className="text-sm" style={{ color: 'var(--text-dim)' }}>生成中...</p>
-            ) : aiIssue ? (
-              <>
-                <AssistantContent content={aiIssue} />
-                <div className="mt-2"><FeedbackButton source="issue" question={`${latest?.month ?? ''} 課題と対策`} answer={aiIssue} facility={current} /></div>
-              </>
-            ) : aiIssueErr ? (
-              <p className="text-sm" style={{ color: 'var(--red)' }}>生成エラー: {aiIssueErr}</p>
-            ) : (
-              <p className="text-sm" style={{ color: 'var(--text-dim)' }}>課題と対策は未生成です（APIキー設定後に表示されます）。</p>
+              <p className="text-sm" style={{ color: 'var(--text-dim)' }}>「生成」で、灯が今月の実績・クチコミ・生産性・先月の取組の効果・課題と次の一手を一枚にまとめます（月次会議と同じ内容）。</p>
             )}
           </div>
 
