@@ -10,9 +10,13 @@ import BudgetPL from '@/components/budget-pl'
 import BudgetReviewCard from '@/components/budget-review-card'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+function ComingSoon({ label }: { label: string }) {
+  return <div className="card p-8 mt-4 text-center text-sm" style={{ color: 'var(--text-dim)' }}>「{label}」は準備中です。</div>
+}
+
 export default function BudgetPage() {
   const { current } = useFacility()
-  const [tab, setTab] = useState<'daily' | 'pl'>('daily')
+  const [tab, setTab] = useState<'daily' | 'pl' | 'capex' | 'staffing'>('daily')
   const [fyList, setFyList] = useState<number[]>([])
   const [fy, setFy] = useState<number | null>(null)
 
@@ -34,16 +38,19 @@ export default function BudgetPage() {
 
   return (
     <div className="p-6">
-      <div className="flex gap-1 mb-1">
-        {([['daily', '日別売上予算'], ['pl', '月次PL予算']] as const).map(([t, label]) => (
+      <div className="flex gap-1 mb-1 flex-wrap">
+        {([['daily', '日別売上予算'], ['pl', '月次PL予算'], ['capex', '修繕投資計画'], ['staffing', '人員計画']] as const).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)} className="px-4 py-1.5 rounded-md text-sm"
             style={{ background: tab === t ? 'var(--accent)' : 'var(--surface2)', color: tab === t ? '#fff' : 'var(--text-dim)' }}>
-            {label}
+            {label}{(t === 'capex' || t === 'staffing') && <span className="ml-1 text-[9px]">準備中</span>}
           </button>
         ))}
       </div>
-      {tab === 'daily' ? <BudgetDaily fy={fy} fyList={fyList} onFy={setFy} /> : <BudgetPL fy={fy} fyList={fyList} onFy={setFy} />}
-      <BudgetReviewCard fy={fy} />
+      {tab === 'daily' && <BudgetDaily fy={fy} fyList={fyList} onFy={setFy} />}
+      {tab === 'pl' && <BudgetPL fy={fy} fyList={fyList} onFy={setFy} />}
+      {tab === 'capex' && <ComingSoon label="修繕投資計画" />}
+      {tab === 'staffing' && <ComingSoon label="人員計画" />}
+      {(tab === 'daily' || tab === 'pl') && <BudgetReviewCard fy={fy} />}
     </div>
   )
 }
