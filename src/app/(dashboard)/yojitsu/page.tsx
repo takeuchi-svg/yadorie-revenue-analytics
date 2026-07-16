@@ -42,7 +42,7 @@ export default function YojitsuPage() {
     if (!current) return
     setLoading(true)
     Promise.all([
-      fetchAll(() => supabase.from('budget_monthly').select('fiscal_year, month, category, item_code, item_name, amount, sort_order').eq('facility', current).order('id')),
+      fetchAll(() => supabase.from('budget_monthly').select('fiscal_year, month, category, item_code, item_name, amount, sort_order').eq('facility', current).eq('version', '当初').order('id')),
       fetchAll(() => supabase.from('actual_monthly').select('fiscal_year, month, item_code, actual').eq('facility', current).order('id')),
       fetchAll(() => supabase.from('mart_monthly_kpi').select('month, guests, adr, guest_unit, companion').eq('facility', current)),
       fetchAll(() => supabase.from('mart_occupancy_monthly').select('month, rooms_sold, occ, occ_calendar_days, operating_days').eq('facility', current)),

@@ -23,7 +23,7 @@ export async function buildMeetingMaterial(sb: SupabaseClient, facility: string,
   const monthList = [month, prior]
 
   const [budget, actual, kpiTrend, occRows, laborRows, fb, nps, qual] = await Promise.all([
-    fetchAll(() => sb.from('budget_monthly').select('facility, fiscal_year, month, category, item_code, item_name, amount, sort_order').eq('facility', facility).in('fiscal_year', fyList).order('id')),
+    fetchAll(() => sb.from('budget_monthly').select('facility, fiscal_year, month, category, item_code, item_name, amount, sort_order').eq('facility', facility).in('fiscal_year', fyList).eq('version', '当初').order('id')),
     fetchAll(() => sb.from('actual_monthly').select('facility, fiscal_year, month, item_code, actual').eq('facility', facility).in('fiscal_year', fyList).order('id')),
     fetchAll(() => sb.from('mart_monthly_kpi').select('month, revenue, guest_unit, guests, rooms_sold').eq('facility', facility).order('month', { ascending: false })),
     fetchAll(() => sb.from('mart_occupancy_monthly').select('month, occ, occ_calendar_days').eq('facility', facility)),

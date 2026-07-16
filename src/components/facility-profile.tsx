@@ -85,7 +85,7 @@ export default function FacilityProfile() {
   // 月別客室数: 年度候補と選択年度の値を読み込み
   useEffect(() => {
     if (!current) return
-    supabase.from('budget_monthly').select('fiscal_year').eq('facility', current).then(({ data }) => {
+    supabase.from('budget_monthly').select('fiscal_year').eq('facility', current).eq('version', '当初').then(({ data }) => {
       const fys = [...new Set(((data as { fiscal_year: string }[]) ?? []).map((r) => r.fiscal_year))].sort().reverse()
       setOpFys(fys)
       setOpFy((prev) => (fys.includes(prev) ? prev : fys[0] ?? ''))

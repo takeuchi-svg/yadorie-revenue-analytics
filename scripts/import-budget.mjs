@@ -156,8 +156,9 @@ async function main() {
   const wb = XLSX.read(Buffer.from(j.content, 'base64'), { type: 'buffer' })
   const daily = parseDaily(wb), monthly = parseMonthly(wb), yojitsu = parseYojitsu(wb)
   console.log(`FY=${FY} parsed daily:${daily.length} monthly:${monthly.length} yojitsu:${yojitsu.length}`)
-  await upsert('budget_daily', daily, 'facility,date')
-  await upsert('budget_monthly', monthly, 'facility,fiscal_year,month,item_code')
+  // 予算はスプレッドシート由来＝当初予算(version='当初')。UNIQUEが版込みのため onConflict も版を含める。
+  await upsert('budget_daily', daily.map((r) => ({ ...r, version: '当初' })), 'facility,date,version')
+  await upsert('budget_monthly', monthly.map((r) => ({ ...r, version: '当初' })), 'facility,fiscal_year,month,item_code,version')
   if (yojitsu.length) {
     try { await upsert('actual_monthly', yojitsu, 'facility,fiscal_year,month,item_code'); console.log('actual_monthly: ' + yojitsu.length) }
     catch (e) { console.log('actual_monthly skip (' + e.message.slice(0, 60) + ')') }

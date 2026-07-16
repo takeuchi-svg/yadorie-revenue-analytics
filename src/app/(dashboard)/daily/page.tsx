@@ -87,7 +87,7 @@ export default function DailyPage() {
     Promise.all([
       fetchAll(() => supabase.from('mart_occupancy_daily').select('date, rooms_sold').eq('facility', current).order('date')),
       fetchAll(() => supabase.from('raw_reservation').select('checkin, nights, revenue_settled, guests_total').eq('facility', current).eq('status', 'C/O').order('id')),
-      fetchAll(() => supabase.from('budget_daily').select('date, rooms_sold, occ, companion, guests, guest_unit, room_unit, total_revenue').eq('facility', current).order('date')),
+      fetchAll(() => supabase.from('budget_daily').select('date, rooms_sold, occ, companion, guests, guest_unit, room_unit, total_revenue').eq('facility', current).eq('version', '当初').order('date')),
       supabase.from('dim_operating_days').select('month, rooms').eq('facility', current).then((r) => r),
     ]).then(([sales, res, bud, od]) => {
       const rbm: Record<string, number> = {}

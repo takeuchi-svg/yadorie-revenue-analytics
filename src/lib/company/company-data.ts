@@ -73,7 +73,7 @@ export async function loadCompanyData(sb: SupabaseClient, targetMonth: string): 
   const [dimFac, dimProf, budget, actual, occ, kpi, labor, feedback, nps] = await Promise.all([
     fetchAll(() => sb.from('dim_facility').select('facility, name, total_rooms, opening_date')),
     fetchAll(() => sb.from('dim_facility_profile').select('facility, facility_type')),
-    fetchAll(() => sb.from('budget_monthly').select('facility, fiscal_year, month, category, item_code, item_name, amount, sort_order').in('fiscal_year', fyList).order('id')),
+    fetchAll(() => sb.from('budget_monthly').select('facility, fiscal_year, month, category, item_code, item_name, amount, sort_order').in('fiscal_year', fyList).eq('version', '当初').order('id')),
     fetchAll(() => sb.from('actual_monthly').select('facility, fiscal_year, month, item_code, actual').in('fiscal_year', fyList).order('id')),
     fetchAll(() => sb.from('mart_occupancy_monthly').select('facility, month, rooms_sold, total_rooms, occ, occ_calendar_days').in('month', monthList)),
     fetchAll(() => sb.from('mart_monthly_kpi').select('facility, month, revenue, guests, guest_unit').in('month', monthList)),
