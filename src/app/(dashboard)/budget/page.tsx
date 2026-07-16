@@ -18,6 +18,7 @@ interface PrevRef { budRooms: number | null; budRev: number | null; actOcc: numb
 const WD = ['日', '月', '火', '水', '木', '金', '土']
 const num = (s: string): number | null => (s.trim() === '' ? null : (Number.isFinite(Number(s)) ? Number(s) : null))
 const daysInMonth = (ym: string) => new Date(+ym.slice(0, 4), +ym.slice(5, 7), 0).getDate()
+const mEnd = (ym: string) => `${ym}-${String(daysInMonth(ym)).padStart(2, '0')}`  // 月末日（4月なら-30。-31は無効日付でDBエラーになる）
 const shiftYear = (dateStr: string, delta: number) => `${+dateStr.slice(0, 4) + delta}${dateStr.slice(4)}`
 // FY文字列(例'2027') → その年度の月配列 2027-04..2028-03
 const fyMonths = (fy: number): string[] => {
@@ -66,24 +67,26 @@ export default function BudgetPage() {
     if (!current || !month || fy == null) return
     setLoading(true)
     const prevMonth = shiftYear(`${month}-01`, -1).slice(0, 7)
-    const [cur, prevBud, prevOcc] = await Promise.all([
-      fetchAll(() => supabase.from('budget_daily').select('date, inventory, rooms_sold, room_unit, guests, guest_unit, total_revenue, event_note').eq('facility', current).eq('version', '当初').eq('fiscal_year', String(fy)).gte('date', `${month}-01`).lte('date', `${month}-31`)),
-      fetchAll(() => supabase.from('budget_daily').select('date, rooms_sold, total_revenue').eq('facility', current).eq('version', '当初').gte('date', `${prevMonth}-01`).lte('date', `${prevMonth}-31`)),
-      fetchAll(() => supabase.from('mart_occupancy_daily').select('date, occ, rooms_sold').eq('facility', current).gte('date', `${prevMonth}-01`).lte('date', `${prevMonth}-31`)),
-    ])
-    const r: Record<string, Row> = {}
-    for (const d of dates) r[d] = { ...EMPTY }
-    const s = (v: any) => (v == null ? '' : String(v))
-    ;((cur as any[]) ?? []).forEach((x) => {
-      r[String(x.date)] = {
-        inventory: s(x.inventory), rooms_sold: s(x.rooms_sold), room_unit: s(x.room_unit),
-        guests: s(x.guests), guest_unit: s(x.guest_unit), total_revenue: s(x.total_revenue), event_note: x.event_note ?? '',
-      }
-    })
-    const p: Record<string, PrevRef> = {}
-    ;((prevBud as any[]) ?? []).forEach((x) => { const d = shiftYear(String(x.date), 1); (p[d] ??= { budRooms: null, budRev: null, actOcc: null, actRooms: null }).budRooms = x.rooms_sold; p[d].budRev = x.total_revenue })
-    ;((prevOcc as any[]) ?? []).forEach((x) => { const d = shiftYear(String(x.date), 1); (p[d] ??= { budRooms: null, budRev: null, actOcc: null, actRooms: null }).actOcc = x.occ; p[d].actRooms = x.rooms_sold })
-    setRows(r); setPrev(p); setLoading(false)
+    try {
+      const [cur, prevBud, prevOcc] = await Promise.all([
+        fetchAll(() => supabase.from('budget_daily').select('date, inventory, rooms_sold, room_unit, guests, guest_unit, total_revenue, event_note').eq('facility', current).eq('version', '当初').eq('fiscal_year', String(fy)).gte('date', `${month}-01`).lte('date', mEnd(month))).catch(() => []),
+        fetchAll(() => supabase.from('budget_daily').select('date, rooms_sold, total_revenue').eq('facility', current).eq('version', '当初').gte('date', `${prevMonth}-01`).lte('date', mEnd(prevMonth))).catch(() => []),
+        fetchAll(() => supabase.from('mart_occupancy_daily').select('date, occ, rooms_sold').eq('facility', current).gte('date', `${prevMonth}-01`).lte('date', mEnd(prevMonth))).catch(() => []),
+      ])
+      const r: Record<string, Row> = {}
+      for (const d of dates) r[d] = { ...EMPTY }
+      const s = (v: any) => (v == null ? '' : String(v))
+      ;((cur as any[]) ?? []).forEach((x) => {
+        r[String(x.date)] = {
+          inventory: s(x.inventory), rooms_sold: s(x.rooms_sold), room_unit: s(x.room_unit),
+          guests: s(x.guests), guest_unit: s(x.guest_unit), total_revenue: s(x.total_revenue), event_note: x.event_note ?? '',
+        }
+      })
+      const p: Record<string, PrevRef> = {}
+      ;((prevBud as any[]) ?? []).forEach((x) => { const d = shiftYear(String(x.date), 1); (p[d] ??= { budRooms: null, budRev: null, actOcc: null, actRooms: null }).budRooms = x.rooms_sold; p[d].budRev = x.total_revenue })
+      ;((prevOcc as any[]) ?? []).forEach((x) => { const d = shiftYear(String(x.date), 1); (p[d] ??= { budRooms: null, budRev: null, actOcc: null, actRooms: null }).actOcc = x.occ; p[d].actRooms = x.rooms_sold })
+      setRows(r); setPrev(p)
+    } finally { setLoading(false) }
   }, [current, month, fy, dates])
   useEffect(() => { load() }, [load])
 
@@ -94,7 +97,7 @@ export default function BudgetPage() {
   const copyPrevYear = async () => {
     if (!current || !month) return
     const prevMonth = shiftYear(`${month}-01`, -1).slice(0, 7)
-    const pb = await fetchAll(() => supabase.from('budget_daily').select('date, inventory, rooms_sold, room_unit, guests, guest_unit, total_revenue, event_note').eq('facility', current).eq('version', '当初').gte('date', `${prevMonth}-01`).lte('date', `${prevMonth}-31`))
+    const pb = await fetchAll(() => supabase.from('budget_daily').select('date, inventory, rooms_sold, room_unit, guests, guest_unit, total_revenue, event_note').eq('facility', current).eq('version', '当初').gte('date', `${prevMonth}-01`).lte('date', mEnd(prevMonth)))
     const byDate: Record<string, any> = {}
     ;((pb as any[]) ?? []).forEach((x) => { byDate[shiftYear(String(x.date), 1)] = x })
     setRows((prevR) => {
