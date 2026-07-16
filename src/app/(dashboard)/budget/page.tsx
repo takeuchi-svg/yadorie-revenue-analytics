@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import BudgetDaily from '@/components/budget-daily'
 import BudgetPL from '@/components/budget-pl'
+import BudgetReviewCard from '@/components/budget-review-card'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 export default function BudgetPage() {
@@ -42,6 +43,7 @@ export default function BudgetPage() {
         ))}
       </div>
       {tab === 'daily' ? <BudgetDaily fy={fy} fyList={fyList} onFy={setFy} /> : <BudgetPL fy={fy} fyList={fyList} onFy={setFy} />}
+      <BudgetReviewCard fy={fy} />
     </div>
   )
 }

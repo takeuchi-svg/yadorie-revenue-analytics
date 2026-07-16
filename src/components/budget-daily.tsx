@@ -180,8 +180,8 @@ export default function BudgetDaily({ fy, fyList, onFy }: { fy: number | null; f
                 return (
                   <Fragment key={m}>
                     <tr id={`bm-${m}`}>
-                      <td colSpan={11} className="px-2 py-1.5 text-xs font-semibold sticky left-0" style={{ background: 'var(--surface2)', borderTop: '2px solid var(--border)' }}>
-                        {m}　<span style={{ color: 'var(--text-dim)' }}>販売室数 {fmtNum(mt.rooms)} / 売上 {fmtNum(mt.rev)} / OCC {pct(mt.occ)}</span>
+                      <td colSpan={11} className="px-2 py-1.5 text-xs font-semibold" style={{ position: 'sticky', top: 30, zIndex: 16, background: 'var(--surface2)', borderTop: '2px solid var(--border)', borderBottom: '1px solid var(--border)' }}>
+                        <span style={{ position: 'sticky', left: 8 }}>{m}　<span style={{ color: 'var(--text-dim)' }}>販売室数 {fmtNum(mt.rooms)} / 売上 {fmtNum(mt.rev)} / OCC {pct(mt.occ)}</span></span>
                       </td>
                     </tr>
                     {monthDates(m).map((d) => {

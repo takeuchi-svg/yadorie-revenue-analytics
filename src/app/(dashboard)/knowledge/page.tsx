@@ -44,6 +44,7 @@ const PROMPT_LABEL: Record<string, string> = {
   company_insight: '全社モード 所見',
   meeting_pack: '月次レポート（概要・月次会議で共通）',
   meeting_extract: '月次会議 構造化抽出',
+  budget_review: '予算レビュー（灯の伴走）',
 }
 const KNOW_LABEL: Record<string, string> = {
   persona: '灯の人格（層1）',

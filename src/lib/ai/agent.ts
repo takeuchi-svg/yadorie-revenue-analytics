@@ -356,6 +356,25 @@ export async function runMeetingPack(facility: string, month: string, material: 
   return text
 }
 
+// 予算レビュー（B6）: 支配人が作った来期予算を灯が伴走レビュー。材料はクライアント算出。層3(基準PL/意図/取組)注入。
+export async function runBudgetReview(facility: string, fy: number, material: string): Promise<string> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+  const sb = makeSupabase()
+  const RUNTIME = `【この依頼の進め方】query_dataツールは使わず、ユーザーメッセージの【予算データ】のみを根拠にレビューする（推測の数値は作らない）。金額は万円、率は%。灯は代わりに予算を作らず、気づきを問いの形で示す。`
+  const [system, promptTpl] = await Promise.all([
+    buildSystemBlocks(sb, facility, { runtime: RUNTIME }),
+    getPrompt(sb, 'budget_review'),
+  ])
+  const prompt = promptTpl.replaceAll('{fy}', String(fy))
+  const resp = await client.messages.create({
+    model: MODEL, max_tokens: 4000, thinking: NO_THINKING, system,
+    messages: [{ role: 'user', content: `${prompt}\n\n【予算データ】\n${material}` }],
+  })
+  const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
+  if (!text) throw new Error(`AIが空の応答を返しました（stop_reason=${resp.stop_reason ?? '不明'}）`)
+  return text
+}
+
 // kind='summary'|'issue' の本文を1回のLLM呼び出しで生成
 export async function runInsight(
   kind: 'summary' | 'issue',

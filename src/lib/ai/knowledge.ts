@@ -12,7 +12,7 @@ import { DEFAULT_PROMPTS, DEFAULT_LAYER2 } from '@/lib/ai/defaults'
 export type PromptKey =
   | 'chat_system' | 'summary' | 'issue'
   | 'review_analyze' | 'review_insight' | 'profile_context_template'
-  | 'company_insight' | 'meeting_pack' | 'meeting_extract'
+  | 'company_insight' | 'meeting_pack' | 'meeting_extract' | 'budget_review'
 
 interface KpiRow { kpi_key: string; label_ja: string; formula?: string; numerator?: string; denominator?: string; unit?: string; direction?: string; note?: string }
 interface GlossRow { term: string; definition_ja: string; note?: string }
