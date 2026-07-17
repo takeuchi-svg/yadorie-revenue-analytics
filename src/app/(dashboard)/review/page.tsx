@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   ResponsiveContainer, LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid,
-  BarChart, Bar, Cell, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Legend,
+  BarChart, Bar, Cell, LabelList, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Legend,
 } from 'recharts'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
@@ -54,7 +54,7 @@ export default function ReviewPage() {
   const { current, currentFacility } = useFacility()
   const [month, setMonth] = useState('')
   const [mode, setMode] = useState<'1' | '3' | '12'>('3')
-  const [srcFilter, setSrcFilter] = useState<Set<string>>(new Set())  // 空=全て
+  const [srcMode, setSrcMode] = useState('all')  // 'all'=全体 / jalan / ikyu / rakuten / survey（単一選択）
   const [trendAxis, setTrendAxis] = useState('overall')
   const [openBody, setOpenBody] = useState<number | null>(null)
   const [analyzing, setAnalyzing] = useState(false)
@@ -102,8 +102,8 @@ export default function ReviewPage() {
   }, [data])
 
   // 期間内レビュー（ソースフィルタ適用）
-  const srcOk = (s: string) => srcFilter.size === 0 || srcFilter.has(s)
-  const winReviews = useMemo(() => reviews.filter((r) => winSet.has(r.review_date.slice(0, 7)) && srcOk(r.source)), [reviews, winSet, srcFilter])
+  const srcOk = (s: string) => srcMode === 'all' || s === srcMode
+  const winReviews = useMemo(() => reviews.filter((r) => winSet.has(r.review_date.slice(0, 7)) && srcOk(r.source)), [reviews, winSet, srcMode])
 
   // 軸スコア集計（期間×任意のフィルタ）: web=raw_reviewから直接 / survey=mart経由
   const axisAgg = (monthSet: Set<string>): Record<string, { sum: number; n: number }> => {
@@ -117,7 +117,7 @@ export default function ReviewPage() {
         if (axis && !isNaN(num)) add(axis, num * 5 / r.rating_scale)
       }
     }
-    if (srcFilter.size === 0 || srcFilter.has('survey')) {
+    if (srcMode === 'all' || srcMode === 'survey') {
       for (const f of (data?.fb ?? [])) {
         if (f.channel !== 'survey' || !monthSet.has(f.month) || f.raw_avg == null) continue
         ;(acc[f.axis_code] ??= { sum: 0, n: 0 }); acc[f.axis_code].sum += f.raw_avg * f.n; acc[f.axis_code].n += f.n
@@ -125,8 +125,8 @@ export default function ReviewPage() {
     }
     return acc
   }
-  const curAxis = useMemo(() => axisAgg(winSet), [winSet, reviews, data, srcFilter, axisOf])   // eslint-disable-line react-hooks/exhaustive-deps
-  const prevAxis = useMemo(() => axisAgg(prevWinSet), [prevWinSet, reviews, data, srcFilter, axisOf])  // eslint-disable-line react-hooks/exhaustive-deps
+  const curAxis = useMemo(() => axisAgg(winSet), [winSet, reviews, data, srcMode, axisOf])   // eslint-disable-line react-hooks/exhaustive-deps
+  const prevAxis = useMemo(() => axisAgg(prevWinSet), [prevWinSet, reviews, data, srcMode, axisOf])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // 平滑化スコア（3ヶ月ローリングmart。選択月・web+surveyをn加重）
   const smoothedAt = (m: string, axis: string): { v: number | null; n: number; low: boolean } => {
@@ -136,8 +136,33 @@ export default function ReviewPage() {
     return { v: n ? sum / n : null, n, low: low || n < 5 }
   }
 
-  // KPIカード
-  const kOverall = smoothedAt(activeMonth, 'overall')
+  // ソース別の総合スコア（期間・単純平均。各OTA選択時のKPI用。web=raw_review / アンケート=mart / 楽天=集計値）
+  const overallBySource = useMemo(() => {
+    const acc: Record<string, { sum: number; n: number }> = {}
+    for (const r of reviews) {
+      if (!winSet.has(r.review_date.slice(0, 7)) || r.overall_rating == null) continue
+      ;(acc[r.source] ??= { sum: 0, n: 0 })
+      acc[r.source].sum += r.overall_rating * 5 / r.rating_scale; acc[r.source].n += 1
+    }
+    for (const f of (data?.fb ?? [])) {
+      if (f.channel !== 'survey' || !winSet.has(f.month) || f.axis_code !== 'overall' || f.raw_avg == null) continue
+      ;(acc['survey'] ??= { sum: 0, n: 0 }); acc['survey'].sum += f.raw_avg * f.n; acc['survey'].n += f.n
+    }
+    const rk = (data?.rakuten ?? []).filter((r) => winSet.has(r.month))
+    if (rk.length) {
+      let sum = 0, n = 0
+      for (const r of rk) { if (r.overall_avg != null) { sum += Number(r.overall_avg); n += 1 } }
+      if (n) acc['rakuten'] = { sum, n }
+    }
+    return acc
+  }, [reviews, data, winSet])
+
+  // KPIカード（総合評価: 全体=3ヶ月平滑化mart / 各OTA=そのソースの単純平均）
+  const kOverall = useMemo(() => {
+    if (srcMode === 'all') return smoothedAt(activeMonth, 'overall')
+    const a = overallBySource[srcMode]
+    return { v: a && a.n ? a.sum / a.n : null, n: a?.n ?? 0, low: !a || a.n < 5 }
+  }, [srcMode, activeMonth, overallBySource, data])  // eslint-disable-line react-hooks/exhaustive-deps
   const npsWin = (data?.nps ?? []).filter((r) => winSet.has(r.month))
   const npsAgg = useMemo(() => {
     const n = npsWin.reduce((s, r) => s + r.n, 0)
@@ -281,18 +306,22 @@ export default function ReviewPage() {
         </div>
       </div>
 
-      {/* ソースフィルタ */}
-      <div className="flex items-center gap-1.5 mb-4 flex-wrap">
-        <button onClick={() => setSrcFilter(new Set())} className="px-2.5 py-1 rounded-full text-xs"
-          style={{ background: srcFilter.size === 0 ? 'var(--accent)' : 'var(--surface)', color: srcFilter.size === 0 ? '#fff' : 'var(--text-dim)', border: '1px solid var(--border)' }}>全て</button>
+      {/* ソース切替（単一選択・全体 と 各OTA を分離） */}
+      <div className="flex items-center gap-1.5 mb-1.5 flex-wrap">
+        <button onClick={() => setSrcMode('all')} className="px-2.5 py-1 rounded-full text-xs"
+          style={{ background: srcMode === 'all' ? 'var(--accent)' : 'var(--surface)', color: srcMode === 'all' ? '#fff' : 'var(--text-dim)', border: '1px solid var(--border)' }}>全体</button>
         {Object.entries(SRC_LABEL).map(([k, label]) => (
-          <button key={k} onClick={() => setSrcFilter((prev) => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n })}
-            className="px-2.5 py-1 rounded-full text-xs"
-            style={{ background: srcFilter.has(k) ? SRC_COLOR[k] : 'var(--surface)', color: srcFilter.has(k) ? '#fff' : 'var(--text-dim)', border: `1px solid ${srcFilter.has(k) ? SRC_COLOR[k] : 'var(--border)'}` }}>
+          <button key={k} onClick={() => setSrcMode(k)} className="px-2.5 py-1 rounded-full text-xs"
+            style={{ background: srcMode === k ? SRC_COLOR[k] : 'var(--surface)', color: srcMode === k ? '#fff' : 'var(--text-dim)', border: `1px solid ${srcMode === k ? SRC_COLOR[k] : 'var(--border)'}` }}>
             {label}
           </button>
         ))}
       </div>
+      <p className="text-[10px] mb-4" style={{ color: 'var(--text-dim)' }}>
+        {srcMode === 'all'
+          ? '総合評価は3ヶ月平滑化。改善候補はクチコミ全体のAI分析。'
+          : `${SRC_LABEL[srcMode] ?? srcMode}のみ表示中（総合評価・レーダー・レビュー）。改善候補・NPSは全体基準です。`}
+      </p>
 
       {loading ? <Loading /> : error ? <LoadError message={error} /> : months.length === 0 ? (
         <Empty message="クチコミが未取込です。アップロード→「クチコミ」からじゃらん/一休CSVを取り込んでください。" />
@@ -301,7 +330,7 @@ export default function ReviewPage() {
           {/* KPIカード */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
             <div className="card p-4">
-              <div className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>総合評価（3ヶ月平滑化）{badge(kOverall.low)}</div>
+              <div className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>{srcMode === 'all' ? '総合評価（3ヶ月平滑化）' : `${SRC_LABEL[srcMode] ?? srcMode}・総合（単純平均）`}{badge(kOverall.low)}</div>
               <div className="text-2xl font-bold">{kOverall.v != null ? kOverall.v.toFixed(2) : '-'}<span className="text-sm font-normal" style={{ color: 'var(--text-dim)' }}> /5</span></div>
               <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-dim)' }}>n={kOverall.n}</div>
             </div>
@@ -318,7 +347,7 @@ export default function ReviewPage() {
               </div>
             </div>
             <div className="card p-4">
-              <div className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>改善候補 1位</div>
+              <div className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>改善候補 1位（全体）</div>
               <div className="text-lg font-bold truncate">{topicsWin[0]?.label ?? '-'}</div>
               <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-dim)' }}>{topicsWin[0] ? `ネガ言及 ${topicsWin[0].neg}件` : 'AI分析 未実行（C4）'}</div>
             </div>
@@ -373,12 +402,14 @@ export default function ReviewPage() {
               <h2 className="text-sm font-semibold mb-2">ソース別比較（{AXIS_LABEL[trendAxis]}・{modeLabel}）</h2>
               {srcCompare.length ? (
                 <ResponsiveContainer width="100%" height={Math.max(140, srcCompare.length * 44)}>
-                  <BarChart data={srcCompare} layout="vertical" margin={{ left: 30, right: 24 }}>
+                  <BarChart data={srcCompare} layout="vertical" margin={{ left: 30, right: 52 }}>
                     <XAxis type="number" domain={[0, 5]} {...CHART_AXIS} />
                     <YAxis type="category" dataKey="name" {...CHART_AXIS} width={70} />
                     <Tooltip {...chartTooltip} formatter={(v: any, _n: any, p: any) => [`${v}（n=${p.payload.n}）`, 'スコア']} />
                     <Bar dataKey="score" radius={[0, 4, 4, 0]} maxBarSize={22}>
                       {srcCompare.map((d) => <Cell key={d.source} fill={SRC_COLOR[d.source] ?? '#888780'} />)}
+                      <LabelList dataKey="score" position="right" formatter={(v: any) => Number(v).toFixed(2)}
+                        style={{ fill: 'var(--text)', fontSize: 12, fontWeight: 700 }} />
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
