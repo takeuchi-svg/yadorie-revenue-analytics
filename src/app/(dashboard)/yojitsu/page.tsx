@@ -50,14 +50,18 @@ export default function YojitsuPage() {
       fetchAll(() => supabase.from('mart_monthly_kpi').select('month, guests, adr, guest_unit, companion').eq('facility', current)),
       fetchAll(() => supabase.from('mart_occupancy_monthly').select('month, rooms_sold, occ, occ_calendar_days, operating_days').eq('facility', current)),
       supabase.from('dim_operating_days').select('month, rooms').eq('facility', current).then((r) => r),
-      fetchAll(() => supabase.from('budget_monthly').select('fiscal_year, month, category, item_code, item_name, amount, sort_order').eq('facility', current).eq('version', '見込').order('id')),
+      fetchAll(() => supabase.from('budget_monthly').select('fiscal_year, month, category, item_code, item_name, amount, sort_order, version').eq('facility', current).like('version', '見込%').order('id')),
       supabase.from('budget_monthly').select('version').eq('facility', current).then((r) => r),
     ]).then(([b, a, kp, oc, od, fc, vs]: any[]) => {
       setBudget((b as BRow[]) ?? [])
       setActual((a as ARow[]) ?? [])
       setKpi((kp as KpiRow[]) ?? [])
       setOcc((oc as OccRow[]) ?? [])
-      setForecast((fc as BRow[]) ?? [])
+      // 着地には最新の見込バージョンを使う
+      const fcRows = (fc as any[]) ?? []
+      const fvs = [...new Set(fcRows.map((r) => r.version as string))].sort()
+      const maxV = fvs[fvs.length - 1]
+      setForecast((maxV ? fcRows.filter((r) => r.version === maxV) : []) as BRow[])
       const vlist = [...new Set(((vs?.data as { version: string }[]) ?? []).map((r) => r.version).filter((v) => v && v !== '見込'))].sort()
       setVersions(vlist.length ? vlist : ['当初'])
       const rm: Record<string, number> = {}

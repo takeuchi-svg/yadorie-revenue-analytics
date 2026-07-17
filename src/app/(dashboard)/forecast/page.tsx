@@ -45,6 +45,8 @@ export default function ForecastPage() {
   const [occ, setOcc] = useState<OccRow[]>([])
   const [onhand, setOnhand] = useState<Record<string, number | null>>({})
   const [inp, setInp] = useState<Record<string, string>>({})
+  const [fcAll, setFcAll] = useState<any[]>([])          // 全見込バージョンの行
+  const [fcVersion, setFcVersion] = useState('見込1')     // 選択中の見込バージョン
   const [fys, setFys] = useState<string[]>([])
   const [fy, setFy] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
@@ -62,13 +64,11 @@ export default function ForecastPage() {
         fetchAll(() => supabase.from('actual_monthly').select('fiscal_year, month, item_code, actual').eq('facility', current).order('id')).catch(() => []),
         fetchAll(() => supabase.from('mart_monthly_kpi').select('month, guests, adr, guest_unit, companion').eq('facility', current)).catch(() => []),
         fetchAll(() => supabase.from('mart_occupancy_monthly').select('month, rooms_sold, occ, occ_calendar_days, operating_days').eq('facility', current)).catch(() => []),
-        fetchAll(() => supabase.from('budget_monthly').select('month, item_code, amount').eq('facility', current).eq('version', '見込')).catch(() => []),
+        fetchAll(() => supabase.from('budget_monthly').select('month, item_code, amount, version, fiscal_year').eq('facility', current).like('version', '見込%')).catch(() => []),
         fetchAll(() => supabase.from('mart_onhand_monthly').select('month, revenue').eq('facility', current)).catch(() => []),
       ])
       setBudget((b as BudgetRow[]) ?? []); setActual((a as ActualRow[]) ?? []); setKpi((kp as KpiRow[]) ?? []); setOcc((oc as OccRow[]) ?? [])
-      const oim: Record<string, string> = {}
-      ;((fc as any[]) ?? []).forEach((r) => { if (r.amount != null) oim[K(r.month, r.item_code)] = String(r.amount) })
-      setInp(oim)
+      setFcAll((fc as any[]) ?? [])
       const ohm: Record<string, number | null> = {}
       ;((oh as any[]) ?? []).forEach((r) => { ohm[r.month] = r.revenue })
       setOnhand(ohm)
@@ -78,6 +78,20 @@ export default function ForecastPage() {
     } finally { setLoading(false) }
   }, [current])
   useEffect(() => { load() }, [load])
+
+  // 見込バージョン（当年度分）。選択版を inp に展開。
+  const fcVersions = useMemo(() => [...new Set(fcAll.filter((r) => String(r.fiscal_year) === String(fy)).map((r) => r.version as string))].sort(), [fcAll, fy])
+  useEffect(() => { setFcVersion((v) => (fcVersions.includes(v) ? v : (fcVersions[fcVersions.length - 1] ?? '見込1'))) }, [fcVersions])
+  useEffect(() => {
+    const oim: Record<string, string> = {}
+    fcAll.filter((r) => r.version === fcVersion && String(r.fiscal_year) === String(fy)).forEach((r) => { if (r.amount != null) oim[K(r.month, r.item_code)] = String(r.amount) })
+    setInp(oim)
+  }, [fcVersion, fy, fcAll])
+  const newForecast = () => {
+    const nums = fcVersions.map((v) => parseInt(v.replace(/[^0-9]/g, ''), 10) || 0)
+    setFcVersion('見込' + ((nums.length ? Math.max(...nums) : 0) + 1))
+    setInp({})  // 当初予算を既定に新規作成
+  }
 
   const R = useMemo(() => makePlResolver({ budget, actual, kpi, occ, totalRooms, fy: String(fy ?? '') }), [budget, actual, kpi, occ, totalRooms, fy])
   const confirmed = (m: string) => R.actualMonths.has(m)
@@ -100,11 +114,12 @@ export default function ForecastPage() {
     const rows: any[] = []
     for (const m of months) for (const r of ROWS) {
       const v = fval(m, r.code)
-      rows.push({ facility: current, fiscal_year: String(fy), month: m, version: '見込', category: r.cat, item_code: r.code, item_name: r.name, amount: v == null ? null : Math.round(v), sort_order: r.so })
+      rows.push({ facility: current, fiscal_year: String(fy), month: m, version: fcVersion, category: r.cat, item_code: r.code, item_name: r.name, amount: v == null ? null : Math.round(v), sort_order: r.so })
     }
     const { error } = await supabase.from('budget_monthly').upsert(rows, { onConflict: 'facility,fiscal_year,month,item_code,version' })
-    toast(error ? `エラー: ${error.message}` : `${fy}年度の見込を保存しました（予実の着地に反映）`, error ? 'error' : 'success')
+    toast(error ? `エラー: ${error.message}` : `${fcVersion}（${fy}年度）を保存しました（最新の見込が予実の着地に反映）`, error ? 'error' : 'success')
     setSaving(false)
+    if (!error) load()
   }
 
   if (!current) return <div className="p-6 text-sm" style={{ color: 'var(--text-dim)' }}>宿を選択してください。</div>
@@ -118,7 +133,12 @@ export default function ForecastPage() {
             {fys.map((y) => <option key={y} value={y}>{y}年度</option>)}
           </select>
         )}
-        <button onClick={save} disabled={saving} className="ml-auto px-4 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>{saving ? '保存中…' : '見込を保存'}</button>
+        <span className="text-xs" style={{ color: 'var(--text-dim)' }}>見込</span>
+        <select className="field px-3 py-1.5 text-sm" value={fcVersion} onChange={(e) => setFcVersion(e.target.value)}>
+          {[...new Set([...fcVersions, fcVersion])].sort().map((v) => <option key={v} value={v}>{v}</option>)}
+        </select>
+        <button onClick={newForecast} className="text-xs px-3 py-1.5 rounded-md" style={{ background: 'var(--surface2)', color: 'var(--text)' }}>＋新しい見込</button>
+        <button onClick={save} disabled={saving} className="ml-auto px-4 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>{saving ? '保存中…' : `${fcVersion}を保存`}</button>
       </div>
       <p className="text-[11px] mb-2" style={{ color: 'var(--text-dim)' }}>
         着地見込＝実績（確定月・自動）＋見込（残月・編集可、当初予算が既定）。残月は<span style={{ color: '#2563eb' }}>青</span>で入力。GOP・EBITDA・営業損益は自動。売上の下はオンハンド（現時点の予約売上）参考。保存すると予実（PL）の「着地」に反映されます。
