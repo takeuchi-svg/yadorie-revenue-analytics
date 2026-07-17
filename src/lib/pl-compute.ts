@@ -133,6 +133,7 @@ export interface PlResolverInput {
   opRooms?: Record<string, number>  // 月別客室数の上書き（改装等）
   totalRooms?: number | null
   fy: string
+  forecast?: BudgetRow[]            // 見込(budget_monthly version='見込')。着地の残月に使う（実績＞見込＞予算）
 }
 
 export interface PlResolver {
@@ -149,7 +150,7 @@ export interface PlResolver {
   yearBudget: (code: string) => number | null
 }
 
-export function makePlResolver({ budget, actual, kpi = [], occ = [], opRooms = {}, totalRooms = null, fy }: PlResolverInput): PlResolver {
+export function makePlResolver({ budget, actual, kpi = [], occ = [], opRooms = {}, totalRooms = null, fy, forecast = [] }: PlResolverInput): PlResolver {
   // 項目（budget の sort_order 順）
   const seen = new Set<string>()
   const items: { code: string; name: string; category: string | null }[] = []
@@ -171,6 +172,9 @@ export function makePlResolver({ budget, actual, kpi = [], occ = [], opRooms = {
   const actualMap: Record<string, number | null> = {}
   actual.forEach((a) => { actualMap[k(a.month, a.item_code)] = a.actual })
   const actualMonths = new Set(actual.map((a) => a.month))
+  const forecastMap: Record<string, number | null> = {}
+  forecast.forEach((b) => { forecastMap[k(b.month, b.item_code)] = b.amount })
+  const hasForecast = forecast.length > 0
   const kpiMap: Record<string, KpiRow> = {}
   kpi.forEach((r) => { kpiMap[r.month] = r })
   const occMap: Record<string, OccRow> = {}
@@ -214,9 +218,13 @@ export function makePlResolver({ budget, actual, kpi = [], occ = [], opRooms = {
     }
   }
 
-  // 着地（実績がある月は実績、無い月は予算）
-  const landingFor = (code: string, ym: string): number | null =>
-    actualMonths.has(ym) ? getActual(code, ym) : getBudget(code, ym)
+  // 着地（実績がある月は実績、無い月は「見込があれば見込・無ければ予算」）。実績＞見込＞予算。
+  const landingFor = (code: string, ym: string): number | null => {
+    if (actualMonths.has(ym)) return getActual(code, ym)
+    const f = forecastMap[k(ym, code)]
+    return f != null ? f : getBudget(code, ym)
+  }
+  void hasForecast
 
   const sumLanding = (code: string): number => months.reduce((s, m) => s + (landingFor(code, m) ?? 0), 0)
   const sumBudgetYear = (code: string): number => months.reduce((s, m) => s + (getBudget(code, m) ?? 0), 0)

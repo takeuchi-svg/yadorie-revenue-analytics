@@ -28,6 +28,9 @@ export default function YojitsuPage() {
   const [kpi, setKpi] = useState<KpiRow[]>([])
   const [occ, setOcc] = useState<OccRow[]>([])
   const [opRooms, setOpRooms] = useState<Record<string, number>>({})  // 月別客室数の上書き（稼働日数は稼働率martから自動）
+  const [forecast, setForecast] = useState<BRow[]>([])   // 見込(version='見込')。着地の残月に使う
+  const [version, setVersion] = useState('当初')          // 比較する予算の版（当初/修正…）
+  const [versions, setVersions] = useState<string[]>(['当初'])
   const [fy, setFy] = useState('')
   const [month, setMonth] = useState('')
   const [view, setView] = useState<'month' | 'year'>('month')
@@ -42,16 +45,21 @@ export default function YojitsuPage() {
     if (!current) return
     setLoading(true)
     Promise.all([
-      fetchAll(() => supabase.from('budget_monthly').select('fiscal_year, month, category, item_code, item_name, amount, sort_order').eq('facility', current).eq('version', '当初').order('id')),
+      fetchAll(() => supabase.from('budget_monthly').select('fiscal_year, month, category, item_code, item_name, amount, sort_order').eq('facility', current).eq('version', version).order('id')),
       fetchAll(() => supabase.from('actual_monthly').select('fiscal_year, month, item_code, actual').eq('facility', current).order('id')),
       fetchAll(() => supabase.from('mart_monthly_kpi').select('month, guests, adr, guest_unit, companion').eq('facility', current)),
       fetchAll(() => supabase.from('mart_occupancy_monthly').select('month, rooms_sold, occ, occ_calendar_days, operating_days').eq('facility', current)),
       supabase.from('dim_operating_days').select('month, rooms').eq('facility', current).then((r) => r),
-    ]).then(([b, a, kp, oc, od]: any[]) => {
+      fetchAll(() => supabase.from('budget_monthly').select('fiscal_year, month, category, item_code, item_name, amount, sort_order').eq('facility', current).eq('version', '見込').order('id')),
+      supabase.from('budget_monthly').select('version').eq('facility', current).then((r) => r),
+    ]).then(([b, a, kp, oc, od, fc, vs]: any[]) => {
       setBudget((b as BRow[]) ?? [])
       setActual((a as ARow[]) ?? [])
       setKpi((kp as KpiRow[]) ?? [])
       setOcc((oc as OccRow[]) ?? [])
+      setForecast((fc as BRow[]) ?? [])
+      const vlist = [...new Set(((vs?.data as { version: string }[]) ?? []).map((r) => r.version).filter((v) => v && v !== '見込'))].sort()
+      setVersions(vlist.length ? vlist : ['当初'])
       const rm: Record<string, number> = {}
       ;((od?.data as { month: string; rooms: number | null }[]) ?? []).forEach((r) => {
         if (r.rooms != null) rm[r.month] = r.rooms  // 月別客室数の上書き（改装等）
@@ -59,15 +67,15 @@ export default function YojitsuPage() {
       setOpRooms(rm)
     }).catch((e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false))
-  }, [current])
+  }, [current, version])
 
   const fys = useMemo(() => [...new Set(budget.map((b) => b.fiscal_year))].sort().reverse(), [budget])
   useEffect(() => { if (fys.length && !fys.includes(fy)) setFy(fys[0]) }, [fys, fy])
 
   // PL再計算は pl-compute の SSOT に集約（全社Coreと同一ロジック。実績集計行は明細から再計算）
   const { items, months, actualMonths, hasActual, getBudget, getActual, landingFor, yearLanding, yearBudget } =
-    useMemo(() => makePlResolver({ budget, actual, kpi, occ, opRooms, totalRooms, fy }),
-      [budget, actual, kpi, occ, opRooms, totalRooms, fy])
+    useMemo(() => makePlResolver({ budget, actual, kpi, occ, opRooms, totalRooms, fy, forecast }),
+      [budget, actual, kpi, occ, opRooms, totalRooms, fy, forecast])
   useEffect(() => { if (months.length && !months.includes(month)) setMonth(months[0]) }, [months, month])
 
   const toggle = (cat: string) => setCollapsed((p) => { const n = new Set(p); n.has(cat) ? n.delete(cat) : n.add(cat); return n })
@@ -127,6 +135,11 @@ export default function YojitsuPage() {
                 </button>
               ))}
             </div>
+          )}
+          {versions.length > 1 && (
+            <select className="field px-3 py-1.5 text-sm" value={version} onChange={(e) => setVersion(e.target.value)} title="比較する予算の版">
+              {versions.map((v) => <option key={v} value={v}>{v}予算</option>)}
+            </select>
           )}
           {fys.length > 0 && (
             <select className="field px-3 py-1.5 text-sm" value={fy} onChange={(e) => setFy(e.target.value)}>

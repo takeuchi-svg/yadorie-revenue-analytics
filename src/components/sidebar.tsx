@@ -28,7 +28,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/budget', label: '予算作成' },
       { href: '/yojitsu', label: '予実管理（PL）' },
-      { href: '#', label: '見込', disabled: true, note: '準備中' },
+      { href: '/forecast', label: '見込' },
     ],
   },
   {

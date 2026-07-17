@@ -24,17 +24,18 @@ create policy budget_lock_write on budget_lock for all to authenticated
   using (public.my_role() = 'owner') with check (public.my_role() = 'owner');
 
 -- 予算テーブル: ロック中の(facility,fiscal_year)への書込みを禁止（WITH CHECK）。読み取り・削除はUSINGで従来通り。
+-- ただし version='見込' は当年度に更新する着地見込なので、ロック中でも書込可（確定予算=当初/修正のみ保護）。
 drop policy if exists "allow_all_authenticated" on budget_daily;
 drop policy if exists budget_daily_rw on budget_daily;
 create policy budget_daily_rw on budget_daily for all to authenticated
   using (true)
-  with check (not exists (select 1 from budget_lock l where l.facility = budget_daily.facility and l.fiscal_year = budget_daily.fiscal_year));
+  with check (budget_daily.version = '見込' or not exists (select 1 from budget_lock l where l.facility = budget_daily.facility and l.fiscal_year = budget_daily.fiscal_year));
 
 drop policy if exists "allow_all_authenticated" on budget_monthly;
 drop policy if exists budget_monthly_rw on budget_monthly;
 create policy budget_monthly_rw on budget_monthly for all to authenticated
   using (true)
-  with check (not exists (select 1 from budget_lock l where l.facility = budget_monthly.facility and l.fiscal_year = budget_monthly.fiscal_year));
+  with check (budget_monthly.version = '見込' or not exists (select 1 from budget_lock l where l.facility = budget_monthly.facility and l.fiscal_year = budget_monthly.fiscal_year));
 
 -- 初期ロック: 2020〜2026年度を全宿ロック（過年度・当年度の確定予算を保護）
 insert into budget_lock (facility, fiscal_year, locked_by)
