@@ -32,6 +32,7 @@ export interface RawReservation {
   prefecture: string | null
   plan: string | null
   booking_date: string | null
+  cancel_date: string | null
   source_month: string | null
 }
 

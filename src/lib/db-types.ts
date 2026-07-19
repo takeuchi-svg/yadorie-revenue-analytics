@@ -13,6 +13,7 @@ export interface ReservationRow {
   prefecture: string | null
   status?: string | null
   booking_date?: string | null
+  cancel_date?: string | null
   channel?: string | null
   plan?: string | null
   room_count?: number | null

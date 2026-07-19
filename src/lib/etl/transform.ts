@@ -58,6 +58,7 @@ export function transformReservation(
         prefecture: findCol(r, '都道府県', '発信地', '居住地', '住所') || null,
         plan: findCol(r, 'プラン', 'プラン名', '企画名') || null,
         booking_date: parseDate(findCol(r, '予約日', '予約受付日')),
+        cancel_date: parseDate(findCol(r, 'キャンセル日', '取消日', '解約日')),
         source_month: sourceMonth,
       }
     })
