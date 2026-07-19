@@ -29,16 +29,16 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '/budget', label: '予算作成' },
       { href: '/yojitsu', label: '予実管理（PL）' },
       { href: '/forecast', label: '見込' },
+      { href: '/productivity', label: '生産性' },
     ],
   },
   {
-    key: 'analysis', label: '分析',
+    key: 'analysis', label: '売上実績分析',
     items: [
       { href: '/revenue', label: '売上分析' },
       { href: '/daily', label: '日別売上' },
       { href: '/cancel', label: 'CXL＆LT分析' },
       { href: '/fb', label: '料飲分析' },
-      { href: '/productivity', label: '生産性' },
     ],
   },
   { key: 'review', label: '顧客満足度', href: '/review' },
