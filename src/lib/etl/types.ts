@@ -108,4 +108,5 @@ export interface UploadResult {
   inserted: number
   skipped?: number
   error?: string
+  warning?: string  // 非ブロッキング警告（確定実績の変更検知・全ステータス出力チェック等）
 }

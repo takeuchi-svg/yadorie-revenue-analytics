@@ -22,6 +22,7 @@ interface FlowRow {
   net_reservations: number | null; net_room_nights: number | null; net_revenue: number | null
 }
 interface CurveRow { stay_date: string; channel: string; booking_date: string | null; cancel_date: string | null; lead_days: number | null; rooms: number | null; revenue: number | null }
+interface OnhandRow { stay_date: string; channel: string; rooms: number | null; guests: number | null; revenue: number | null }
 interface Action {
   id: number; channel: string | null; action_type: string; title: string
   start_date: string; end_date: string | null; cost: number | null; memo: string | null; decided_date: string | null
@@ -42,13 +43,14 @@ export default function BookingPage() {
   const [flow, setFlow] = useState<FlowRow[]>([])
   const [actions, setActions] = useState<Action[]>([])
   const [curve, setCurve] = useState<CurveRow[] | null>(null)
+  const [onhand, setOnhand] = useState<OnhandRow[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
-  const [view, setView] = useState<'stack' | 'yoy' | 'curve'>('stack')
+  const [view, setView] = useState<'stack' | 'yoy' | 'curve' | 'onhand'>('stack')
 
   useEffect(() => {
     if (!current) return
-    setLoading(true); setLoadError(''); setCurve(null)
+    setLoading(true); setLoadError(''); setCurve(null); setOnhand(null)
     Promise.all([
       fetchAll<FlowRow>(() => supabase.from('mart_booking_flow').select('*').eq('facility', current)),
       fetchAll<Action>(() => supabase.from('raw_marketing_action')
@@ -60,16 +62,21 @@ export default function BookingPage() {
 
   // 宿泊日ベース/カーブは重いので必要時のみ取得
   useEffect(() => {
-    if (!current || (view === 'stack') || curve !== null) return
+    if (!current || !(view === 'yoy' || view === 'curve') || curve !== null) return
     fetchAll<CurveRow>(() => supabase.from('mart_booking_curve')
       .select('stay_date, channel, booking_date, cancel_date, lead_days, rooms, revenue').eq('facility', current))
       .then((c) => setCurve(c ?? [])).catch(() => setCurve([]))
   }, [current, view, curve])
+  useEffect(() => {
+    if (!current || view !== 'onhand' || onhand !== null) return
+    fetchAll<OnhandRow>(() => supabase.from('mart_onhand').select('stay_date, channel, rooms, guests, revenue').eq('facility', current))
+      .then((o) => setOnhand(o ?? [])).catch(() => setOnhand([]))
+  }, [current, view, onhand])
 
   return (
     <div className="p-6">
       <div className="flex rounded-md overflow-hidden mb-4 w-fit" style={{ border: '1px solid var(--border)' }}>
-        {([['stack', '予約日ベース積み上げ'], ['yoy', '前年同日比較'], ['curve', 'ブッキングカーブ']] as const).map(([v, l]) => (
+        {([['stack', '予約日ベース積み上げ'], ['yoy', '前年同日比較'], ['curve', 'ブッキングカーブ'], ['onhand', 'オンハンド断面']] as const).map(([v, l]) => (
           <button key={v} onClick={() => setView(v)} className="px-4 py-1.5 text-xs font-medium"
             style={{ background: view === v ? 'var(--accent)' : 'var(--surface)', color: view === v ? '#fff' : 'var(--text-dim)' }}>{l}</button>
         ))}
@@ -79,7 +86,8 @@ export default function BookingPage() {
         <Empty message="予約情報CSV（全ステータス）を /upload から取り込むと、予約日ベースの動きが表示されます。" />
       ) : view === 'stack' ? <StackView flow={flow} actions={actions} />
         : view === 'yoy' ? <YoyView flow={flow} curve={curve} actions={actions} />
-        : <CurveView curve={curve} />}
+        : view === 'curve' ? <CurveView curve={curve} />
+        : <OnhandView onhand={onhand} />}
     </div>
   )
 }
@@ -409,6 +417,85 @@ function CurveView({ curve }: { curve: CurveRow[] | null }) {
         <p className="text-[10px] mt-1" style={{ color: 'var(--text-dim)' }}>
           横軸＝宿泊日までの日数（左=先／右=当日）、縦軸＝その時点で入っていた{unit === 'revenue' ? '金額' : '室数'}。
           橙=当年、紫破線=前年同月。前年同日のD-nと当年のD-nを重ねて「入りの速さ」を比較できます。
+        </p>
+      </div>
+    </>
+  )
+}
+
+// ============================================================
+// M8: オンハンド断面（宿泊日×OTA別の現在の入り。mart_onhand）
+// ============================================================
+function OnhandView({ onhand }: { onhand: OnhandRow[] | null }) {
+  const [mode, setMode] = useState<'day' | 'month'>('month')
+  const [metric, setMetric] = useState<'rooms' | 'revenue'>('rooms')
+  const [dayMonth, setDayMonth] = useState('')
+
+  const rows = onhand ?? []
+  const monthOptions = useMemo(() => [...new Set(rows.map((r) => r.stay_date.slice(0, 7)))].sort(), [rows])
+  const activeDayMonth = dayMonth || monthOptions[0] || ''
+
+  const channelRank = useMemo(() => {
+    const t: Record<string, number> = {}
+    for (const r of rows) t[r.channel] = (t[r.channel] ?? 0) + (r.rooms ?? 0)
+    return [...Object.entries(t)].sort((a, b) => b[1] - a[1]).map(([c]) => c)
+  }, [rows])
+  const topChannels = channelRank.slice(0, TOP_CHANNELS)
+  const channels = channelRank.length > TOP_CHANNELS ? [...topChannels, 'その他'] : topChannels
+  const chanKey = (c: string) => (topChannels.includes(c) ? c : 'その他')
+  const valOf = (r: OnhandRow) => (metric === 'revenue' ? (r.revenue ?? 0) : (r.rooms ?? 0))
+  const bucketOf = (d: string) => (mode === 'month' ? d.slice(0, 7) : d)
+
+  const perBucket = useMemo(() => {
+    const per: Record<string, Record<string, number>> = {}
+    for (const r of rows) { const b = bucketOf(r.stay_date); (per[b] ??= {}); const ck = chanKey(r.channel); per[b][ck] = (per[b][ck] ?? 0) + valOf(r) }
+    return per
+  }, [rows, mode, metric, channelRank])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const buckets = useMemo(() => {
+    if (mode === 'month') return Object.keys(perBucket).sort()
+    if (!activeDayMonth) return []
+    const [y, m] = activeDayMonth.split('-').map(Number)
+    return Array.from({ length: new Date(y, m, 0).getDate() }, (_, i) => `${activeDayMonth}-${String(i + 1).padStart(2, '0')}`)
+  }, [mode, perBucket, activeDayMonth])
+
+  const chartData = useMemo(() => buckets.map((b) => {
+    const row: Record<string, string | number> = { bucket: mode === 'month' ? b.slice(2) : b.slice(8), full: b }
+    const per = perBucket[b] ?? {}
+    for (const c of channels) row[c] = per[c] ?? 0
+    return row
+  }), [buckets, perBucket, channels, mode])
+  const hasData = chartData.some((d) => channels.some((c) => (d[c] as number) !== 0))
+
+  if (onhand === null) return <p className="text-sm py-16 text-center" style={{ color: 'var(--text-dim)' }}>オンハンド断面を集計中…</p>
+
+  return (
+    <>
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <Seg value={mode} set={setMode} opts={[['month', '月別'], ['day', '日別']]} />
+        <Seg value={metric} set={setMetric} opts={[['rooms', '室数'], ['revenue', '金額']]} />
+        {mode === 'day' && monthOptions.length > 0 && (
+          <select className="field px-3 py-1.5 text-sm" value={activeDayMonth} onChange={(e) => setDayMonth(e.target.value)}>
+            {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        )}
+        <span className="text-xs" style={{ color: 'var(--text-dim)' }}>宿泊日×OTA別・今日以降・未キャンセルの現在の入り</span>
+      </div>
+      <div className="card p-4">
+        {hasData ? (
+          <ResponsiveContainer width="100%" height={380}>
+            <ComposedChart data={chartData} margin={{ top: 8, right: 12, bottom: 5, left: metric === 'revenue' ? 8 : -14 }}>
+              <CartesianGrid stroke="#e7dac6" vertical={false} />
+              <XAxis dataKey="bucket" {...CHART_AXIS} interval={mode === 'day' ? 2 : Math.max(0, Math.floor(chartData.length / 16))} />
+              <YAxis {...CHART_AXIS} allowDecimals={false} tickFormatter={metric === 'revenue' ? (v) => `${Math.round(Number(v) / 10000)}万` : undefined} />
+              <Tooltip {...chartTooltip} labelFormatter={(l: any, p: any) => (p?.[0]?.payload?.full ?? l)} formatter={(v: any, n: any) => [metric === 'revenue' ? fmtYen(Number(v)) : `${fmtNum(Number(v))}室`, n]} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              {channels.map((c) => <Bar key={c} dataKey={c} stackId="s" maxBarSize={mode === 'day' ? 20 : 30} fill={c === 'その他' ? '#B4B2A9' : channelColor(c)} />)}
+            </ComposedChart>
+          </ResponsiveContainer>
+        ) : <p className="text-sm py-16 text-center" style={{ color: 'var(--text-dim)' }}>今日以降のオンハンドがありません（将来月の予約情報CSVを取り込むと表示されます）。</p>}
+        <p className="text-[10px] mt-1" style={{ color: 'var(--text-dim)' }}>
+          棒＝OTA別の{metric === 'revenue' ? '金額' : '室数'}（宿泊日で計上・未キャンセル）。前年同時点比較は snapshot_onhand の蓄積後に有効化予定。
         </p>
       </div>
     </>

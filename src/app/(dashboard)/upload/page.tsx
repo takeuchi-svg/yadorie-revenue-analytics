@@ -15,6 +15,7 @@ import { parsePlCsv } from '@/lib/etl/pl-parser'
 import { parseAttendanceHtml, type FacilityMapping } from '@/lib/etl/attendance-parser'
 import { parseReviewCsv, type ReviewInsert } from '@/lib/etl/review-parser'
 import { supabase } from '@/lib/supabase/client'
+import { fetchAll } from '@/lib/supabase/fetch-all'
 import { useFacility } from '@/lib/facility-context'
 
 // Supabaseのエラーは Error インスタンスでないため、メッセージを確実に取り出す
@@ -331,6 +332,7 @@ export default function UploadPage() {
       }
 
       const results: UploadResult[] = []
+      const resvFacilities = new Set<string>()  // M3: 取込後に snapshot_onhand へ断面追記する施設
 
       for (const payload of payloads) {
         const { table, data } = payload
@@ -340,7 +342,34 @@ export default function UploadPage() {
         }
         try {
           let totalInserted = 0
+          let warning: string | undefined
           const onConflict = UPSERT_KEYS[table] || ''
+
+          // M3: 予約情報の取込バリデーション（非ブロッキング）
+          if (table === 'raw_reservation') {
+            const fac = (data[0] as Record<string, unknown>).facility as string
+            const sourceMonth = (data[0] as Record<string, unknown>).source_month as string | null
+            resvFacilities.add(fac)
+            const warns: string[] = []
+            // 全ステータス出力チェック: キャンセル行が0なら全ステータス出力でない可能性
+            const cxlCount = (data as Record<string, unknown>[]).filter((r) => r.status === 'キャンセル').length
+            if (cxlCount === 0) warns.push('キャンセル行が0件です。全ステータス出力でない可能性（ブッキングカーブの再構築が狂います）')
+            // 確定実績の変更検知: 同一source_monthの既存C/Oと精算額を突合
+            if (sourceMonth) {
+              try {
+                const existing = await fetchAll<{ pms_id: number; revenue_settled: number | null; status: string | null }>(
+                  () => supabase.from('raw_reservation').select('pms_id, revenue_settled, status').eq('facility', fac).eq('source_month', sourceMonth))
+                const exMap = new Map(existing.map((e) => [e.pms_id, e]))
+                let changed = 0
+                for (const r of data as Record<string, unknown>[]) {
+                  const e = exMap.get(r.pms_id as number)
+                  if (e && e.status === 'C/O' && (e.revenue_settled ?? 0) !== ((r.revenue_settled as number | null) ?? 0)) changed++
+                }
+                if (changed > 0) warns.push(`確定済(C/O)の精算額が${changed}件変化しています。誤ったCSV（古い出力・別期間）の可能性。差分をご確認ください`)
+              } catch { /* 検知失敗は取込を止めない */ }
+            }
+            if (warns.length) warning = warns.join(' / ')
+          }
 
           // Tables without simple unique keys: delete existing data before insert
           const DELETE_BEFORE_INSERT = ['raw_basic_product', 'raw_other_product', 'raw_payment', 'raw_rate_snapshot', 'raw_room_sales']
@@ -377,7 +406,7 @@ export default function UploadPage() {
               totalInserted += count ?? batch.length
             }
           }
-          results.push({ table, inserted: totalInserted, skipped: payload.skipped })
+          results.push({ table, inserted: totalInserted, skipped: payload.skipped, warning })
         } catch (err) {
           const message = err instanceof Error ? err.message
             : (err && typeof err === 'object' && 'message' in err) ? String((err as { message: unknown }).message)
@@ -400,6 +429,21 @@ export default function UploadPage() {
           } as FileEntry
         })
       )
+
+      // M3: 予約情報を取り込んだ施設は、取込後の mart_onhand（＝現在のオンハンド断面）を
+      //     snapshot_onhand に当日断面として追記する（追記専用・同日再取込は上書き）。
+      //     全upsert後に施設単位で1回だけ実行（ファイル分割による二重計上/上書きを防ぐ）。
+      const snapDate = new Date().toISOString().slice(0, 10)
+      for (const fac of resvFacilities) {
+        try {
+          const oh = await fetchAll<{ stay_date: string; channel: string; rooms: number | null; guests: number | null; revenue: number | null }>(
+            () => supabase.from('mart_onhand').select('stay_date, channel, rooms, guests, revenue').eq('facility', fac))
+          const snap = oh.map((o) => ({ facility: fac, snapshot_date: snapDate, stay_date: o.stay_date, channel: o.channel ?? '不明', rooms: o.rooms, guests: o.guests, revenue: o.revenue }))
+          for (let i = 0; i < snap.length; i += 500) {
+            await supabase.from('snapshot_onhand').upsert(snap.slice(i, i + 500), { onConflict: 'facility,snapshot_date,stay_date,channel' })
+          }
+        } catch { /* 断面追記の失敗は取込自体を止めない */ }
+      }
     }
 
     await refreshMarts()
@@ -509,6 +553,11 @@ export default function UploadPage() {
                       {entry.result?.skipped ? (
                         <span style={{ color: 'var(--yellow)' }} title="ヘッダー不一致・必須項目欠落等で変換できなかった行。件数が多い場合はフォーマットを確認してください">
                           ⚠ {entry.result.skipped}行スキップ
+                        </span>
+                      ) : null}
+                      {entry.result?.warning ? (
+                        <span style={{ color: 'var(--red)' }} title="取込は完了していますが確認が必要です">
+                          ⚠ {entry.result.warning}
                         </span>
                       ) : null}
                       {entry.error && (
