@@ -486,6 +486,26 @@ export default function UploadPage() {
         </div>
 
         {tab === 'sales' && (<>
+        {/* アップロード種別ガイド（枠外） */}
+        <div className="card p-4 mb-4" style={{ borderColor: 'var(--border)' }}>
+          <div className="text-xs font-semibold mb-2" style={{ color: 'var(--text-dim)' }}>アップロードの種類</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <div>
+              <div className="font-medium mb-0.5">❶ 実績アップロード<span className="text-[10px] font-normal ml-1 px-1.5 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>月1・確定締め</span></div>
+              <p className="text-xs" style={{ color: 'var(--text-dim)' }}>ステイシー（基本商品情報・その他商品情報・入金情報・販売数集計表・予約情報）＋ 在庫レート表</p>
+            </div>
+            <div>
+              <div className="font-medium mb-0.5">❷ オンハンドアップロード<span className="text-[10px] font-normal ml-1 px-1.5 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>週1・鮮度</span></div>
+              <p className="text-xs" style={{ color: 'var(--text-dim)' }}>ステイシー（予約情報のみ）を当月〜予約が入っている最終月まで数本</p>
+            </div>
+          </div>
+          <ul className="mt-2 text-[11px] space-y-0.5" style={{ color: 'var(--text-dim)' }}>
+            <li>・予約情報は必ず<strong style={{ color: 'var(--text)' }}>全ステータス（C/O＋キャンセル＋全て）</strong>で出力（キャンセル日が欠けるとブッキングカーブの再構築が狂います）</li>
+            <li>・ファイル名に対象年月（例「2026_05」）を含める（重複防止・過去分の上書きに使用）</li>
+            <li>・確定済み（C/O）の過去実績が再取込で変化すると警告が出ます（誤ったCSVの検知）</li>
+          </ul>
+        </div>
+
         {/* Drop zone */}
         <div
           className="border-2 border-dashed rounded-lg p-12 text-center transition-colors card"
