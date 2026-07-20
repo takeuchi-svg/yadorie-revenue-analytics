@@ -99,9 +99,19 @@ export default function OverviewPage() {
     }).catch(() => setLoading(false))
   }, [current])
 
+  // 最新の実績月（無ければ最新の予算/データ月）→ 今期(FY)を決める
+  const latestMonth = useMemo(() => {
+    const am = actual.map((a) => a.month)
+    if (am.length) { const s = [...am].sort(); return s[s.length - 1] }
+    const all = [...new Set([...budget.map((b) => b.month), ...kpi.map((k) => k.month)])].sort()
+    return all[all.length - 1] ?? ''
+  }, [actual, budget, kpi])
+  const fy = latestMonth ? fiscalYearOf(latestMonth) : fiscalYearOf(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`)
+  const fyMs = useMemo(() => fyMonths(fy), [fy])
+
   const resolver = useMemo(
-    () => makePlResolver({ budget, actual, kpi, occ, opRooms, totalRooms, fy: '', forecast }),
-    [budget, actual, kpi, occ, opRooms, totalRooms, forecast])
+    () => makePlResolver({ budget, actual, kpi, occ, opRooms, totalRooms, fy: String(fy), forecast }),
+    [budget, actual, kpi, occ, opRooms, totalRooms, fy, forecast])
 
   // 満足度: 月別の総合評価（3ヶ月ローリングmartをn加重）
   const satByMonth = useMemo(() => {
@@ -114,17 +124,6 @@ export default function OverviewPage() {
     for (const [mo, v] of Object.entries(m)) out[mo] = v.n > 0 ? v.sum / v.n : null
     return out
   }, [satRows])
-
-  // 最新の実績月（無ければ最新の予算/データ月）
-  const latestMonth = useMemo(() => {
-    const am = [...resolver.actualMonths].sort()
-    if (am.length) return am[am.length - 1]
-    const all = [...new Set([...budget.map((b) => b.month), ...kpi.map((k) => k.month)])].sort()
-    return all[all.length - 1] ?? ''
-  }, [resolver.actualMonths, budget, kpi])
-
-  const fy = latestMonth ? fiscalYearOf(latestMonth) : new Date().getFullYear()
-  const fyMs = useMemo(() => fyMonths(fy), [fy])
 
   const loadReport = useCallback(async (facility: string, month: string) => {
     const key = `${facility}|${month}`
@@ -160,6 +159,22 @@ export default function OverviewPage() {
     { label: '営業利益', kind: 'yen', cur: val('operating_income'), bud: bud('operating_income'), prev: prv('operating_income') },
     { label: '顧客満足度 総合', kind: 'score', cur: satByMonth[lm] ?? null, bud: null, prev: satByMonth[pm] ?? null },
   ]
+
+  // 今期の想定着地（実績＞見込＞予算）と年度予算・予算差異
+  const sumB = (code: string) => fyMs.reduce((s, m) => s + (resolver.getBudget(code, m) ?? 0), 0)
+  const summary = {
+    sales: { land: resolver.yearLanding('sales_total'), bud: resolver.yearBudget('sales_total') },
+    occ: { land: resolver.yearLanding('稼働率'), bud: sumB('在庫数') > 0 ? sumB('販売室数') / sumB('在庫数') : null },
+    adr: { land: resolver.yearLanding('室単価'), bud: sumB('販売室数') > 0 ? sumB('sales_total') / sumB('販売室数') : null },
+    gop: { land: resolver.yearLanding('gop'), bud: resolver.yearBudget('gop') },
+    oi: { land: resolver.yearLanding('operating_income'), bud: resolver.yearBudget('operating_income') },
+  }
+  const fcMonths = useMemo(() => new Set(forecast.map((f) => f.month)), [forecast])
+  const dyen = (l: number | null, b: number | null): { t: string; c?: string } =>
+    (l == null || b == null) ? { t: '-' } : { t: (l - b >= 0 ? '+' : '') + fmtNum(l - b), c: l - b >= 0 ? 'var(--green)' : 'var(--red)' }
+  const dpt = (l: number | null, b: number | null): { t: string; c?: string } =>
+    (l == null || b == null) ? { t: '-' } : { t: ((l - b) * 100 >= 0 ? '+' : '') + ((l - b) * 100).toFixed(1) + 'pt', c: (l - b) >= 0 ? 'var(--green)' : 'var(--red)' }
+  const diffCells = [dyen(summary.sales.land, summary.sales.bud), dpt(summary.occ.land, summary.occ.bud), dyen(summary.adr.land, summary.adr.bud), dyen(summary.gop.land, summary.gop.bud), dyen(summary.oi.land, summary.oi.bud)]
 
   const noData = !loading && !lm
 
@@ -256,7 +271,7 @@ export default function OverviewPage() {
                   const isA = resolver.actualMonths.has(m)
                   return (
                     <tr key={m} style={{ borderTop: '1px solid var(--border)', background: isA ? undefined : 'rgba(216,90,48,0.03)' }}>
-                      <td className="px-4 py-2 font-medium">{m}{!isA && <span className="ml-1 text-[9px] px-1 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>予算</span>}</td>
+                      <td className="px-4 py-2 font-medium">{m}{!isA && <span className="ml-1 text-[9px] px-1 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>{fcMonths.has(m) ? '見込' : '予算'}</span>}</td>
                       <td className="px-4 py-2 text-right">{fmtNum(resolver.landingFor('sales_total', m))}</td>
                       <td className="px-4 py-2 text-right">{pct(resolver.landingFor('稼働率', m))}</td>
                       <td className="px-4 py-2 text-right">{fmtNum(resolver.landingFor('室単価', m))}</td>
@@ -266,10 +281,35 @@ export default function OverviewPage() {
                     </tr>
                   )
                 })}
+                {/* 今期の想定着地 */}
+                <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--surface2)' }} className="font-bold">
+                  <td className="px-4 py-2">着地見込</td>
+                  <td className="px-4 py-2 text-right">{fmtNum(summary.sales.land)}</td>
+                  <td className="px-4 py-2 text-right">{pct(summary.occ.land)}</td>
+                  <td className="px-4 py-2 text-right">{fmtNum(summary.adr.land)}</td>
+                  <td className="px-4 py-2 text-right">{fmtNum(summary.gop.land)}</td>
+                  <td className="px-4 py-2 text-right">{fmtNum(summary.oi.land)}</td>
+                  <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>-</td>
+                </tr>
+                <tr style={{ borderTop: '1px solid var(--border)', background: 'var(--surface2)', color: 'var(--text-dim)' }}>
+                  <td className="px-4 py-2">年度予算</td>
+                  <td className="px-4 py-2 text-right">{fmtNum(summary.sales.bud)}</td>
+                  <td className="px-4 py-2 text-right">{pct(summary.occ.bud)}</td>
+                  <td className="px-4 py-2 text-right">{fmtNum(summary.adr.bud)}</td>
+                  <td className="px-4 py-2 text-right">{fmtNum(summary.gop.bud)}</td>
+                  <td className="px-4 py-2 text-right">{fmtNum(summary.oi.bud)}</td>
+                  <td className="px-4 py-2 text-right">-</td>
+                </tr>
+                <tr style={{ borderTop: '1px solid var(--border)', background: 'var(--surface2)' }} className="font-medium">
+                  <td className="px-4 py-2">予算差異</td>
+                  {diffCells.map((d, i) => <td key={i} className="px-4 py-2 text-right" style={{ color: d.c }}>{d.t}</td>)}
+                  <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>-</td>
+                </tr>
               </tbody>
             </table>
             <p className="text-xs px-4 py-3" style={{ color: 'var(--text-dim)' }}>
-              実績のある月は実績、無い月は予算（見込があれば見込）。GOP・営業利益は予実PL（sales−原価−人件費−販管費、EBITDA−減価償却）を再計算。顧客満足度は3ヶ月平滑化の総合評価。
+              実績のある月は実績、無い月は予算（見込があれば見込）。「着地見込」＝実績＋残月見込の今期想定着地、「予算差異」＝着地−年度予算（緑=予算超・赤=未達）。
+              GOP・営業利益は予実PL（sales−原価−人件費−販管費、EBITDA−減価償却）を再計算。顧客満足度は3ヶ月平滑化の総合評価。
             </p>
           </div>
         </>
