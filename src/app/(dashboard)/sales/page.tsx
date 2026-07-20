@@ -407,12 +407,16 @@ function SalesDrill({ mon, resv, prevPoint }: { mon: string; resv: Resv[]; prevP
         </div>
       </div>
 
-      <div className="flex items-center gap-3 text-xs">
-        <Link href={`/booking?tab=curve&month=${mon}`} className="px-2.5 py-1 rounded-md" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
-          → この月の予約の入り方（ブッキングカーブ）
+      <div className="flex items-center gap-2 text-xs flex-wrap">
+        <span style={{ color: 'var(--text-dim)' }}>{mon} を詳しく →</span>
+        <Link href={`/revenue?month=${mon}`} className="px-2.5 py-1 rounded-md" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
+          月別売上分析
         </Link>
-        <Link href="/daily" className="px-2.5 py-1 rounded-md" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
-          → 日別売上分析
+        <Link href={`/sameday?month=${mon}`} className="px-2.5 py-1 rounded-md" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
+          前年同日分析
+        </Link>
+        <Link href={`/daily?month=${mon}`} className="px-2.5 py-1 rounded-md" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--accent)' }}>
+          日別売上分析
         </Link>
       </div>
     </div>

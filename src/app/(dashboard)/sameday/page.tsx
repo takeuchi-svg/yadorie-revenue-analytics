@@ -2,7 +2,7 @@
 
 // 前年同日分析（先行予約 同日対比）— 基準日を選び、宿泊月ごとに「基準日時点で入っていた予約」を
 // 今年 vs 前年同日で比較する。チャネル別に売上・室数(泊)・ADR・人数・同伴を並べる。
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
@@ -78,6 +78,14 @@ export default function SameDayPage() {
     return out
   }, [resv, months, asOf, prevAsOf])
 
+  // 売上状況からの ?month= に対応（該当月カードへスクロール）
+  useEffect(() => {
+    const m = new URLSearchParams(window.location.search).get('month')
+    if (!m || loading) return
+    const el = document.getElementById(`sd-${m}`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [loading])
+
   const monthRows = useMemo(() => months.map((m) => {
     const { cur, prev } = byMonth[m]
     const chSet = [...new Set([...Object.keys(cur), ...Object.keys(prev)])]
@@ -127,7 +135,7 @@ export default function SameDayPage() {
       ) : (
         <div className="space-y-4">
           {monthRows.map(({ m, prevM, rows, total }) => (
-            <div key={m} className="card overflow-x-auto">
+            <div key={m} id={`sd-${m}`} className="card overflow-x-auto">
               <div className="flex items-center justify-between px-4 pt-3 pb-2">
                 <h2 className="text-sm font-semibold">宿泊月：{m}</h2>
                 <span className="text-xs" style={{ color: 'var(--text-dim)' }}>前年同月：{prevM}</span>

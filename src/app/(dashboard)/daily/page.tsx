@@ -41,13 +41,14 @@ function rankColor(rank: number | null | undefined): string {
 
 /* ---------- KPI 定義 ---------- */
 type Metrics = { sold: number; revenue: number; guests: number; guestUnit: number | null; occ: number | null; adr: number | null; companion: number | null; revpar: number | null }
+// 並び順: 売上・室数・人数・客単価・室単価・稼働率・同伴係数・RevPAR
 const KPIS: { key: keyof Metrics; label: string; color: string; fmt: (v: any) => string }[] = [
-  { key: 'sold', label: '販売室数', color: '#6366f1', fmt: (v) => fmtNum(v) },
   { key: 'revenue', label: '売上', color: '#22c55e', fmt: (v) => fmtYen(v) },
+  { key: 'sold', label: '室数', color: '#6366f1', fmt: (v) => fmtNum(v) },
   { key: 'guests', label: '人数', color: '#f59e0b', fmt: (v) => fmtNum(v) },
   { key: 'guestUnit', label: '客単価', color: '#ef4444', fmt: (v) => fmtYen(v) },
+  { key: 'adr', label: '室単価', color: '#a855f7', fmt: (v) => fmtYen(v) },
   { key: 'occ', label: '稼働率', color: '#06b6d4', fmt: (v) => pct(v) },
-  { key: 'adr', label: 'ADR', color: '#a855f7', fmt: (v) => fmtYen(v) },
   { key: 'companion', label: '同伴係数', color: '#84cc16', fmt: (v) => (v == null ? '-' : Number(v).toFixed(2)) },
   { key: 'revpar', label: 'RevPAR', color: '#ec4899', fmt: (v) => fmtYen(v) },
 ]
@@ -119,8 +120,12 @@ export default function DailyPage() {
         }
       }
       setSoldMap(sMap); setRevMap(rMap); setGuestMap(gMap); setBudgetMap(bMap)
+      // 既定範囲: URLの ?month= があればその月、無ければ最新月
+      const urlMonth = new URLSearchParams(window.location.search).get('month')
       const dates = Object.keys(sMap).sort()
-      if (dates.length > 0) {
+      if (urlMonth && /^\d{4}-\d{2}$/.test(urlMonth)) {
+        setFrom(`${urlMonth}-01`); setTo(lastDayOfMonth(urlMonth))
+      } else if (dates.length > 0) {
         const latest = dates[dates.length - 1].slice(0, 7)
         setFrom(`${latest}-01`); setTo(lastDayOfMonth(latest))
       }
@@ -210,13 +215,6 @@ export default function DailyPage() {
     return raw
   }, [model, metricsFor, showPY, showPM, showBudget, budgetMap])
 
-  const budgetRange = useMemo(() => {
-    if (!model) return null
-    let rev = 0, sold = 0, has = false
-    for (const { date } of model.rows) { const b = budgetMap[date]; if (b) { has = true; rev += b.revenue || 0; sold += b.sold || 0 } }
-    return has ? { rev, sold } : null
-  }, [model, budgetMap])
-
   const HROW = 'h-9', HHEAD = 'h-11'
   const toggle = (key: string) => setVisible((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
 
@@ -236,28 +234,6 @@ export default function DailyPage() {
         <p style={{ color: 'var(--text-dim)' }}>範囲を選択してください</p>
       ) : (
         <>
-          {/* 範囲サマリ（実績 vs 予算） */}
-          {budgetRange && (
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
-              <div className="card p-3">
-                <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>売上（実績／予算）</p>
-                <p className="text-lg font-bold">{fmtNum(model.total.revenue)} <span className="text-xs" style={{ color: 'var(--text-dim)' }}>/ {fmtNum(budgetRange.rev)}</span></p>
-              </div>
-              <div className="card p-3">
-                <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>売上 達成率</p>
-                <p className="text-lg font-bold" style={{ color: 'var(--accent)' }}>{budgetRange.rev > 0 ? pct(model.total.revenue / budgetRange.rev) : '-'}</p>
-              </div>
-              <div className="card p-3">
-                <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>販売室数（実績／予算）</p>
-                <p className="text-lg font-bold">{fmtNum(model.total.sold)} <span className="text-xs" style={{ color: 'var(--text-dim)' }}>/ {fmtNum(budgetRange.sold)}</span></p>
-              </div>
-              <div className="card p-3">
-                <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>販売室数 達成率</p>
-                <p className="text-lg font-bold" style={{ color: 'var(--accent)' }}>{budgetRange.sold > 0 ? pct(model.total.sold / budgetRange.sold) : '-'}</p>
-              </div>
-            </div>
-          )}
-
           {/* KPI 折れ線グラフ */}
           <div className="card p-4 mb-4">
             <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
@@ -314,7 +290,7 @@ export default function DailyPage() {
                 <thead>
                   <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-left">
                     <th className={`px-3 ${HHEAD} whitespace-nowrap`}>日付</th>
-                    {['販売室数', '売上', '人数', '客単価', '稼働率', 'ADR', '同伴係数', 'RevPAR'].map((h) => (
+                    {['売上', '室数', '人数', '客単価', '室単価', '稼働率', '同伴係数', 'RevPAR'].map((h) => (
                       <th key={h} className={`px-3 ${HHEAD} text-right whitespace-nowrap`}>{h}</th>
                     ))}
                   </tr>
@@ -326,12 +302,12 @@ export default function DailyPage() {
                     return (
                       <tr key={date} style={{ borderTop: '1px solid var(--border)' }}>
                         <td className={`px-3 ${HROW} whitespace-nowrap font-medium`} style={{ color: dcolor }}>{mmdd(date)}({DOW[dw]})</td>
-                        <td className={`px-3 ${HROW} text-right`}>{fmtNum(m.sold)}</td>
                         <td className={`px-3 ${HROW} text-right`}>{fmtNum(m.revenue)}</td>
+                        <td className={`px-3 ${HROW} text-right`}>{fmtNum(m.sold)}</td>
                         <td className={`px-3 ${HROW} text-right`}>{fmtNum(m.guests)}</td>
                         <td className={`px-3 ${HROW} text-right`}>{fmtNum(m.guestUnit)}</td>
-                        <td className={`px-3 ${HROW} text-right`}>{pct(m.occ)}</td>
                         <td className={`px-3 ${HROW} text-right`}>{fmtNum(m.adr)}</td>
+                        <td className={`px-3 ${HROW} text-right`}>{pct(m.occ)}</td>
                         <td className={`px-3 ${HROW} text-right`}>{m.companion?.toFixed(2) ?? '-'}</td>
                         <td className={`px-3 ${HROW} text-right`}>{fmtNum(m.revpar)}</td>
                       </tr>
@@ -339,12 +315,12 @@ export default function DailyPage() {
                   })}
                   <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--surface2)' }} className="font-semibold">
                     <td className={`px-3 ${HHEAD} whitespace-nowrap`}>合計/平均</td>
-                    <td className={`px-3 ${HHEAD} text-right`}>{fmtNum(model.total.sold)}</td>
                     <td className={`px-3 ${HHEAD} text-right`}>{fmtNum(model.total.revenue)}</td>
+                    <td className={`px-3 ${HHEAD} text-right`}>{fmtNum(model.total.sold)}</td>
                     <td className={`px-3 ${HHEAD} text-right`}>{fmtNum(model.total.guests)}</td>
                     <td className={`px-3 ${HHEAD} text-right`}>{fmtNum(model.total.guestUnit)}</td>
-                    <td className={`px-3 ${HHEAD} text-right`}>{pct(model.total.occ)}</td>
                     <td className={`px-3 ${HHEAD} text-right`}>{fmtNum(model.total.adr)}</td>
+                    <td className={`px-3 ${HHEAD} text-right`}>{pct(model.total.occ)}</td>
                     <td className={`px-3 ${HHEAD} text-right`}>{model.total.companion?.toFixed(2) ?? '-'}</td>
                     <td className={`px-3 ${HHEAD} text-right`}>{fmtNum(model.total.revpar)}</td>
                   </tr>
