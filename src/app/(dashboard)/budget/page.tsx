@@ -9,12 +9,11 @@ import { fetchAll } from '@/lib/supabase/fetch-all'
 import { useToast } from '@/components/toast'
 import BudgetDaily from '@/components/budget-daily'
 import BudgetPL from '@/components/budget-pl'
+import BudgetCapex from '@/components/budget-capex'
+import BudgetStaffing from '@/components/budget-staffing'
 import BudgetReviewCard from '@/components/budget-review-card'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-function ComingSoon({ label }: { label: string }) {
-  return <div className="card p-8 mt-4 text-center text-sm" style={{ color: 'var(--text-dim)' }}>「{label}」は準備中です。</div>
-}
 
 export default function BudgetPage() {
   const { current, isOwner } = useFacility()
@@ -65,9 +64,14 @@ export default function BudgetPage() {
         {([['daily', '日別売上予算'], ['pl', '月次PL予算'], ['capex', '修繕投資計画'], ['staffing', '人員計画']] as const).map(([t, label]) => (
           <button key={t} onClick={() => setTab(t)} className="px-4 py-1.5 rounded-md text-sm"
             style={{ background: tab === t ? 'var(--accent)' : 'var(--surface2)', color: tab === t ? '#fff' : 'var(--text-dim)' }}>
-            {label}{(t === 'capex' || t === 'staffing') && <span className="ml-1 text-[9px]">準備中</span>}
+            {label}
           </button>
         ))}
+        {(tab === 'capex' || tab === 'staffing') && fy != null && (
+          <select className="ml-auto field px-3 py-1.5 text-sm" value={fy} onChange={(e) => setFy(Number(e.target.value))}>
+            {fyList.map((y) => <option key={y} value={y}>{y}年度</option>)}
+          </select>
+        )}
         {(tab === 'daily' || tab === 'pl') && fy != null && (
           <span className="ml-auto flex items-center gap-2">
             {locked && <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>🔒 {fy}年度は確定（ロック中）</span>}
@@ -81,8 +85,8 @@ export default function BudgetPage() {
       </div>
       {tab === 'daily' && <BudgetDaily fy={fy} fyList={fyList} onFy={setFy} locked={locked} />}
       {tab === 'pl' && <BudgetPL fy={fy} fyList={fyList} onFy={setFy} locked={locked} />}
-      {tab === 'capex' && <ComingSoon label="修繕投資計画" />}
-      {tab === 'staffing' && <ComingSoon label="人員計画" />}
+      {tab === 'capex' && <BudgetCapex fy={fy} />}
+      {tab === 'staffing' && <BudgetStaffing fy={fy} />}
       {(tab === 'daily' || tab === 'pl') && <BudgetReviewCard fy={fy} />}
     </div>
   )
