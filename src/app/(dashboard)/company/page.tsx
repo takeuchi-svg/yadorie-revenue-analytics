@@ -12,6 +12,7 @@ import { fetchAll } from '@/lib/supabase/fetch-all'
 import { fmtNum, fmtMan, pct, CHART_AXIS } from '@/lib/ui'
 import { Loading, Empty, LoadError } from '@/components/page-bits'
 import { AssistantContent } from '@/components/ai-drawer'
+import CompanyShiftVariance from '@/components/company-shift-variance'
 import {
   loadCompanyData, aggregateScope, detectAnomalies, loadFacilityQualitative, buildCompanyMaterial,
   type CompanyDataset, type FacilityMetrics, type Triple, type ScopeAggregate,
@@ -540,6 +541,9 @@ export default function CompanyPage() {
             金額=万円。売上/営業利益/GOPは宿ごとにPL明細から再計算（予実ページと同一）。人件費率=人件費(PL)÷売上、生産性=売上÷総労働時間、OCC=全日ベース。
             満足度=クチコミ総合(3ヶ月平滑)。全店/既存店/新店は開業13ヶ月ルール（新店は前年比を非表示）。人件費率・生産性・満足度・NPSの色はスコープ平均比。
           </p>
+
+          {/* (F) シフト予実（施設×月・SV07） */}
+          <CompanyShiftVariance />
         </>
       )}
 
