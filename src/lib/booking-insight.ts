@@ -11,11 +11,14 @@ const yoy = (cur: number, prev: number) => (prev > 0 ? `前年比${Math.round((c
 const adr = (rn: number, rev: number) => (rn > 0 ? fmtMan(Math.round(rev / rn)) : '—')
 
 export async function buildBookingInsightMaterial(sb: SupabaseClient, facility: string, asOf: string): Promise<string> {
-  const [flow, onhand, actions] = await Promise.all([
+  const [flow, onhand, actions, budget] = await Promise.all([
     fetchAll<any>(() => sb.from('mart_booking_flow').select('flow_date, channel, new_room_nights, new_revenue').eq('facility', facility)).catch(() => []),
-    fetchAll<any>(() => sb.from('mart_onhand').select('stay_date, channel, rooms').eq('facility', facility)).catch(() => []),
+    fetchAll<any>(() => sb.from('mart_onhand').select('stay_date, channel, rooms, revenue').eq('facility', facility)).catch(() => []),
     fetchAll<any>(() => sb.from('raw_marketing_action').select('channel, action_type, title, start_date, end_date').eq('facility', facility)).catch(() => []),
+    fetchAll<any>(() => sb.from('mart_budget_daily_monthly').select('month, revenue_budget').eq('facility', facility)).catch(() => []),
   ])
+  const budMap: Record<string, number> = {}
+  for (const b of budget as any[]) if (b.revenue_budget != null) budMap[b.month] = b.revenue_budget
 
   // 予約日ベース 月次（新規予約）
   const bm: Record<string, { rn: number; rev: number }> = {}
@@ -41,14 +44,19 @@ export async function buildBookingInsightMaterial(sb: SupabaseClient, facility: 
   for (const [ch, v] of Object.entries(chAcc).sort((a, b) => b[1].cur - a[1].cur))
     lines.push(`- ${ch}: 室泊 ${v.cur}（${yoy(v.cur, v.prev)}） / 室単価 ${adr(v.cur, v.rev)}`)
 
-  // オンハンド（宿泊日ベース・今後6ヶ月の現在の入り）
-  const om: Record<string, number> = {}; const omByCh: Record<string, Record<string, number>> = {}
-  for (const r of onhand as any[]) { const m = r.stay_date.slice(0, 7); om[m] = (om[m] ?? 0) + (r.rooms ?? 0); (omByCh[m] ??= {}); omByCh[m][r.channel] = (omByCh[m][r.channel] ?? 0) + (r.rooms ?? 0) }
+  // オンハンド（宿泊日ベース・今後6ヶ月の現在の入り。売上は予算比も添える）
+  const om: Record<string, number> = {}; const omRev: Record<string, number> = {}; const omByCh: Record<string, Record<string, number>> = {}
+  for (const r of onhand as any[]) {
+    const m = r.stay_date.slice(0, 7)
+    om[m] = (om[m] ?? 0) + (r.rooms ?? 0); omRev[m] = (omRev[m] ?? 0) + (r.revenue ?? 0)
+    ;(omByCh[m] ??= {}); omByCh[m][r.channel] = (omByCh[m][r.channel] ?? 0) + (r.rooms ?? 0)
+  }
   const future = Object.keys(om).filter((m) => m >= asOf).sort().slice(0, 6)
-  lines.push('', '## オンハンド（宿泊日ベース・今後6ヶ月・現在の入り室数）※前年同時点は蓄積待ちのため未提供')
+  lines.push('', '## オンハンド（宿泊日ベース・今後6ヶ月・現在の入り）※前年同時点は蓄積待ちのため未提供')
   for (const m of future) {
     const top = Object.entries(omByCh[m] ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([c, v]) => `${c}${v}`).join('・')
-    lines.push(`- ${m}宿泊: ${om[m]}室（${top}）`)
+    const bud = budMap[m]
+    lines.push(`- ${m}宿泊: ${om[m]}室 / 売上 ${fmtMan(omRev[m] ?? 0)}${bud ? `（予算比${Math.round(((omRev[m] ?? 0) / bud) * 100)}%）` : ''}（${top}）`)
   }
 
   // 施策（直近8ヶ月）

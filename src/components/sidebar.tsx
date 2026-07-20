@@ -33,10 +33,14 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    key: 'analysis', label: '売上実績分析',
+    // 売上分析（旧: 売上実績分析＋オンハンドを統合）。宿泊日の軸=売上状況、予約日の軸=予約日ベース分析。
+    key: 'analysis', label: '売上分析',
     items: [
-      { href: '/revenue', label: '売上分析' },
-      { href: '/daily', label: '日別売上' },
+      { href: '/sales', label: '売上状況' },
+      { href: '/revenue', label: '単月売上分析' },
+      { href: '/booking', label: '予約日ベース分析' },
+      { href: '/daily', label: '日別売上分析' },
+      { href: '/marketing', label: '施策記録' },
       { href: '/cancel', label: 'CXL＆LT分析' },
       { href: '/fb', label: '料飲分析' },
     ],
@@ -49,16 +53,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: '#', label: 'スキルマップ', disabled: true, note: '準備中' },
     ],
   },
-  {
-    key: 'onhand', label: 'オンハンド',
-    items: [
-      { href: '/onhand', label: '予約状況（オンハンド）' },
-      { href: '/booking', label: '予約日ベース分析' },
-      { href: '/marketing', label: '施策記録' },
-      { href: '/rate', label: 'レートコントロール' },
-      { href: '/ota', label: 'OTA分析' },
-    ],
-  },
+  // レートコントロール(/rate)・OTA分析(/ota)は内容が固まるまでナビ非表示（ページは温存）
 ]
 
 // ---- 全社モードのナビ（owner のみ） ----
