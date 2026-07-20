@@ -84,6 +84,7 @@ export default function Sidebar() {
       ]
     : [
         ...BOTTOM_TOOLS,
+        { href: '/settings', label: '各宿設定' },
         { href: '/dict', label: '辞書' },
       ]
 

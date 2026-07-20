@@ -91,7 +91,8 @@ end $$;
 do $$
 declare t text; pol record;
 begin
-  foreach t in array array['dim_facility','dim_facility_mapping','dim_role','dim_shift_pattern'] loop
+  -- dim_shift_pattern は「各宿設定」で施設スコープ編集にしたため master 扱いから除外（shift_pattern_settings.sql が正）
+  foreach t in array array['dim_facility','dim_facility_mapping','dim_role'] loop
     if to_regclass('public.' || t) is null then continue; end if;
     execute format('alter table %I enable row level security', t);
     for pol in select policyname from pg_policies where schemaname = 'public' and tablename = t loop
