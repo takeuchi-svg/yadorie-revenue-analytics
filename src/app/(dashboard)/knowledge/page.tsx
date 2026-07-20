@@ -25,6 +25,7 @@ interface Item {
   id: string | number
   title: string
   group: string
+  usage?: string   // どこで使われているか（サイドバー › 配下名称）
   content: string
   draft_content: string | null
   status: string
@@ -34,8 +35,12 @@ interface Item {
   updated_at: string | null
 }
 
+const G_L1 = '層1 灯の人格'
+const G_L2 = '層2 グループ共通ナレッジ'
+const G_PROMPT = 'プロンプト（機能別）'
+
 const PROMPT_LABEL: Record<string, string> = {
-  chat_system: '灯の人格（チャットの土台）',
+  chat_system: '灯の人格（全チャット共通の土台）',
   summary: '実績サマリ',
   issue: '課題と対策',
   review_analyze: 'クチコミ トピック抽出',
@@ -46,6 +51,29 @@ const PROMPT_LABEL: Record<string, string> = {
   meeting_extract: '月次会議 構造化抽出',
   budget_review: '予算レビュー（灯の伴走）',
   booking_insight: '売上状況 所見（売上の異変検知）',
+}
+// プロンプトの並び順（サイドバーの並び順に対応。chat_systemは層1なので含めない）
+const PROMPT_ORDER = [
+  'meeting_pack', 'summary', 'issue',   // ビュー › 概要 / 月次会議
+  'profile_context_template',           // ビュー › 宿プロフィール
+  'meeting_extract',                    // ビュー › 月次会議
+  'budget_review',                      // 予実管理 › 予算作成
+  'booking_insight',                    // 売上分析 › 売上状況
+  'review_analyze', 'review_insight',   // 顧客満足度
+  'company_insight',                    // 全社ダッシュボード
+]
+// どこで使われているか（サイドバー › その配下の名称）
+const PROMPT_USAGE: Record<string, string> = {
+  meeting_pack: 'ビュー › 概要／月次会議',
+  summary: 'ビュー › 概要（※月次レポートに統合・現在未使用）',
+  issue: 'ビュー › 概要（※月次レポートに統合・現在未使用）',
+  profile_context_template: 'ビュー › 宿プロフィール',
+  meeting_extract: 'ビュー › 月次会議',
+  budget_review: '予実管理 › 予算作成',
+  booking_insight: '売上分析 › 売上状況',
+  review_analyze: '顧客満足度',
+  review_insight: '顧客満足度',
+  company_insight: '全社ダッシュボード',
 }
 const KNOW_LABEL: Record<string, string> = {
   persona: '灯の人格（層1）',
@@ -99,17 +127,31 @@ export default function KnowledgePage() {
     }
     const r = await call({ action: 'list' })
     if (r.error) { setMsg(r.error); return }
+    const prompts = (r.prompts ?? []) as any[]
+    const knowledge = (r.knowledge ?? []) as any[]
+    const promptItem = (p: any, group: string, usage?: string): Item => ({
+      kind: 'prompt', id: p.prompt_key, title: PROMPT_LABEL[p.prompt_key] ?? p.prompt_key,
+      group, usage, content: p.content, draft_content: p.draft_content, status: p.status,
+      min_role_edit: p.min_role_edit, canEdit: p.canEdit, updated_by: p.updated_by, updated_at: p.updated_at,
+    })
+    const knowItem = (k: any): Item => ({
+      kind: 'knowledge', id: k.id, title: KNOW_LABEL[k.type] ?? k.type,
+      group: k.layer === 1 ? G_L1 : G_L2, content: k.content ?? '', draft_content: k.draft_content,
+      status: k.status, min_role_edit: k.min_role_edit, canEdit: k.canEdit, updated_by: k.updated_by, updated_at: k.updated_at,
+    })
+    // 灯の人格(chat_system)は層1として扱い、プロンプト群から分離
+    const persona = prompts.find((p) => p.prompt_key === 'chat_system')
+    const otherPrompts = prompts.filter((p) => p.prompt_key !== 'chat_system')
+      .sort((a, b) => {
+        const ia = PROMPT_ORDER.indexOf(a.prompt_key), ib = PROMPT_ORDER.indexOf(b.prompt_key)
+        return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)
+      })
+    // 並び順: 層1(人格) → 層2(グループ共通) → プロンプト(サイドバー順)
     const list: Item[] = [
-      ...((r.prompts ?? []) as any[]).map((p) => ({
-        kind: 'prompt' as const, id: p.prompt_key, title: PROMPT_LABEL[p.prompt_key] ?? p.prompt_key,
-        group: 'プロンプト（7種）', content: p.content, draft_content: p.draft_content, status: p.status,
-        min_role_edit: p.min_role_edit, canEdit: p.canEdit, updated_by: p.updated_by, updated_at: p.updated_at,
-      })),
-      ...((r.knowledge ?? []) as any[]).map((k) => ({
-        kind: 'knowledge' as const, id: k.id, title: KNOW_LABEL[k.type] ?? k.type,
-        group: k.layer === 1 ? '層1 人格' : '層2 グループ共通ナレッジ', content: k.content ?? '', draft_content: k.draft_content,
-        status: k.status, min_role_edit: k.min_role_edit, canEdit: k.canEdit, updated_by: k.updated_by, updated_at: k.updated_at,
-      })),
+      ...(persona ? [promptItem(persona, G_L1, '全ページの灯チャット共通の土台（人格）')] : []),
+      ...knowledge.filter((k) => k.layer === 1).map(knowItem),
+      ...knowledge.filter((k) => k.layer !== 1).map(knowItem),
+      ...otherPrompts.map((p) => promptItem(p, G_PROMPT, PROMPT_USAGE[p.prompt_key])),
     ]
     setItems(list)
   }, [call])
@@ -208,11 +250,14 @@ export default function KnowledgePage() {
                   const draftBadge = it.draft_content != null && it.draft_content !== it.content
                   return (
                     <button key={key} onClick={() => setSel(key)}
-                      className="w-full text-left px-2 py-2 rounded-md text-sm flex items-center gap-2 transition-colors"
+                      className="w-full text-left px-2 py-2 rounded-md text-sm flex items-start gap-2 transition-colors"
                       style={{ background: active ? 'var(--accent)' : 'transparent', color: active ? '#fff' : 'var(--text)' }}>
-                      <span className="flex-1">{it.title}</span>
-                      {draftBadge && <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: active ? 'rgba(255,255,255,.25)' : 'var(--yellow)', color: active ? '#fff' : '#000' }}>下書き</span>}
-                      {!it.canEdit && <span className="text-[9px]" style={{ color: active ? '#fff' : 'var(--text-dim)' }}>🔒</span>}
+                      <span className="flex-1 min-w-0">
+                        <span className="block truncate">{it.title}</span>
+                        {it.usage && <span className="block text-[10px] truncate mt-0.5" style={{ color: active ? 'rgba(255,255,255,.8)' : 'var(--text-dim)' }}>{it.usage}</span>}
+                      </span>
+                      {draftBadge && <span className="text-[9px] px-1.5 py-0.5 rounded shrink-0 mt-0.5" style={{ background: active ? 'rgba(255,255,255,.25)' : 'var(--yellow)', color: active ? '#fff' : '#000' }}>下書き</span>}
+                      {!it.canEdit && <span className="text-[9px] shrink-0 mt-0.5" style={{ color: active ? '#fff' : 'var(--text-dim)' }}>🔒</span>}
                     </button>
                   )
                 })}
@@ -228,6 +273,7 @@ export default function KnowledgePage() {
               <>
                 <div className="flex items-center gap-2 mb-3 flex-wrap">
                   <h2 className="text-lg font-semibold">{current.title}</h2>
+                  {current.usage && <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>使用: {current.usage}</span>}
                   {hasDraft && <span className="text-[10px] px-2 py-0.5 rounded" style={{ background: 'var(--yellow)', color: '#000' }}>未公開の下書きあり</span>}
                   <span className="ml-auto text-[11px]" style={{ color: 'var(--text-dim)' }}>
                     最終更新: {current.updated_at ? new Date(current.updated_at).toLocaleString('ja-JP') : '-'} {current.updated_by ? `by ${current.updated_by}` : ''}
