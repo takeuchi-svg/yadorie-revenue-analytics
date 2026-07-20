@@ -93,6 +93,26 @@ export default function ForecastPage() {
     setInp({})  // 当初予算を既定に新規作成
   }
 
+  // 選択中の見込バージョンを削除（保存済みの行があれば DB からも削除）
+  const deleteForecast = async () => {
+    if (!current || fy == null) return
+    const saved = fcVersions.includes(fcVersion)
+    if (saved) {
+      if (!confirm(`「${fcVersion}」（${fy}年度）を削除します。よろしいですか？\n※予実（PL）の着地から外れます（最新の別の見込があればそれに切替わります）`)) return
+      setSaving(true)
+      const { error } = await supabase.from('budget_monthly').delete()
+        .eq('facility', current).eq('fiscal_year', String(fy)).eq('version', fcVersion)
+      setSaving(false)
+      if (error) { toast(`エラー: ${error.message}`, 'error'); return }
+      toast(`${fcVersion}（${fy}年度）を削除しました`)
+      load()
+    } else {
+      // 未保存の新規見込は state を捨てて最新版へ戻すだけ
+      setFcVersion(fcVersions[fcVersions.length - 1] ?? '見込1')
+      setInp({})
+    }
+  }
+
   const R = useMemo(() => makePlResolver({ budget, actual, kpi, occ, totalRooms, fy: String(fy ?? '') }), [budget, actual, kpi, occ, totalRooms, fy])
   const confirmed = (m: string) => R.actualMonths.has(m)
 
@@ -138,6 +158,7 @@ export default function ForecastPage() {
           {[...new Set([...fcVersions, fcVersion])].sort().map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
         <button onClick={newForecast} className="text-xs px-3 py-1.5 rounded-md" style={{ background: 'var(--surface2)', color: 'var(--text)' }}>＋新しい見込</button>
+        <button onClick={deleteForecast} disabled={saving} className="text-xs px-3 py-1.5 rounded-md disabled:opacity-50" style={{ border: '1px solid var(--border)', color: 'var(--red)' }} title="選択中の見込を削除">削除</button>
         <button onClick={save} disabled={saving} className="ml-auto px-4 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>{saving ? '保存中…' : `${fcVersion}を保存`}</button>
       </div>
       <p className="text-[11px] mb-2" style={{ color: 'var(--text-dim)' }}>
