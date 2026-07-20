@@ -38,6 +38,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: '/sales', label: '売上状況' },
       { href: '/revenue', label: '単月売上分析' },
+      { href: '/sameday', label: '前年同日分析' },
       { href: '/booking', label: '予約日ベース分析' },
       { href: '/daily', label: '日別売上分析' },
       { href: '/marketing', label: '施策記録' },
