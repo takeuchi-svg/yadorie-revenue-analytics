@@ -127,9 +127,16 @@ export async function buildSystemBlocks(
 ): Promise<Anthropic.TextBlockParam[]> {
   const { layer2, kpi, glossary, standardPl } = await load(sb)
   const today = new Date().toISOString().slice(0, 10)
+  // {施設} には内部コード(FRY等)ではなく正式名称を注入する。
+  // コードだけ渡すと灯が名称を推測・捏造する（例: FRY→「大曲の森のリゾート」誤生成）ため。
+  let facilityLabel = '(未指定)'
+  if (facility) {
+    const { data: fac } = await sb.from('dim_facility').select('name').eq('facility', facility).maybeSingle()
+    facilityLabel = (fac?.name as string | undefined)?.trim() || facility
+  }
   const persona = (await getPrompt(sb, 'chat_system'))
     .replaceAll('{日付}', today)
-    .replaceAll('{施設}', facility || '(未指定)')
+    .replaceAll('{施設}', facilityLabel)
 
   const l2items = layer2.length ? layer2 : DEFAULT_LAYER2
   // 層2 = 全施設共通のMarkdownナレッジ ＋ KPI辞書・用語集（cache対象プレフィックス。施設非依存で共有）。

@@ -67,8 +67,9 @@ export async function buildBookingInsightMaterial(sb: SupabaseClient, facility: 
   }
 
   // ── ② オンハンド（宿泊日ベース・当月以降・現在の入り・予算比/前年同日比） ──
-  // 注意: mart_onhand は「当日以降の宿泊日」しか持たない。当月は月頭〜昨日の確定分が欠落し満月予算に対して過少になるため、
-  //       当月のみ満月ベースの生存予約(salesNow=実績確定+残りオンハンド)を採用。将来月(丸ごと先)は mart_onhand が正。
+  // 注意: mart_onhand は「当日以降の宿泊日」しか持たない。当月は月頭〜昨日の確定分が欠落し月間予算に対して過少になるため、
+  //       当月のみ月全体の生存予約(salesNow=確定済み実績+今後の予約)を採用。将来月(丸ごと先)は mart_onhand が正。
+  //       ※本文に渡す言葉は画面で使う普通の言葉のみ（「満月ベース」等の造語は灯が拾って出力するため禁止）。
   const om: Record<string, number> = {}; const omRev: Record<string, number> = {}; const omByCh: Record<string, Record<string, number>> = {}
   for (const r of onhand as any[]) {
     const m = r.stay_date.slice(0, 7)
@@ -78,7 +79,7 @@ export async function buildBookingInsightMaterial(sb: SupabaseClient, facility: 
   const futureSet = new Set<string>([curM])
   for (const m of Object.keys(om)) if (m > curM) futureSet.add(m)
   const future = [...futureSet].sort().slice(0, 7)
-  lines.push('', '## ② オンハンド（宿泊日ベース・当月以降のいま現在の入り。予算比＝満月予算に対する現在の入り率／前年同日比＝1年前の同日時点の入りとの比）')
+  lines.push('', '## ② オンハンド（宿泊日ベース・当月以降のいま現在の入り。予算比＝その月の予算に対する現在の入り(確定＋予約)の割合／前年同日比＝1年前の同日時点の入りとの比）')
   for (const m of future) {
     const pm = shiftYr(m)
     const isCur = m === curM
@@ -87,7 +88,7 @@ export async function buildBookingInsightMaterial(sb: SupabaseClient, facility: 
     const chMap = isCur ? (chNow[m] ?? {}) : (omByCh[m] ?? {})
     const psame = salesPrevSame[pm] ?? 0
     const top = Object.entries(chMap).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([c, v]) => `${c}${v}室`).join('・')
-    const note = isCur ? '（当月＝実績確定分＋残りオンハンドの満月ベース）' : ''
+    const note = isCur ? '（当月＝確定済み実績＋今後の予約をあわせた月全体）' : ''
     lines.push(`- ${m}宿泊${note}: ${rn}室泊 / 売上 ${fmtMan(rev)}（${rat(rev, budMap[m], '予算比')} / 前年同日比${psame > 0 ? Math.round((rev / psame) * 100) + '%' : '—'}）（${top}）`)
   }
 

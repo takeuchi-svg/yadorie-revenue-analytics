@@ -43,6 +43,31 @@ async function deepCreate(
   return text
 }
 
+// ── Phase 2: 2パス方式（ドラフト生成 → 自己検証 → 最終稿） ──
+// 実際に出た違和感（施設名の捏造「FRY=大曲の森の…」/ 造語「満月予算」/ 順繁忙期の秋を「谷」と表現）を
+// チェックリスト化。1つの違和感が全体の信頼を落とすため、公開前に灯自身に点検させる。
+const VERIFY_PROMPT = `あなたが直前に書いたドラフトを、以下の観点で厳密に点検し、修正を織り込んだ最終版だけを出力してください。点検メモ・修正理由・前置きは一切書かない（最終版の本文のみ）。
+1. 数値の検算: 引用した数値・比率が渡された材料と一致するか。材料に無い数値は書かない
+2. 軸と基準: すべての数字に軸（宿泊日ベース/予約日ベース）と基準（予算比/前年比/前年同日比）が明記されているか
+3. 言葉: 材料・画面に無い造語を使っていないか（例:「満月予算」はNG）。社内で通じる普通の言葉に直す
+4. 固有名詞: 施設名はシステムプロンプトで与えられた正式名称のみ。内部コード（英字ID）や推測した名称を排除
+5. プロフィール整合: 宿プロフィール（繁閑の理由・避けたいこと・NG）と矛盾する記述がないか（繁忙期の月を「谷」「閑散」と呼ぶ等）
+6. 構成: 指示された見出し構成・分量を維持。問題がなければそのまま出力してよい`
+
+async function deepCreateVerified(
+  client: Anthropic,
+  system: Anthropic.TextBlockParam[],
+  userContent: string,
+): Promise<string> {
+  const draft = await deepCreate(client, system, [{ role: 'user', content: userContent }])
+  // 同一system（層1+2はprompt cacheが効く）で会話を続け、検証・改稿した最終版のみ受け取る
+  return deepCreate(client, system, [
+    { role: 'user', content: userContent },
+    { role: 'assistant', content: draft },
+    { role: 'user', content: VERIFY_PROMPT },
+  ])
+}
+
 // フォールバック用の静的許可リスト（正本は data_confidentiality の C0。K30適用後は自動生成が優先）
 const ALLOWED_TABLES = new Set([
   'mart_monthly_kpi', 'mart_occupancy_monthly', 'mart_occupancy_daily',
@@ -368,7 +393,7 @@ export async function runMeetingPack(facility: string, month: string, material: 
     getPrompt(sb, 'meeting_pack'),
   ])
   const prompt = promptTpl.replaceAll('{month}', month)
-  return deepCreate(client, system, [{ role: 'user', content: `${prompt}\n\n【会議データ】\n${material}` }])
+  return deepCreateVerified(client, system, `${prompt}\n\n【会議データ】\n${material}`)
 }
 
 // 予算レビュー（B6）: 支配人が作った来期予算を灯が伴走レビュー。材料はクライアント算出。層3(基準PL/意図/取組)注入。
@@ -395,7 +420,7 @@ export async function runBookingInsight(facility: string, asOf: string, material
     getPrompt(sb, 'booking_insight'),
   ])
   const prompt = promptTpl.replaceAll('{as_of}', asOf)
-  return deepCreate(client, system, [{ role: 'user', content: `${prompt}\n\n【予約日ベースデータ】\n${material}` }])
+  return deepCreateVerified(client, system, `${prompt}\n\n【予約日ベースデータ】\n${material}`)
 }
 
 // kind='summary'|'issue' の本文を1回のLLM呼び出しで生成
