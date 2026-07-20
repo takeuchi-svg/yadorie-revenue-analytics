@@ -41,21 +41,21 @@ const G_PROMPT = 'プロンプト（機能別）'
 
 const PROMPT_LABEL: Record<string, string> = {
   chat_system: '灯の人格（全チャット共通の土台）',
-  summary: '実績サマリ',
-  issue: '課題と対策',
   review_analyze: 'クチコミ トピック抽出',
   review_insight: 'クチコミ 改善レポート',
-  profile_context_template: '宿プロフィール 前文',
+  profile_context_template: '宿プロフィール 前文（灯へ渡す冒頭文）',
   company_insight: '全社モード 所見',
   meeting_pack: '月次レポート（概要・月次会議で共通）',
-  meeting_extract: '月次会議 構造化抽出',
+  meeting_extract: '記録から抽出（灯の提案 → 承認で登録）',
   budget_review: '予算レビュー（灯の伴走）',
-  booking_insight: '売上状況 所見（売上の異変検知）',
+  booking_insight: '売上状況 所見（実績＋オンハンドの異変検知）',
 }
+// 灯の頭の中に表示しないプロンプト（月次レポートに統合済で未使用）
+const HIDDEN_PROMPTS = new Set(['summary', 'issue'])
 // プロンプトの並び順（サイドバーの並び順に対応。chat_systemは層1なので含めない）
 const PROMPT_ORDER = [
-  'meeting_pack', 'summary', 'issue',   // ビュー › 概要 / 月次会議
-  'profile_context_template',           // ビュー › 宿プロフィール
+  'meeting_pack',                       // ビュー › 概要 / 月次会議
+  'profile_context_template',           // 全AI（宿プロフィール注入の前文）
   'meeting_extract',                    // ビュー › 月次会議
   'budget_review',                      // 予実管理 › 予算作成
   'booking_insight',                    // 売上分析 › 売上状況
@@ -65,9 +65,7 @@ const PROMPT_ORDER = [
 // どこで使われているか（サイドバー › その配下の名称）
 const PROMPT_USAGE: Record<string, string> = {
   meeting_pack: 'ビュー › 概要／月次会議',
-  summary: 'ビュー › 概要（※月次レポートに統合・現在未使用）',
-  issue: 'ビュー › 概要（※月次レポートに統合・現在未使用）',
-  profile_context_template: 'ビュー › 宿プロフィール',
+  profile_context_template: '全AI共通（灯が宿プロフィールを読む前の冒頭文。層3の前置き）',
   meeting_extract: 'ビュー › 月次会議',
   budget_review: '予実管理 › 予算作成',
   booking_insight: '売上分析 › 売上状況',
@@ -141,7 +139,7 @@ export default function KnowledgePage() {
     })
     // 灯の人格(chat_system)は層1として扱い、プロンプト群から分離
     const persona = prompts.find((p) => p.prompt_key === 'chat_system')
-    const otherPrompts = prompts.filter((p) => p.prompt_key !== 'chat_system')
+    const otherPrompts = prompts.filter((p) => p.prompt_key !== 'chat_system' && !HIDDEN_PROMPTS.has(p.prompt_key))
       .sort((a, b) => {
         const ia = PROMPT_ORDER.indexOf(a.prompt_key), ib = PROMPT_ORDER.indexOf(b.prompt_key)
         return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib)

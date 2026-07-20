@@ -33,7 +33,7 @@ export default function BookingInsightCard() {
     <div className="card p-4 mb-4" style={{ borderColor: 'var(--accent)' }}>
       <div className="flex items-center gap-2 mb-2">
         <SparkleIcon size={16} />
-        <h3 className="text-sm font-semibold">灯の所見（売上の異変検知）</h3>
+        <h3 className="text-sm font-semibold">灯の所見（実績＋オンハンドの異変検知）</h3>
         {updatedAt && <span className="text-[10px]" style={{ color: 'var(--text-dim)' }}>{new Date(updatedAt).toLocaleDateString('ja-JP')}</span>}
         <button onClick={gen} disabled={busy} className="ml-auto text-xs px-3 py-1 rounded-md text-white disabled:opacity-40" style={{ background: 'var(--accent)' }}>
           {busy ? '分析中…' : content ? '↻ 再分析' : '灯に見てもらう'}
