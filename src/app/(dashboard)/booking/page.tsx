@@ -24,6 +24,7 @@ interface FlowRow {
 }
 interface CurveRow { stay_date: string; channel: string; booking_date: string | null; cancel_date: string | null; lead_days: number | null; rooms: number | null; revenue: number | null }
 interface OnhandRow { stay_date: string; channel: string; rooms: number | null; guests: number | null; revenue: number | null }
+interface SnapshotRow { snapshot_date: string; stay_date: string; channel: string; rooms: number | null }
 interface Action {
   id: number; channel: string | null; action_type: string; title: string
   start_date: string; end_date: string | null; cost: number | null; memo: string | null; decided_date: string | null
@@ -45,13 +46,14 @@ export default function BookingPage() {
   const [actions, setActions] = useState<Action[]>([])
   const [curve, setCurve] = useState<CurveRow[] | null>(null)
   const [onhand, setOnhand] = useState<OnhandRow[] | null>(null)
+  const [snapshot, setSnapshot] = useState<SnapshotRow[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [view, setView] = useState<'stack' | 'yoy' | 'curve' | 'onhand'>('stack')
 
   useEffect(() => {
     if (!current) return
-    setLoading(true); setLoadError(''); setCurve(null); setOnhand(null)
+    setLoading(true); setLoadError(''); setCurve(null); setOnhand(null); setSnapshot(null)
     Promise.all([
       fetchAll<FlowRow>(() => supabase.from('mart_booking_flow').select('*').eq('facility', current)),
       fetchAll<Action>(() => supabase.from('raw_marketing_action')
@@ -61,9 +63,9 @@ export default function BookingPage() {
       .finally(() => setLoading(false))
   }, [current])
 
-  // 宿泊日ベース/カーブは重いので必要時のみ取得
+  // 宿泊日ベース/カーブは重いので必要時のみ取得（前年同時点の再構築にも使うため onhand でも読む）
   useEffect(() => {
-    if (!current || !(view === 'yoy' || view === 'curve') || curve !== null) return
+    if (!current || view === 'stack' || curve !== null) return
     fetchAll<CurveRow>(() => supabase.from('mart_booking_curve')
       .select('stay_date, channel, booking_date, cancel_date, lead_days, rooms, revenue').eq('facility', current))
       .then((c) => setCurve(c ?? [])).catch(() => setCurve([]))
@@ -73,6 +75,11 @@ export default function BookingPage() {
     fetchAll<OnhandRow>(() => supabase.from('mart_onhand').select('stay_date, channel, rooms, guests, revenue').eq('facility', current))
       .then((o) => setOnhand(o ?? [])).catch(() => setOnhand([]))
   }, [current, view, onhand])
+  useEffect(() => {
+    if (!current || view !== 'onhand' || snapshot !== null) return
+    fetchAll<SnapshotRow>(() => supabase.from('snapshot_onhand').select('snapshot_date, stay_date, channel, rooms').eq('facility', current))
+      .then((s) => setSnapshot(s ?? [])).catch(() => setSnapshot([]))
+  }, [current, view, snapshot])
 
   return (
     <div className="p-6">
@@ -89,7 +96,7 @@ export default function BookingPage() {
       ) : view === 'stack' ? <StackView flow={flow} actions={actions} />
         : view === 'yoy' ? <YoyView flow={flow} curve={curve} actions={actions} />
         : view === 'curve' ? <CurveView curve={curve} />
-        : <OnhandView onhand={onhand} />}
+        : <OnhandView onhand={onhand} curve={curve} snapshot={snapshot} />}
     </div>
   )
 }
@@ -302,8 +309,32 @@ function Drilldown({ mon, basis, metric, byMonthChannel, flow, curve, actions }:
   const adr = (x?: { rn: number; rev: number }) => (x && x.rn > 0 ? Math.round(x.rev / x.rn) : null)
   const actIn = (m: string) => actions.filter((a) => a.start_date.slice(0, 7) <= m && (a.end_date ?? a.start_date).slice(0, 7) >= m)
 
+  // STEP4: プラン別・部屋タイプ別（raw_reservationから当該月＋前年同月を室泊で分解）
+  const { current } = useFacility()
+  const [pt, setPt] = useState<null | { plans: { name: string; cur: number; prev: number }[]; rooms: { name: string; cur: number; prev: number }[] }>(null)
+  useEffect(() => {
+    if (!current) return
+    let alive = true; setPt(null)
+    const col = basis === 'booking' ? 'booking_date' : 'checkin'
+    const bounds = (m: string) => { const [y, mo] = m.split('-').map(Number); return [`${m}-01`, `${m}-${String(new Date(y, mo, 0).getDate()).padStart(2, '0')}`] as const }
+    const fetchMonth = (m: string) => { const [s, e] = bounds(m); return fetchAll<Record<string, unknown>>(() => supabase.from('raw_reservation').select('plan, room_type, nights, status').eq('facility', current).gte(col, s).lte(col, e)) }
+    Promise.all([fetchMonth(mon), fetchMonth(prevMon)]).then(([cRows, pRows]) => {
+      if (!alive) return
+      const agg = (rows: Record<string, unknown>[], key: 'plan' | 'room_type') => {
+        const o: Record<string, number> = {}
+        for (const r of rows) { if (r.status === '販売不可' || r.status === '空部屋') continue; const k = (r[key] as string) || '不明'; o[k] = (o[k] ?? 0) + Math.max((r.nights as number) ?? 1, 1) }
+        return o
+      }
+      const merge = (cm: Record<string, number>, pm: Record<string, number>) =>
+        [...new Set([...Object.keys(cm), ...Object.keys(pm)])].map((k) => ({ name: k, cur: cm[k] ?? 0, prev: pm[k] ?? 0 })).sort((a, b) => b.cur - a.cur).slice(0, 8)
+      setPt({ plans: merge(agg(cRows, 'plan'), agg(pRows, 'plan')), rooms: merge(agg(cRows, 'room_type'), agg(pRows, 'room_type')) })
+    }).catch(() => { if (alive) setPt({ plans: [], rooms: [] }) })
+    return () => { alive = false }
+  }, [current, mon, prevMon, basis])
+
   return (
-    <div className="py-2 grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <div className="py-2 space-y-4">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <div>
         <div className="text-xs font-semibold mb-1">OTA別 分解（室数 × 単価）</div>
         <table className="w-full text-xs">
@@ -333,6 +364,38 @@ function Drilldown({ mon, basis, metric, byMonthChannel, flow, curve, actions }:
         <div className="text-[11px] mt-2 mb-1" style={{ color: 'var(--text-dim)' }}>▼ {prevMon}（前年同月）</div>
         <ActionList list={actIn(prevMon)} />
       </div>
+    </div>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <PtTable title={`プラン別（上位8・室泊・${basis === 'booking' ? '予約日' : '宿泊日'}基準）`} rows={pt?.plans} />
+      <PtTable title="部屋タイプ別（上位8・室泊）" rows={pt?.rooms} />
+    </div>
+    </div>
+  )
+}
+
+function PtTable({ title, rows }: { title: string; rows?: { name: string; cur: number; prev: number }[] }) {
+  return (
+    <div>
+      <div className="text-xs font-semibold mb-1">{title}</div>
+      {rows == null ? <p className="text-[11px]" style={{ color: 'var(--text-dim)' }}>読み込み中…</p>
+        : rows.length === 0 ? <p className="text-[11px]" style={{ color: 'var(--text-dim)' }}>データなし</p>
+        : (
+          <table className="w-full text-xs">
+            <thead><tr style={{ color: 'var(--text-dim)' }} className="text-left">
+              <th className="py-1">名称</th><th className="py-1 text-right">当年室泊</th><th className="py-1 text-right">前年室泊</th><th className="py-1 text-right">前年比</th>
+            </tr></thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.name} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td className="py-1" style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.name.slice(0, 28)}</td>
+                  <td className="py-1 text-right font-medium">{fmtNum(r.cur)}</td>
+                  <td className="py-1 text-right" style={{ color: 'var(--text-dim)' }}>{fmtNum(r.prev)}</td>
+                  <td className="py-1 text-right" style={{ color: r.prev > 0 && r.cur < r.prev ? 'var(--red)' : undefined }}>{r.prev > 0 ? pct(r.cur / r.prev) : '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
     </div>
   )
 }
@@ -428,12 +491,49 @@ function CurveView({ curve }: { curve: CurveRow[] | null }) {
 // ============================================================
 // M8: オンハンド断面（宿泊日×OTA別の現在の入り。mart_onhand）
 // ============================================================
-function OnhandView({ onhand }: { onhand: OnhandRow[] | null }) {
+function OnhandView({ onhand, curve, snapshot }: { onhand: OnhandRow[] | null; curve: CurveRow[] | null; snapshot: SnapshotRow[] | null }) {
   const [mode, setMode] = useState<'day' | 'month'>('month')
   const [metric, setMetric] = useState<'rooms' | 'revenue'>('rooms')
   const [dayMonth, setDayMonth] = useState('')
 
   const rows = onhand ?? []
+
+  // 前年同時点比較: 今年の各将来月のオンハンド室数 vs 前年同時点（snapshot実測 or curve推定で再構築）
+  const compare = useMemo(() => {
+    const now = new Date()
+    const todayIso = now.toISOString().slice(0, 10)
+    const tPrev = `${now.getFullYear() - 1}${todayIso.slice(4)}`  // 前年の同じ日付（同時点）
+    const thisM = todayIso.slice(0, 7)
+    // 今年オンハンド（宿泊月別・今日以降）
+    const cur: Record<string, number> = {}
+    for (const r of rows) { const m = r.stay_date.slice(0, 7); if (m >= thisM) cur[m] = (cur[m] ?? 0) + (r.rooms ?? 0) }
+    const months = Object.keys(cur).sort().slice(0, 8)
+    // 前年同時点の snapshot（tPrev に最も近い断面。±30日以内なら実測採用）
+    const snaps = [...new Set((snapshot ?? []).map((s) => s.snapshot_date))]
+    let snapDate = ''; let best = 99
+    for (const d of snaps) { const diff = Math.abs(daysBetween(d, tPrev)); if (diff < best) { best = diff; snapDate = d } }
+    const useSnap = snapDate && best <= 30
+    const snapByMonth: Record<string, number> = {}
+    if (useSnap) for (const s of (snapshot ?? [])) { if (s.snapshot_date === snapDate) { const m = s.stay_date.slice(0, 7); snapByMonth[m] = (snapByMonth[m] ?? 0) + (s.rooms ?? 0) } }
+    // curve 推定: 前年宿泊月PMを tPrev 時点で再構築
+    const curveByMonth: Record<string, number> = {}
+    for (const r of (curve ?? [])) {
+      if (!r.booking_date) continue
+      if (r.booking_date > tPrev) continue
+      if (r.cancel_date && r.cancel_date <= tPrev) continue
+      const m = r.stay_date.slice(0, 7)
+      curveByMonth[m] = (curveByMonth[m] ?? 0) + (r.rooms ?? 1)
+    }
+    return months.map((m) => {
+      const pm = shiftYr(m)
+      const prevSnap = useSnap ? snapByMonth[pm] : undefined
+      const prevCurve = curveByMonth[pm]
+      const prev = prevSnap != null ? prevSnap : prevCurve
+      const src = prevSnap != null ? '実測' : (prevCurve != null ? '推定' : '—')
+      return { m, cur: cur[m], prev: prev ?? null, ratio: prev ? cur[m] / prev : null, src }
+    })
+  }, [rows, curve, snapshot])
+  const hasCompare = compare.some((c) => c.prev != null)
   const monthOptions = useMemo(() => [...new Set(rows.map((r) => r.stay_date.slice(0, 7)))].sort(), [rows])
   const activeDayMonth = dayMonth || monthOptions[0] || ''
 
@@ -497,7 +597,36 @@ function OnhandView({ onhand }: { onhand: OnhandRow[] | null }) {
           </ResponsiveContainer>
         ) : <p className="text-sm py-16 text-center" style={{ color: 'var(--text-dim)' }}>今日以降のオンハンドがありません（将来月の予約情報CSVを取り込むと表示されます）。</p>}
         <p className="text-[10px] mt-1" style={{ color: 'var(--text-dim)' }}>
-          棒＝OTA別の{metric === 'revenue' ? '金額' : '室数'}（宿泊日で計上・未キャンセル）。前年同時点比較は snapshot_onhand の蓄積後に有効化予定。
+          棒＝OTA別の{metric === 'revenue' ? '金額' : '室数'}（宿泊日で計上・未キャンセル）。
+        </p>
+      </div>
+
+      {/* 前年同時点比較（snapshot実測 or curve推定で再構築） */}
+      <div className="card overflow-x-auto mt-4">
+        <div className="px-3 pt-3 text-sm font-semibold">前年同時点オンハンド比較（今後の宿泊月・室数）</div>
+        {hasCompare ? (
+          <table className="w-full text-sm whitespace-nowrap mt-2">
+            <thead>
+              <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-left">
+                <th className="px-3 py-2">宿泊月</th><th className="px-3 py-2 text-right">今年オンハンド</th>
+                <th className="px-3 py-2 text-right">前年同時点</th><th className="px-3 py-2 text-right">前年比</th><th className="px-3 py-2">出所</th>
+              </tr>
+            </thead>
+            <tbody>
+              {compare.map((c) => (
+                <tr key={c.m} style={{ borderTop: '1px solid var(--border)' }}>
+                  <td className="px-3 py-2 font-medium">{c.m}</td>
+                  <td className="px-3 py-2 text-right font-medium">{fmtNum(c.cur)}室</td>
+                  <td className="px-3 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{c.prev != null ? `${fmtNum(c.prev)}室` : '-'}</td>
+                  <td className="px-3 py-2 text-right" style={{ color: c.ratio != null && c.ratio < 1 ? 'var(--red)' : c.ratio != null ? 'var(--green)' : undefined }}>{c.ratio != null ? pct(c.ratio) : '-'}</td>
+                  <td className="px-3 py-2 text-[10px]"><span className="px-1.5 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>{c.src}</span></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : <p className="text-sm px-3 py-6" style={{ color: 'var(--text-dim)' }}>前年同時点のデータがまだありません（前年の予約情報CSVを取り込むと「推定」で、週1の断面が1年貯まると「実測」で比較できます）。</p>}
+        <p className="text-[10px] px-3 pb-3 pt-1" style={{ color: 'var(--text-dim)' }}>
+          出所「実測」＝前年ほぼ同日に記録した断面（snapshot_onhand）。「推定」＝予約日×キャンセル日から前年同時点を再構築（mart_booking_curve）。両方あれば実測を優先。
         </p>
       </div>
     </>
