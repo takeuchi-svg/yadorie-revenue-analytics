@@ -5,7 +5,7 @@ import { runCompanyInsight, makeSupabase, hasApiKey } from '@/lib/ai/agent'
 import { requireUser, isAuthErr } from '@/lib/ai/auth'
 
 export const runtime = 'nodejs'
-export const maxDuration = 60
+export const maxDuration = 300  // 分析系: Opus+adaptive thinkingの熟考生成(Vercel Fluid Compute前提)
 
 export async function POST(req: NextRequest) {
   const auth = await requireUser(req)

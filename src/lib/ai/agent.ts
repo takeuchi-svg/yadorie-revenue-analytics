@@ -6,15 +6,42 @@ import { createClient } from '@supabase/supabase-js'
 import { buildSystemBlocks, getPrompt } from '@/lib/ai/knowledge'
 import { aiDbAvailable, queryMartAi, type AiQueryInput } from '@/lib/ai/db'
 
-// 既定は現行の有効なモデルID。CHAT_MODEL 環境変数で上書き可（例: claude-opus-4-8）
+// ── モデル2系統 ──
+// チャット系＝速さ優先(Sonnet 5・thinking無効)。CHAT_MODEL で上書き可。
+// 分析系(所見/会議パック/予算レビュー)＝深さ優先(Opus 4.8・adaptive thinking)。ANALYSIS_MODEL で上書き可。
 const MODEL = process.env.CHAT_MODEL || 'claude-sonnet-5'
+const ANALYSIS_MODEL = process.env.ANALYSIS_MODEL || 'claude-opus-4-8'
 
-// 拡張思考(thinking)は全AI呼び出しで無効化する。
-// Claude Sonnet 5 は既定が adaptive thinking＝難しい質問ほど本文の前に「思考」へ
-// トークンと時間を使う。灯はデータを先渡し済みで長考不要なのに、思考が
-// max_tokens を食い潰して「空回答(stop_reason=max_tokens)」「途中切れ」、
-// 生成時間が延びて「60秒タイムアウト(通信エラー)」の根本原因になっていた。
+// チャット系は thinking 無効のまま維持する。
+// Sonnet 5 は既定が adaptive thinking＝難しい質問ほど本文の前に「思考」へトークンと時間を使う。
+// 過去、max_tokens=4000 のまま思考が走り「空回答(stop_reason=max_tokens)」「途中切れ」
+// 「60秒タイムアウト」が多発した。真因は (1)max_tokensが思考の内数で小さすぎ (2)maxDuration=60秒。
+// チャットは即答が価値なので thinking 無効が正しい。分析系は deepCreate(下記)で器を広げて思考を解禁する。
 const NO_THINKING = { type: 'disabled' as const }
+
+// ── 分析系の深い1回生成（熟考解禁の器） ──
+// - adaptive thinking + effort high: 灯が回答前に材料の数値を突き合わせて考える
+// - max_tokens 16000: 思考は max_tokens の内数のため、思考の余地を確保（従来4000が空回答の真因）
+// - SDK内部ストリーミング(stream→finalMessage): 長時間生成でもHTTPアイドル切断されない
+// 呼び出し側の route は maxDuration=300 (Vercel Fluid Compute) が前提。
+async function deepCreate(
+  client: Anthropic,
+  system: Anthropic.TextBlockParam[],
+  messages: Anthropic.MessageParam[],
+): Promise<string> {
+  const stream = client.messages.stream({
+    model: ANALYSIS_MODEL,
+    max_tokens: 16000,
+    thinking: { type: 'adaptive' },
+    output_config: { effort: 'high' },
+    system,
+    messages,
+  } as Anthropic.MessageStreamParams)
+  const resp = await stream.finalMessage()
+  const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
+  if (!text) throw new Error(`AIが空の応答を返しました（stop_reason=${resp.stop_reason ?? '不明'}）`)
+  return text
+}
 
 // フォールバック用の静的許可リスト（正本は data_confidentiality の C0。K30適用後は自動生成が優先）
 const ALLOWED_TABLES = new Set([
@@ -328,13 +355,7 @@ export async function runCompanyInsight(month: string, material: string): Promis
     getPrompt(sb, 'company_insight'),
   ])
   const prompt = promptTpl.replaceAll('{month}', month)
-  const resp = await client.messages.create({
-    model: MODEL, max_tokens: 4000, thinking: NO_THINKING, system,
-    messages: [{ role: 'user', content: `${prompt}\n\n【全社実データ】\n${material}` }],
-  })
-  const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
-  if (!text) throw new Error(`AIが空の応答を返しました（stop_reason=${resp.stop_reason ?? '不明'}）`)
-  return text
+  return deepCreate(client, system, [{ role: 'user', content: `${prompt}\n\n【全社実データ】\n${material}` }])
 }
 
 // 月次会議パック（B9）: 材料(クライアント算出)を渡して1回生成。施設プロフィール(層3)も注入。
@@ -347,13 +368,7 @@ export async function runMeetingPack(facility: string, month: string, material: 
     getPrompt(sb, 'meeting_pack'),
   ])
   const prompt = promptTpl.replaceAll('{month}', month)
-  const resp = await client.messages.create({
-    model: MODEL, max_tokens: 4000, thinking: NO_THINKING, system,
-    messages: [{ role: 'user', content: `${prompt}\n\n【会議データ】\n${material}` }],
-  })
-  const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
-  if (!text) throw new Error(`AIが空の応答を返しました（stop_reason=${resp.stop_reason ?? '不明'}）`)
-  return text
+  return deepCreate(client, system, [{ role: 'user', content: `${prompt}\n\n【会議データ】\n${material}` }])
 }
 
 // 予算レビュー（B6）: 支配人が作った来期予算を灯が伴走レビュー。材料はクライアント算出。層3(基準PL/意図/取組)注入。
@@ -366,13 +381,7 @@ export async function runBudgetReview(facility: string, fy: number, material: st
     getPrompt(sb, 'budget_review'),
   ])
   const prompt = promptTpl.replaceAll('{fy}', String(fy))
-  const resp = await client.messages.create({
-    model: MODEL, max_tokens: 4000, thinking: NO_THINKING, system,
-    messages: [{ role: 'user', content: `${prompt}\n\n【予算データ】\n${material}` }],
-  })
-  const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
-  if (!text) throw new Error(`AIが空の応答を返しました（stop_reason=${resp.stop_reason ?? '不明'}）`)
-  return text
+  return deepCreate(client, system, [{ role: 'user', content: `${prompt}\n\n【予算データ】\n${material}` }])
 }
 
 // 予約日ベース分析（M8）: 前年同期比の異変検知・OTA/室数・単価の分解・施策照合を灯が1回で生成。
@@ -386,13 +395,7 @@ export async function runBookingInsight(facility: string, asOf: string, material
     getPrompt(sb, 'booking_insight'),
   ])
   const prompt = promptTpl.replaceAll('{as_of}', asOf)
-  const resp = await client.messages.create({
-    model: MODEL, max_tokens: 4000, thinking: NO_THINKING, system,
-    messages: [{ role: 'user', content: `${prompt}\n\n【予約日ベースデータ】\n${material}` }],
-  })
-  const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
-  if (!text) throw new Error(`AIが空の応答を返しました（stop_reason=${resp.stop_reason ?? '不明'}）`)
-  return text
+  return deepCreate(client, system, [{ role: 'user', content: `${prompt}\n\n【予約日ベースデータ】\n${material}` }])
 }
 
 // kind='summary'|'issue' の本文を1回のLLM呼び出しで生成
@@ -413,12 +416,5 @@ export async function runInsight(
     fetchInsightData(sb, facility, month),
   ])
   const prompt = promptTpl.replaceAll('{month}', month)
-  const resp = await client.messages.create({
-    model: MODEL, max_tokens: 4000, thinking: NO_THINKING, system,
-    messages: [{ role: 'user', content: `${prompt}\n\n【実データ】\n${dataBlock}` }],
-  })
-  const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
-  // 生成が途中で止まった/空の場合は理由を添えて返す（呼び出し側で可視化）
-  if (!text) throw new Error(`AIが空の応答を返しました（stop_reason=${resp.stop_reason ?? '不明'}）`)
-  return text
+  return deepCreate(client, system, [{ role: 'user', content: `${prompt}\n\n【実データ】\n${dataBlock}` }])
 }
