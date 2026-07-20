@@ -9,7 +9,8 @@ import {
   saveShiftCell, deleteShiftCell, savePlanContext, saveSegments,
   createSpotStaff, saveSpotActual, deleteSpotActual,
   patternMinutes, segMinutes,
-  type Role, type ShiftPattern, type StaffLite, type PlanContext, type ShiftSegment,
+  loadPublications, publishShiftPlan,
+  type Role, type ShiftPattern, type StaffLite, type PlanContext, type ShiftSegment, type Publication,
 } from '@/lib/shift/data'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -69,6 +70,9 @@ export default function ShiftPage() {
   const [memoPop, setMemoPop] = useState<{ text: string; x: number; y: number } | null>(null)  // メモのホバー表示
   const [spotOpen, setSpotOpen] = useState(false)
   const [spotName, setSpotName] = useState(''); const [spotWage, setSpotWage] = useState<number | ''>('')
+  // SV02 公開
+  const [pubs, setPubs] = useState<Publication[]>([])
+  const [publishing, setPublishing] = useState(false)
 
   const days = useMemo(() => daysOfMonth(month), [month])
   const patMap = useMemo(() => { const o: Record<number, ShiftPattern> = {}; patterns.forEach((p) => { o[p.pattern_id] = p }); return o }, [patterns])
@@ -116,10 +120,28 @@ export default function ShiftPage() {
     setSegByShift(sb)
     const cx: Record<string, PlanContext> = {}
     mo.context.forEach((r) => { cx[r.work_date] = r }); setCtx(cx)
+    setPubs(await loadPublications(current, month))
     setDirtyCells(new Set()); setDirtyCtx(new Set()); setSel(new Set())
     setLoading(false)
   }, [current, month])
   useEffect(() => { reload() }, [reload])
+
+  // SV02: シフト公開（月初版スナップショット）
+  const doPublish = async () => {
+    if (!current || !month) return
+    const isFirst = pubs.length === 0
+    const ok = confirm(isFirst
+      ? `${month} のシフトを公開します。\nこの月の「月初版（基準計画）」として記録されます（予実分析の基準になります）。`
+      : `${month} のシフトを再公開します。\n月初版は変更されません（再公開履歴として残ります）。`)
+    if (!ok) return
+    if (dirtyCount > 0) { const s = confirm('未保存の変更があります。先に保存してから公開しますか？'); if (s) { await save() } }
+    setPublishing(true); setMsg('')
+    const { id, error } = await publishShiftPlan(current, month)
+    setPublishing(false)
+    if (error || id == null) { setMsg('Error: 公開に失敗しました' + (error ? `（${error}）` : '')); return }
+    setPubs(await loadPublications(current, month))
+    setMsg(isFirst ? `${month} を公開しました（月初版として記録）` : `${month} を再公開しました`)
+  }
 
   const setCell = (staff: string, date: string, patch: Partial<Cell>) => {
     const key = ck(staff, date)
@@ -457,8 +479,27 @@ export default function ShiftPage() {
           <button onClick={save} disabled={saving || dirtyCount === 0} className="px-4 py-1.5 text-sm rounded-md text-white hover:opacity-90 disabled:opacity-40" style={{ background: 'var(--accent)' }}>
             {saving ? '保存中...' : dirtyCount > 0 ? `保存（${dirtyCount}）` : '保存'}
           </button>
+          <button onClick={doPublish} disabled={publishing || loading} className="px-4 py-1.5 text-sm rounded-md hover:opacity-90 disabled:opacity-40"
+            style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }} title="スタッフへ提示＝予実分析の基準として記録">
+            {publishing ? '公開中…' : pubs.length ? '再公開' : '公開'}
+          </button>
         </div>
       </div>
+
+      {/* 公開状態（SV02） */}
+      {!loading && staff.length > 0 && (
+        <div className="flex items-center gap-2 mb-2 text-[11px] flex-wrap" style={{ color: 'var(--text-dim)' }}>
+          {pubs.length === 0 ? (
+            <span>未公開（「公開」でスタッフへ提示＝この月の月初版として記録されます）</span>
+          ) : (
+            <>
+              <span className="px-2 py-0.5 rounded" style={{ background: 'var(--surface2)' }}>公開済 {pubs.length}回</span>
+              <span>月初版: {new Date(pubs[pubs.length - 1].published_at).toLocaleString('ja-JP')}</span>
+              <span>／ 最終公開: {new Date(pubs[0].published_at).toLocaleString('ja-JP')}</span>
+            </>
+          )}
+        </div>
+      )}
 
       {loading ? <Loading /> : staff.length === 0 ? (
         <Empty message="この宿に従業員がいません。勤怠CSVを取り込むか、スポット追加で登録してください。" />

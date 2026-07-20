@@ -4,6 +4,7 @@
 // 全社横断の設定（賃金・宿タイプ・ユーザー）は「全社設定」(/company-settings)へ。
 import { useFacility } from '@/lib/facility-context'
 import ShiftPatternAdmin from '@/components/shift-pattern-admin'
+import LaborStandardAdmin from '@/components/labor-standard-admin'
 
 export default function SettingsPage() {
   const { current, currentFacility } = useFacility()
@@ -15,6 +16,7 @@ export default function SettingsPage() {
         <p className="text-xs mt-0.5" style={{ color: 'var(--text-dim)' }}>この宿だけの設定。全社横断（賃金・宿タイプ・ユーザー）は全社設定へ。</p>
       </div>
       <ShiftPatternAdmin />
+      <LaborStandardAdmin />
     </div>
   )
 }

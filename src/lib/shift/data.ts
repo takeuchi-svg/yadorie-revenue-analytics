@@ -77,6 +77,49 @@ export async function loadMasters(facility: string): Promise<{ roles: Role[]; pa
   return { roles: (roleRes.data as Role[]) ?? [], patterns: (patRes.data as ShiftPattern[]) ?? [] }
 }
 
+// ── SV02 シフト公開（月初版スナップショット） ──
+export interface Publication { id: number; facility: string; target_month: string; is_baseline: boolean; published_by: string | null; published_at: string }
+// 公開履歴（この施設×月）。新しい順。
+export async function loadPublications(facility: string, month: string): Promise<Publication[]> {
+  const { data } = await supabase.from('shift_plan_publication')
+    .select('id, facility, target_month, is_baseline, published_by, published_at')
+    .eq('facility', facility).eq('target_month', `${month}-01`).order('published_at', { ascending: false })
+  return (data as Publication[]) ?? []
+}
+// 公開実行（RPC）。初回=月初版(baseline)、以降=再公開。戻り=publication_id。
+export async function publishShiftPlan(facility: string, month: string): Promise<{ id: number | null; error?: string }> {
+  const { data, error } = await supabase.rpc('publish_shift_plan', { p_facility: facility, p_month: `${month}-01` })
+  return { id: (data as number) ?? null, error: error?.message }
+}
+
+// ── SV03 標準人時係数（分/人泊） ──
+export interface LaborStandard { facility: string; auto: number | null; sampleDays: number | null; manual: number | null; effective: number | null; source: 'auto' | 'manual' | null }
+export async function loadLaborStandard(facility: string): Promise<LaborStandard> {
+  const [autoR, effR, manR] = await Promise.all([
+    supabase.from('mart_labor_standard_auto').select('minutes_per_guest_auto, sample_days').eq('facility', facility).maybeSingle(),
+    supabase.from('mart_labor_standard_effective').select('minutes_per_guest, source').eq('facility', facility).maybeSingle(),
+    supabase.from('dim_labor_standard').select('minutes_per_guest').eq('facility', facility).eq('source', 'manual').order('effective_from', { ascending: false }).limit(1).maybeSingle(),
+  ])
+  const a = autoR.data as any, e = effR.data as any, m = manR.data as any
+  return {
+    facility,
+    auto: a?.minutes_per_guest_auto ?? null, sampleDays: a?.sample_days ?? null,
+    manual: m?.minutes_per_guest ?? null,
+    effective: e?.minutes_per_guest ?? null, source: e?.source ?? null,
+  }
+}
+// 手動補正の保存（履歴追記）／解除（manual行を削除）
+export async function saveLaborStandardManual(facility: string, value: number | null): Promise<{ error?: string }> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (value == null) {
+    const { error } = await supabase.from('dim_labor_standard').delete().eq('facility', facility).eq('source', 'manual')
+    return { error: error?.message }
+  }
+  const { error } = await supabase.from('dim_labor_standard')
+    .insert({ facility, minutes_per_guest: value, source: 'manual', updated_by: user?.id ?? null })
+  return { error: error?.message }
+}
+
 // 施設所属の従業員（フラット表示用）
 export async function loadStaff(facility: string): Promise<StaffLite[]> {
   const { data } = await supabase.from('dim_staff')
