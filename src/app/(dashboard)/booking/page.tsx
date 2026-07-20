@@ -100,12 +100,10 @@ export default function BookingPage() {
 function StackView({ flow, actions }: { flow: FlowRow[]; actions: Action[] }) {
   const [mode, setMode] = useState<'day' | 'month'>('month')
   const [metric, setMetric] = useState<Metric>('room_nights')
-  const [basis, setBasis] = useState<'new' | 'net'>('new')
-  const [dayMonth, setDayMonth] = useState('')
+  const [daySpan, setDaySpan] = useState(90)  // 日別の表示期間（直近N日）
 
-  const valOf = (r: FlowRow) => (r[`${basis}_${metric}` as keyof FlowRow] as number | null) ?? 0
-  const monthOptions = useMemo(() => [...new Set(flow.map((r) => r.flow_date.slice(0, 7)))].sort().reverse(), [flow])
-  const activeDayMonth = dayMonth || monthOptions[0] || ''
+  const valNew = (r: FlowRow) => (r[`new_${metric}` as keyof FlowRow] as number | null) ?? 0
+  const valCxl = (r: FlowRow) => (r[`cxl_${metric}` as keyof FlowRow] as number | null) ?? 0
 
   const channelRank = useMemo(() => {
     const t: Record<string, number> = {}
@@ -117,32 +115,39 @@ function StackView({ flow, actions }: { flow: FlowRow[]; actions: Action[] }) {
   const chanKey = (c: string) => (topChannels.includes(c) ? c : 'その他')
   const bucketOf = (d: string) => (mode === 'month' ? d.slice(0, 7) : d)
 
-  const { perBucket, totalByBucket } = useMemo(() => {
-    const per: Record<string, Record<string, number>> = {}; const tot: Record<string, number> = {}
+  const { perBucket, perCxl, totalByBucket } = useMemo(() => {
+    const per: Record<string, Record<string, number>> = {}; const cx: Record<string, Record<string, number>> = {}; const tot: Record<string, number> = {}
     for (const r of flow) {
-      const b = bucketOf(r.flow_date); const v = valOf(r); const ck = chanKey(r.channel)
-      ;(per[b] ??= {}); per[b][ck] = (per[b][ck] ?? 0) + v; tot[b] = (tot[b] ?? 0) + v
+      const b = bucketOf(r.flow_date); const ck = chanKey(r.channel)
+      const vN = valNew(r); const vC = valCxl(r)
+      ;(per[b] ??= {}); per[b][ck] = (per[b][ck] ?? 0) + vN
+      ;(cx[b] ??= {}); cx[b][ck] = (cx[b][ck] ?? 0) + vC
+      tot[b] = (tot[b] ?? 0) + vN
     }
-    return { perBucket: per, totalByBucket: tot }
-  }, [flow, mode, metric, basis, channelRank])  // eslint-disable-line react-hooks/exhaustive-deps
+    return { perBucket: per, perCxl: cx, totalByBucket: tot }
+  }, [flow, mode, metric, channelRank])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const buckets = useMemo(() => {
     if (mode === 'month') return Object.keys(perBucket).sort()
-    if (!activeDayMonth) return []
-    const [y, m] = activeDayMonth.split('-').map(Number)
-    return Array.from({ length: new Date(y, m, 0).getDate() }, (_, i) => `${activeDayMonth}-${String(i + 1).padStart(2, '0')}`)
-  }, [mode, perBucket, activeDayMonth])
+    // 日別＝直近N日（予約日は今日まで）
+    const today = new Date()
+    return Array.from({ length: daySpan }, (_, i) => {
+      const d = new Date(today); d.setDate(d.getDate() - (daySpan - 1 - i))
+      return d.toISOString().slice(0, 10)
+    })
+  }, [mode, perBucket, daySpan])
 
   const chartData = useMemo(() => buckets.map((b) => {
-    const row: Record<string, string | number | null> = { bucket: mode === 'month' ? b.slice(2) : b.slice(8), full: b }
+    const row: Record<string, string | number | null> = { bucket: mode === 'month' ? b.slice(2) : b.slice(5), full: b }
     const per = perBucket[b] ?? {}
-    for (const c of channels) row[c] = per[c] ?? 0
+    const cxp = perCxl[b] ?? {}
+    for (const c of channels) { row[c] = per[c] ?? 0; row[`${c}__cxl`] = -(cxp[c] ?? 0) }
     const prev = totalByBucket[shiftYr(b)]
     row['前年'] = prev != null ? prev : null
     return row
-  }), [buckets, perBucket, totalByBucket, channels, mode])
+  }), [buckets, perBucket, perCxl, totalByBucket, channels, mode])
 
-  const hasData = chartData.some((d) => channels.some((c) => (d[c] as number) !== 0))
+  const hasData = chartData.some((d) => channels.some((c) => (d[c] as number) !== 0 || (d[`${c}__cxl`] as number) !== 0))
   const rangeFrom = buckets[0] ?? ''; const rangeTo = buckets[buckets.length - 1] ?? ''
   const visibleActions = useMemo(() => actions.filter((a) => {
     const s = mode === 'month' ? a.start_date.slice(0, 7) : a.start_date
@@ -153,7 +158,7 @@ function StackView({ flow, actions }: { flow: FlowRow[]; actions: Action[] }) {
     const s = mode === 'month' ? a.start_date.slice(0, 7) : a.start_date
     const e = mode === 'month' ? (a.end_date ?? a.start_date).slice(0, 7) : (a.end_date ?? a.start_date)
     const inR = buckets.filter((b) => b >= s && b <= e); if (!inR.length) return null
-    const disp = (b: string) => (mode === 'month' ? b.slice(2) : b.slice(8))
+    const disp = (b: string) => (mode === 'month' ? b.slice(2) : b.slice(5))
     return { x1: disp(inR[0]), x2: disp(inR[inR.length - 1]) }
   }
 
@@ -162,12 +167,12 @@ function StackView({ flow, actions }: { flow: FlowRow[]; actions: Action[] }) {
       <div className="flex items-center gap-2 mb-4 flex-wrap">
         <Seg value={mode} set={setMode} opts={[['month', '月別'], ['day', '日別']]} />
         <Seg value={metric} set={setMetric} opts={[['reservations', '件数'], ['room_nights', '室泊'], ['revenue', '金額']]} />
-        <Seg value={basis} set={setBasis} opts={[['new', '新規'], ['net', 'ネット']]} />
-        {mode === 'day' && monthOptions.length > 0 && (
-          <select className="field px-3 py-1.5 text-sm" value={activeDayMonth} onChange={(e) => setDayMonth(e.target.value)}>
-            {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+        {mode === 'day' && (
+          <select className="field px-3 py-1.5 text-sm" value={daySpan} onChange={(e) => setDaySpan(Number(e.target.value))}>
+            {[30, 60, 90, 180].map((d) => <option key={d} value={d}>直近{d}日</option>)}
           </select>
         )}
+        <span className="text-xs" style={{ color: 'var(--text-dim)' }}>上向き＝新規予約／下向き＝取消（その日にキャンセルされた分）</span>
       </div>
       {visibleActions.length > 0 && (
         <div className="flex items-center gap-2 mb-2 flex-wrap">
@@ -181,21 +186,25 @@ function StackView({ flow, actions }: { flow: FlowRow[]; actions: Action[] }) {
       <div className="card p-4">
         {hasData ? (
           <ResponsiveContainer width="100%" height={380}>
-            <ComposedChart data={chartData} margin={{ top: 8, right: 12, bottom: 5, left: metric === 'revenue' ? 8 : -14 }}>
+            <ComposedChart data={chartData} stackOffset="sign" margin={{ top: 8, right: 12, bottom: 5, left: metric === 'revenue' ? 8 : -14 }}>
               <CartesianGrid stroke="#e7dac6" vertical={false} />
-              <XAxis dataKey="bucket" {...CHART_AXIS} interval={mode === 'day' ? 2 : Math.max(0, Math.floor(chartData.length / 16))} />
+              <XAxis dataKey="bucket" {...CHART_AXIS} interval={mode === 'day' ? Math.max(2, Math.floor(chartData.length / 24)) : Math.max(0, Math.floor(chartData.length / 16))} />
               <YAxis {...CHART_AXIS} allowDecimals={false} tickFormatter={metric === 'revenue' ? (v) => `${Math.round(Number(v) / 10000)}万` : undefined} />
               <Tooltip {...chartTooltip} labelFormatter={(l: any, p: any) => (p?.[0]?.payload?.full ?? l)} formatter={(v: any, n: any) => [fmtMetric(Number(v), metric), n]} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               {visibleActions.map((a) => { const b = bandFor(a); return b ? <ReferenceArea key={a.id} x1={b.x1} x2={b.x2} fill={ACTION_COLOR[a.action_type] ?? '#888780'} fillOpacity={0.10} ifOverflow="extendDomain" /> : null })}
               {channels.map((c) => <Bar key={c} dataKey={c} stackId="s" maxBarSize={mode === 'day' ? 20 : 30} fill={c === 'その他' ? '#B4B2A9' : channelColor(c)} />)}
-              <Line dataKey="前年" name="前年同期" stroke="#C0392B" strokeWidth={2} dot={false} connectNulls />
+              {channels.map((c) => (
+                <Bar key={`${c}__cxl`} dataKey={`${c}__cxl`} name={`${c}(取消)`} stackId="s" legendType="none"
+                  maxBarSize={mode === 'day' ? 20 : 30} fill={c === 'その他' ? '#B4B2A9' : channelColor(c)} fillOpacity={0.55} />
+              ))}
+              <Line dataKey="前年" name="前年同期(新規)" stroke="#C0392B" strokeWidth={2} dot={false} connectNulls />
             </ComposedChart>
           </ResponsiveContainer>
         ) : <p className="text-sm py-16 text-center" style={{ color: 'var(--text-dim)' }}>この範囲に予約日ベースのデータがありません。</p>}
         <p className="text-[10px] mt-1" style={{ color: 'var(--text-dim)' }}>
-          棒＝OTA別{METRIC_LABEL[metric]}（{basis === 'net' ? 'ネット' : '新規'}・予約日で計上）、赤線＝前年同期、帯＝施策の実行期間。
-          {basis === 'net' && ' ネットはキャンセル日で相殺（cancel_date取込後に有効）。'}
+          上向き棒＝新規予約（予約日で計上）、下向き棒＝取消（キャンセル日で計上・薄色）。ネット＝上下の差し引き。赤線＝前年同期の新規。帯＝施策の実行期間。
+          取消はキャンセル日の取込（全ステータス出力での再取込）後に表示されます。
         </p>
       </div>
     </>
@@ -463,6 +472,7 @@ function CurveView({ curve, initialMonth }: { curve: CurveRow[] | null; initialM
           </ResponsiveContainer>
         ) : <p className="text-sm py-16 text-center" style={{ color: 'var(--text-dim)' }}>この宿泊月のカーブデータがありません（予約情報CSVの取込状況によります）。</p>}
         <p className="text-[10px] mt-1" style={{ color: 'var(--text-dim)' }}>
+          対象＝選んだ「宿泊月」（宿泊日ベースの積み上がり）。それが予約日の経過（D-n）でどう入ったかを、予約日×キャンセル日の履歴から復元しています。
           横軸＝宿泊日までの日数（左=先／右=当日）、縦軸＝その時点で入っていた{unit === 'revenue' ? '金額' : '室数'}。
           橙=当年、紫破線=前年同月。前年同日のD-nと当年のD-nを重ねて「入りの速さ」を比較できます。
         </p>

@@ -44,6 +44,14 @@ export default function SameDayPage() {
   }, [asOf])
   const resv = useMemo(() => (data ?? []).filter((r) => !EXCLUDE_STATUS.has(r.status ?? '')), [data])
 
+  // 予約データの最新日（=最後に取り込んだCSVに含まれる最大の予約日）。基準日はこれより先だと不完全
+  const latestBooking = useMemo(() => {
+    let mx = ''
+    for (const r of resv) if (r.booking_date && r.booking_date > mx) mx = r.booking_date
+    return mx
+  }, [resv])
+  const staleAsOf = !!latestBooking && asOf > latestBooking
+
   const asOfMonth = asOf.slice(0, 7)
   const months = useMemo(
     () => [...new Set(resv.map((r) => r.checkin.slice(0, 7)).filter((m) => m >= asOfMonth))].sort().slice(0, MAX_MONTHS),
@@ -101,11 +109,18 @@ export default function SameDayPage() {
       <div className="flex items-center gap-3 mb-2 flex-wrap">
         <h1 className="text-base font-semibold">先行予約 同日対比</h1>
         <label className="text-xs ml-2" style={{ color: 'var(--text-dim)' }}>基準日:</label>
-        <input type="date" className="field px-3 py-1.5 text-sm" value={asOf} onChange={(e) => setAsOf(e.target.value)} />
+        <input type="date" className="field px-3 py-1.5 text-sm" value={asOf} max={todayISO()}
+          onChange={(e) => { const v = e.target.value; if (!v) return; setAsOf(v > todayISO() ? todayISO() : v) }} />
       </div>
-      <p className="text-xs mb-4" style={{ color: 'var(--text-dim)' }}>
-        今年基準日: {asOf}　前年基準日: {prevAsOf}
+      <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>
+        今年基準日: {asOf}　前年基準日: {prevAsOf}{latestBooking && <>　／　予約データの最新日: {latestBooking}</>}
       </p>
+      {staleAsOf && (
+        <p className="text-xs mb-3 px-3 py-2 rounded-md" style={{ background: 'var(--yellow)', color: '#3d2b1f' }}>
+          ⚠ 基準日（{asOf}）が予約データの最新日（{latestBooking}）より先です。最後の取込以降に入った予約は反映されていないため、実際より少なく見えます。最新の予約情報CSVを取り込むか、基準日を {latestBooking} 以前にしてください。
+        </p>
+      )}
+      {!staleAsOf && <div className="mb-3" />}
 
       {loading ? <Loading /> : error ? <LoadError message={error} /> : monthRows.length === 0 ? (
         <Empty message="この基準日以降の宿泊予約データがありません。予約情報CSV（全ステータス）を /upload から取り込んでください。" />
@@ -124,11 +139,11 @@ export default function SameDayPage() {
                     <th className="px-3 py-2 text-right">売上（今）</th>
                     <th className="px-3 py-2 text-right">売上（前）</th>
                     <th className="px-3 py-2 text-right">売上比</th>
-                    <th className="px-3 py-2 text-right">室数RN（今）</th>
-                    <th className="px-3 py-2 text-right">室数RN（前）</th>
+                    <th className="px-3 py-2 text-right">室数（今）</th>
+                    <th className="px-3 py-2 text-right">室数（前）</th>
                     <th className="px-3 py-2 text-right">室数比</th>
-                    <th className="px-3 py-2 text-right">ADR（今）</th>
-                    <th className="px-3 py-2 text-right">ADR（前）</th>
+                    <th className="px-3 py-2 text-right">室単価（今）</th>
+                    <th className="px-3 py-2 text-right">室単価（前）</th>
                     <th className="px-3 py-2 text-right">人数（今）</th>
                     <th className="px-3 py-2 text-right">人数（前）</th>
                     <th className="px-3 py-2 text-right">同伴（今）</th>
@@ -178,7 +193,7 @@ export default function SameDayPage() {
       )}
       <p className="text-xs mt-3" style={{ color: 'var(--text-dim)' }}>
         今＝基準日時点で入っていた予約（予約日が基準日以前・基準日時点で未キャンセル）。前＝前年同日時点で同様に集計。
-        室数RN＝室泊数（1予約×泊数）。ADR＝売上÷室泊。同伴＝人数÷室泊。販売不可・空部屋は除外。
+        室数＝室泊数（1予約×泊数）。室単価＝売上÷室泊。同伴＝人数÷室泊。販売不可・空部屋は除外。
       </p>
     </div>
   )

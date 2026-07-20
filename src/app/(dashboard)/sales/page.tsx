@@ -18,7 +18,7 @@ import BookingInsightCard from '@/components/booking-insight-card'
 interface Resv {
   checkin: string; nights: number | null; revenue_settled: number | null; channel: string | null
   status: string | null; booking_date: string | null; cancel_date: string | null
-  room_type: string | null; plan: string | null
+  room_type: string | null; plan: string | null; guests_total: number | null
 }
 interface BudgetRow { month: string; revenue_budget: number | null }
 
@@ -51,7 +51,7 @@ export default function SalesStatusPage() {
     const from = `${fy - 1}-04-01`, to = `${fy + 1}-03-31`  // 前年度も同時取得（前年比・前年同日用）
     Promise.all([
       fetchAll<Resv>(() => supabase.from('raw_reservation')
-        .select('checkin, nights, revenue_settled, channel, status, booking_date, cancel_date, room_type, plan')
+        .select('checkin, nights, revenue_settled, channel, status, booking_date, cancel_date, room_type, plan, guests_total')
         .eq('facility', current).gte('checkin', from).lte('checkin', to)),
       fetchAll<BudgetRow>(() => supabase.from('mart_budget_daily_monthly').select('month, revenue_budget').eq('facility', current)),
     ]).then(([rs, bs]) => {
@@ -252,6 +252,30 @@ function SalesDrill({ mon, resv, prevPoint }: { mon: string; resv: Resv[]; prevP
   const aliveAt = (r: Resv, T: string) =>
     !!r.booking_date && r.booking_date <= T && (r.status !== 'キャンセル' || (!!r.cancel_date && r.cancel_date > T))
 
+  // 月サマリ: 客単価・室単価・稼働率（当年 vs 前年同日）。在庫=客室数×日数（設定の月別客室数を反映）
+  const { current, currentFacility } = useFacility()
+  const [odRooms, setOdRooms] = useState<Record<string, number>>({})
+  useEffect(() => {
+    if (!current) return
+    supabase.from('dim_operating_days').select('month, rooms').eq('facility', current).in('month', [mon, pm])
+      .then(({ data }) => {
+        const o: Record<string, number> = {}
+        for (const r of (data ?? []) as { month: string; rooms: number | null }[]) if (r.rooms != null) o[r.month] = r.rooms
+        setOdRooms(o)
+      })
+  }, [current, mon, pm])
+  const kpiSum = (pred: (r: Resv) => boolean) => {
+    let rev = 0, rn = 0, gn = 0
+    for (const r of resv) { if (!pred(r)) continue; const n = Math.max(r.nights ?? 1, 1); rev += r.revenue_settled ?? 0; rn += n; gn += (r.guests_total ?? 0) * n }
+    return { rev, rn, gn }
+  }
+  const kCur = kpiSum((r) => r.checkin.slice(0, 7) === mon && aliveNow(r))
+  const kPrev = kpiSum((r) => r.checkin.slice(0, 7) === pm && aliveAt(r, prevPoint))
+  const dimDays = (ym: string) => { const [y, m2] = ym.split('-').map(Number); return new Date(y, m2, 0).getDate() }
+  const invOf = (ym: string) => { const rooms = odRooms[ym] ?? currentFacility?.total_rooms ?? null; return rooms != null ? rooms * dimDays(ym) : null }
+  const occCur = invOf(mon) ? kCur.rn / invOf(mon)! : null
+  const occPrev = invOf(pm) ? kPrev.rn / invOf(pm)! : null
+
   // 日別チャネル積み上げ（当該月・泊分割・売上を泊数按分）
   const daily = useMemo(() => {
     const acc: Record<string, Record<string, number>> = {}
@@ -306,14 +330,14 @@ function SalesDrill({ mon, resv, prevPoint }: { mon: string; resv: Resv[]; prevP
   }, [resv, mon, pm, prevPoint])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // 部屋タイプ別・プラン別（室泊: 当年 vs 前年最終・上位8）
+  // 部屋タイプ別・プラン別: 前年は「前年同日時点」で再構築（今と同じ土俵で比較）
   const ptRows = (key: 'room_type' | 'plan') => {
     const cm2: Record<string, number> = {}; const pm2: Record<string, number> = {}
     for (const r of resv) {
-      if (!aliveNow(r)) continue
       const mm = r.checkin.slice(0, 7); const k = (r[key] as string) || '不明'
       const n = Math.max(r.nights ?? 1, 1)
-      if (mm === mon) cm2[k] = (cm2[k] ?? 0) + n
-      if (mm === pm) pm2[k] = (pm2[k] ?? 0) + n
+      if (mm === mon && aliveNow(r)) cm2[k] = (cm2[k] ?? 0) + n
+      if (mm === pm && aliveAt(r, prevPoint)) pm2[k] = (pm2[k] ?? 0) + n
     }
     return [...new Set([...Object.keys(cm2), ...Object.keys(pm2)])]
       .map((k) => ({ name: k, cur: cm2[k] ?? 0, prev: pm2[k] ?? 0 }))
@@ -323,6 +347,18 @@ function SalesDrill({ mon, resv, prevPoint }: { mon: string; resv: Resv[]; prevP
 
   return (
     <div className="py-2 space-y-4">
+      {/* 客単価・室単価・稼働率（当年 vs 前年同日） */}
+      <div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <KpiMini label="客単価" cur={kCur.gn > 0 ? kCur.rev / kCur.gn : null} prev={kPrev.gn > 0 ? kPrev.rev / kPrev.gn : null} fmt={(v) => fmtYen(Math.round(v))} />
+          <KpiMini label="室単価" cur={kCur.rn > 0 ? kCur.rev / kCur.rn : null} prev={kPrev.rn > 0 ? kPrev.rev / kPrev.rn : null} fmt={(v) => fmtYen(Math.round(v))} />
+          <KpiMini label="稼働率" cur={occCur} prev={occPrev} fmt={(v) => pct(v)} />
+        </div>
+        <p className="text-[10px] mt-1" style={{ color: 'var(--text-dim)' }}>
+          客単価=売上÷人泊、室単価=売上÷室泊、稼働率=室泊÷在庫（客室数×日数・設定の月別客室数を反映）。前年はいずれも前年同日時点。
+        </p>
+      </div>
+
       {/* 日別チャネル積み上げ */}
       <div>
         <div className="text-xs font-semibold mb-1">{mon} 日別売上（チャネル積み上げ・泊按分）</div>
@@ -366,8 +402,8 @@ function SalesDrill({ mon, resv, prevPoint }: { mon: string; resv: Resv[]; prevP
         </div>
         {/* 部屋タイプ別・プラン別 */}
         <div className="space-y-3">
-          <MiniPt title="部屋タイプ別（室泊・当年 vs 前年）" rows={ptRows('room_type')} />
-          <MiniPt title="プラン別（室泊・上位8）" rows={ptRows('plan')} />
+          <MiniPt title="部屋タイプ別（室泊・当年 vs 前年同日）" rows={ptRows('room_type')} />
+          <MiniPt title="プラン別（室泊・上位8・当年 vs 前年同日）" rows={ptRows('plan')} />
         </div>
       </div>
 
@@ -383,6 +419,20 @@ function SalesDrill({ mon, resv, prevPoint }: { mon: string; resv: Resv[]; prevP
   )
 }
 
+function KpiMini({ label, cur, prev, fmt }: { label: string; cur: number | null; prev: number | null; fmt: (v: number) => string }) {
+  const ratio = cur != null && prev != null && prev > 0 ? cur / prev : null
+  return (
+    <div className="rounded-md px-3 py-2" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      <div className="text-[10px]" style={{ color: 'var(--text-dim)' }}>{label}（当年 / 前年同日）</div>
+      <div className="text-sm font-semibold">
+        {cur != null ? fmt(cur) : '-'}
+        <span className="text-xs font-normal ml-1" style={{ color: 'var(--text-dim)' }}>/ {prev != null ? fmt(prev) : '-'}</span>
+        {ratio != null && <span className="text-xs ml-2 font-medium" style={{ color: ratio >= 1 ? 'var(--green)' : 'var(--red)' }}>{pct(ratio)}</span>}
+      </div>
+    </div>
+  )
+}
+
 function MiniPt({ title, rows }: { title: string; rows: { name: string; cur: number; prev: number }[] }) {
   return (
     <div>
@@ -390,7 +440,7 @@ function MiniPt({ title, rows }: { title: string; rows: { name: string; cur: num
       {rows.length === 0 ? <p className="text-[11px]" style={{ color: 'var(--text-dim)' }}>データなし</p> : (
         <table className="w-full text-xs">
           <thead><tr style={{ color: 'var(--text-dim)' }} className="text-left">
-            <th className="py-1">名称</th><th className="py-1 text-right">当年</th><th className="py-1 text-right">前年</th><th className="py-1 text-right">前年比</th>
+            <th className="py-1">名称</th><th className="py-1 text-right">当年</th><th className="py-1 text-right">前年同日</th><th className="py-1 text-right">前年同日比</th>
           </tr></thead>
           <tbody>
             {rows.map((r) => (

@@ -1,19 +1,22 @@
 'use client'
 
+// 月別売上分析 — 宿泊月（チェックイン月）単位の多面分析。すべて宿泊日（C/I日）ベース。
+// 過去月=実績、当月以降=オンハンド（現在の予約状況）も選択可。前年比較つき（オンハンド月は前年同日比較）。
+// 上部に選択月のブッキングカーブ。予約日の軸（施策の効き）は /booking が担当。
 import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
-  ComposedChart, Line, Legend,
+  ComposedChart, Line, LineChart, Legend, CartesianGrid,
 } from 'recharts'
 import { fmtYen, fmtNum, pct, CHART_AXIS, chartTooltip, channelColor } from '@/lib/ui'
 import { Loading, Empty, LoadError } from '@/components/page-bits'
 
 const TABS = ['チャネル', '客室', '居住地', 'プラン', '曜日', '喫食', 'GS', 'ADR帯'] as const
 type Tab = (typeof TABS)[number]
-const LINCOLN_TABS: Tab[] = ['プラン', '曜日', 'GS', 'ADR帯']
 const MEAL_ORDER = ['2食付', '朝食付', '夕食のみ', '素泊り', 'その他']
 
 const DOW_JP: Record<string, string> = { Mon: '月', Tue: '火', Wed: '水', Thu: '木', Fri: '金', Sat: '土', Sun: '日' }
@@ -22,10 +25,18 @@ const GS_ORDER = ['1名', '2名', '3名', '4名', '5名以上']
 const BAND_ORDER = ['〜¥30,000', '¥30,000–50,000', '¥50,000–70,000', '¥70,000–100,000', '¥100,000〜']
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-interface Ev { checkin: string | null; received_at: string | null; plan: string | null; rooms: number | null; guests_total: number | null; amount_gross: number | null; nights: number | null }
-interface Resv { checkin: string | null; prefecture: string | null; revenue_settled: number | null; nights: number | null; guests_total: number | null; plan?: string | null; room_count?: number | null; booking_date?: string | null }
+interface Ev { checkin: string | null; plan: string | null; rooms: number | null; guests_total: number | null; amount_gross: number | null; nights: number | null }
+interface Resv {
+  checkin: string | null; prefecture: string | null; revenue_settled: number | null; nights: number | null
+  guests_total: number | null; plan: string | null; booking_date: string | null; cancel_date: string | null
+  status: string | null; channel: string | null; room_parsed: string | null; room_type: string | null
+}
 interface Row { name: string; revenue: number; rooms: number; guests: number; count?: number }
 
+const ALIVE = new Set(['未確認', '予約確定', '重要予約', 'C/O'])  // 非キャンセル＝生きている予約
+const todayISO = () => new Date().toISOString().slice(0, 10)
+const shiftYr = (k: string) => `${Number(k.slice(0, 4)) - 1}${k.slice(4)}`
+const daysBetweenIso = (a: string, b: string) => Math.round((Date.parse(a + 'T00:00:00Z') - Date.parse(b + 'T00:00:00Z')) / 86400000)
 
 const gsLabel = (g: number) => (g <= 1 ? '1名' : g >= 5 ? '5名以上' : `${g}名`)
 const bandLabel = (adr: number) =>
@@ -33,9 +44,8 @@ const bandLabel = (adr: number) =>
 const yenAxis = (v: any) => Number(v).toLocaleString()
 
 export default function RevenuePage() {
-  const { current, currentFacility } = useFacility()
+  const { current } = useFacility()
   const [tab, setTab] = useState<Tab>('チャネル')
-  const [basis, setBasis] = useState<'ci' | 'booking'>('ci')
   const [month, setMonth] = useState('')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
@@ -47,15 +57,14 @@ export default function RevenuePage() {
     if (!current) return
     setLoading(true)
     Promise.all([
-      supabase.from('mart_channel_monthly').select('*').eq('facility', current),
-      supabase.from('mart_room_monthly').select('*').eq('facility', current),
       supabase.from('mart_room_type_monthly').select('*').eq('facility', current),
       supabase.from('mart_meal_monthly').select('*').eq('facility', current),
-      fetchAll(() => supabase.from('raw_reservation').select('checkin, prefecture, revenue_settled, nights, guests_total, plan, room_count, booking_date')
-        .eq('facility', current).eq('status', 'C/O').order('id')),
+      fetchAll(() => supabase.from('raw_reservation')
+        .select('checkin, prefecture, revenue_settled, nights, guests_total, plan, booking_date, cancel_date, status, channel, room_parsed, room_type')
+        .eq('facility', current).order('id')),
       fetchAll(() => supabase.from('raw_room_sales').select('room_type, sold, stay_date').eq('facility', current).eq('scope', 'type').order('id')),
-    ]).then(([ch, room, rtype, meal, rv, rsType]) => {
-      setData({ channel: ch.data ?? [], room: room.data ?? [], rtype: rtype.data ?? [], meal: meal.data ?? [] })
+    ]).then(([rtype, meal, rv, rsType]) => {
+      setData({ rtype: rtype.data ?? [], meal: meal.data ?? [] })
       setResv((rv as Resv[]) ?? [])
       // 部屋タイプ別 室数（=日次最大販売室数の推定）
       const cap: Record<string, number> = {}
@@ -65,68 +74,80 @@ export default function RevenuePage() {
       .finally(() => setLoading(false))
   }, [current])
 
-  const isLincoln = LINCOLN_TABS.includes(tab)  // ステイシー由来のプラン/曜日/GS/ADR帯タブ（日付基準の切替あり）
-  const dateField: keyof Ev = basis === 'ci' ? 'checkin' : 'received_at'
+  const aliveNow = (r: Resv) => ALIVE.has(r.status ?? '')
+  const aliveAtT = (r: Resv, T: string) =>
+    !!r.booking_date && r.booking_date <= T && (r.status !== 'キャンセル' || (!!r.cancel_date && r.cancel_date > T))
 
-  // ステイシー(C/O予約)を Ev 形に正規化（received_at←予約日, amount_gross←精算額＝freee計上基準）
-  const stayseeEv = useMemo<Ev[]>(() => resv.map((r) => ({
-    checkin: r.checkin, received_at: r.booking_date ?? null, plan: r.plan ?? null,
-    rooms: r.room_count ?? 1, guests_total: r.guests_total, amount_gross: r.revenue_settled, nights: r.nights,
-  })), [resv])
+  const curYm = todayISO().slice(0, 7)
+  const prevPoint = shiftYr(todayISO())  // 前年の同じ日付（前年同日比較の時点）
+  const isOnhand = !!month && month >= curYm
+  const prevLabel = isOnhand ? '前年同日' : '前年'
+  const pm = month ? shiftYr(month) : ''
+
+  // プラン/曜日/GS/ADR帯 用イベント（宿泊日ベース・生存予約のみ。室数=nights: room_countは全件1のため使用しない）
+  const stayseeEv = useMemo<Ev[]>(() => resv.filter(aliveNow).map((r) => ({
+    checkin: r.checkin, plan: r.plan ?? null,
+    rooms: 1, guests_total: r.guests_total, amount_gross: r.revenue_settled, nights: r.nights,
+  })), [resv])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const months = useMemo(() => {
-    let ms: string[]
-    if (isLincoln) {
-      ms = stayseeEv.map((e) => (e[dateField] as string | null)?.slice(0, 7)).filter(Boolean) as string[]
-    } else {
-      // PMS系タブは全ソースの月を統合
-      ms = [
-        ...(data.channel ?? []), ...(data.room ?? []), ...(data.meal ?? []),
-      ].map((r: any) => r.month).filter(Boolean)
-      ms = ms.concat(resv.map((r) => r.checkin?.slice(0, 7)).filter(Boolean) as string[])
-    }
+    const ms = [
+      ...resv.filter(aliveNow).map((r) => r.checkin?.slice(0, 7)),
+      ...(data.meal ?? []).map((r: any) => r.month),
+    ].filter(Boolean) as string[]
     return [...new Set(ms)].sort().reverse()
-  }, [isLincoln, dateField, stayseeEv, data, resv])
+  }, [resv, data])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { if (months.length > 0 && !months.includes(month)) setMonth(months[0]) }, [months, month])
 
-  const monthEvents = useMemo(
-    () => stayseeEv.filter((e) => (e[dateField] as string | null)?.slice(0, 7) === month),
-    [stayseeEv, dateField, month]
-  )
-  const residenceRows = useMemo(() => {
-    const m = new Map<string, Row>()
+  // 汎用集計: 対象月×キー。当年=現在の生存予約 / 前年=オンハンド月なら前年同日時点で再構築
+  const aggBy = (m: string, keyFn: (r: Resv) => string, asPrev: boolean): Row[] => {
+    if (!m) return []
+    const map = new Map<string, Row>()
     for (const r of resv) {
-      if (r.checkin?.slice(0, 7) !== month) continue
-      const k = r.prefecture || '不明'
-      const g = m.get(k) ?? { name: k, revenue: 0, rooms: 0, guests: 0 }
-      // rooms=室泊(1予約行=1部屋×泊数), guests=人泊
-      g.revenue += r.revenue_settled || 0; g.rooms += r.nights || 0
-      g.guests += (r.guests_total || 0) * Math.max(r.nights ?? 1, 1)
-      m.set(k, g)
+      if (r.checkin?.slice(0, 7) !== m) continue
+      if (asPrev && isOnhand ? !aliveAtT(r, prevPoint) : !aliveNow(r)) continue
+      const k = keyFn(r); const n = Math.max(r.nights ?? 1, 1)
+      const g = map.get(k) ?? { name: k, revenue: 0, rooms: 0, guests: 0, count: 0 }
+      g.revenue += r.revenue_settled || 0; g.rooms += n; g.guests += (r.guests_total || 0) * n; g.count! += 1
+      map.set(k, g)
     }
-    return [...m.values()].sort((a, b) => b.revenue - a.revenue)
-  }, [resv, month])
+    return [...map.values()]
+  }
+  /* eslint-disable react-hooks/exhaustive-deps */
+  const channelRows = useMemo(() => aggBy(month, (r) => r.channel || '不明', false), [resv, month])
+  const channelPrev = useMemo(() => aggBy(pm, (r) => r.channel || '不明', true), [resv, pm, isOnhand])
+  const roomRows = useMemo(() => aggBy(month, (r) => r.room_parsed || '不明', false), [resv, month])
+  const roomPrev = useMemo(() => aggBy(pm, (r) => r.room_parsed || '不明', true), [resv, pm, isOnhand])
+  const typeRows = useMemo(() => aggBy(month, (r) => r.room_type || '不明', false), [resv, month])
+  const typePrev = useMemo(() => aggBy(pm, (r) => r.room_type || '不明', true), [resv, pm, isOnhand])
+  const residenceRows = useMemo(() => aggBy(month, (r) => r.prefecture || '不明', false).sort((a, b) => b.revenue - a.revenue), [resv, month])
+  const residencePrev = useMemo(() => aggBy(pm, (r) => r.prefecture || '不明', true), [resv, pm, isOnhand])
+  /* eslint-enable react-hooks/exhaustive-deps */
+
+  const monthEvents = useMemo(
+    () => stayseeEv.filter((e) => e.checkin?.slice(0, 7) === month),
+    [stayseeEv, month]
+  )
 
   return (
     <div className="p-6">
-      <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)', opacity: isLincoln ? 1 : 0.4 }}>
-            {(['ci', 'booking'] as const).map((b) => (
-              <button key={b} disabled={!isLincoln} onClick={() => setBasis(b)} className="px-3 py-1.5 text-xs"
-                style={{ background: basis === b ? 'var(--accent)' : 'var(--surface)', color: basis === b ? '#fff' : 'var(--text-dim)', cursor: isLincoln ? 'pointer' : 'not-allowed' }}>
-                {b === 'ci' ? 'CI日ベース' : '予約日ベース'}
-              </button>
-            ))}
-          </div>
-          {months.length > 0 && (
-            <select className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)}>
-              {months.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
-          )}
-        </div>
+      <div className="flex items-center gap-3 mb-3 flex-wrap">
+        {months.length > 0 && (
+          <select className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)}>
+            {months.map((m) => <option key={m} value={m}>{m}{m >= curYm ? '（オンハンド）' : ''}</option>)}
+          </select>
+        )}
+        <span className="text-xs" style={{ color: 'var(--text-dim)' }}>宿泊日（C/I日）ベース</span>
+        {isOnhand && (
+          <span className="text-[10px] px-2 py-1 rounded" style={{ background: 'var(--yellow)', color: '#3d2b1f' }}>
+            この月はオンハンド（現在の予約状況）。前年比較は前年同日（{prevPoint}）時点です
+          </span>
+        )}
       </div>
+
+      {/* 選択月のブッキングカーブ（切り口タブより上） */}
+      {month && <CurveMini month={month} />}
 
       <div className="flex gap-1 mb-2 flex-wrap">
         {TABS.map((t) => (
@@ -139,29 +160,84 @@ export default function RevenuePage() {
 
       {loading ? <Loading /> : loadError ? <LoadError message={loadError} /> : (
         <>
-          {tab === 'チャネル' && <ChannelTab rows={pmsRows(data.channel, month, 'channel')} />}
-          {tab === '客室' && <RoomTab rooms={pmsRows(data.room, month, 'room')} types={pmsRows(data.rtype, month, 'room_type')} typeMonthly={data.rtype ?? []} capByType={capByType} />}
-          {tab === '居住地' && <ResidenceTab rows={residenceRows} />}
+          {tab === 'チャネル' && <ChannelTab rows={channelRows} prev={channelPrev} prevLabel={prevLabel} />}
+          {tab === '客室' && <RoomTab rooms={roomRows} prevRooms={roomPrev} types={typeRows} prevTypes={typePrev} prevLabel={prevLabel} typeMonthly={data.rtype ?? []} capByType={capByType} />}
+          {tab === '居住地' && <ResidenceTab rows={residenceRows} prev={residencePrev} prevLabel={prevLabel} />}
           {tab === 'プラン' && <PlanTab events={monthEvents} />}
-          {tab === '曜日' && <DowTab events={monthEvents} dateField={dateField} />}
+          {tab === '曜日' && <DowTab events={monthEvents} />}
           {tab === '喫食' && <MealTab rows={(data.meal ?? []).filter((r) => r.month === month)} allMeal={data.meal ?? []} />}
           {tab === 'GS' && <GsTab events={monthEvents} />}
           {tab === 'ADR帯' && <AdrBandTab events={monthEvents} />}
         </>
       )}
+      <p className="text-xs mt-3" style={{ color: 'var(--text-dim)' }}>
+        集計は宿泊日（C/I日）ベース・非キャンセル予約（過去月=宿泊済、当月以降=オンハンド）。室泊=泊数、人泊=人数×泊数。
+        前年列はオンハンド月のみ前年同日時点で再構築（それ以外は前年の確定値）。
+      </p>
     </div>
   )
 }
 
-/* mart rows → 統一Row */
-function pmsRows(src: any[] | undefined, month: string, kind: 'channel' | 'room' | 'room_type'): Row[] {
-  return (src ?? []).filter((r) => r.month === month).map((r) => ({
-    name: (kind === 'channel' ? r.channel : kind === 'room' ? r.room : r.room_type) || '不明',
-    revenue: r.revenue || 0,
-    rooms: (kind === 'channel' ? r.rooms : r.rooms_sold) || 0,
-    guests: r.guests || 0,
-  }))
+/* ---- 選択月のブッキングカーブ（コンパクト） ---- */
+interface CurveRowM { stay_date: string; booking_date: string | null; cancel_date: string | null; lead_days: number | null; rooms: number | null }
+function CurveMini({ month }: { month: string }) {
+  const { current } = useFacility()
+  const [curve, setCurve] = useState<CurveRowM[] | null>(null)
+  useEffect(() => {
+    if (!current) return
+    setCurve(null)
+    fetchAll<CurveRowM>(() => supabase.from('mart_booking_curve')
+      .select('stay_date, booking_date, cancel_date, lead_days, rooms').eq('facility', current))
+      .then((c) => setCurve(c ?? [])).catch(() => setCurve([]))
+  }, [current])
+
+  const MAXK = 120
+  const chart = useMemo(() => {
+    if (!month || curve === null) return []
+    const build = (m: string) => {
+      const arr = new Array(MAXK + 1).fill(0)
+      for (const r of curve) {
+        if (r.stay_date.slice(0, 7) !== m || !r.booking_date) continue
+        const lead = r.lead_days ?? daysBetweenIso(r.stay_date, r.booking_date)
+        if (lead < 0) continue
+        const cl = r.cancel_date ? daysBetweenIso(r.stay_date, r.cancel_date) : null
+        const upTo = Math.min(lead, MAXK)
+        for (let k = 0; k <= upTo; k++) { if (cl != null && cl >= k) continue; arr[k] += r.rooms ?? 1 }
+      }
+      return arr
+    }
+    const cur = build(month); const prev = build(shiftYr(month))
+    const out: { k: string; 当年: number; 前年: number | null }[] = []
+    const hasPrev = prev.some((x: number) => x > 0)
+    for (let k = MAXK; k >= 0; k--) out.push({ k: k === 0 ? '当日' : `D-${k}`, 当年: cur[k], 前年: hasPrev ? prev[k] : null })
+    return out
+  }, [curve, month])
+  const hasData = chart.some((d) => d.当年 > 0)
+
+  return (
+    <div className="card p-4 mb-4">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="text-sm font-semibold">ブッキングカーブ（{month}宿泊・室数・前年同月重ね）</h2>
+        <Link href={`/booking?tab=curve&month=${month}`} className="text-xs" style={{ color: 'var(--accent)' }}>→ 詳細（金額切替・他月比較）</Link>
+      </div>
+      {curve === null ? <p className="text-xs py-8 text-center" style={{ color: 'var(--text-dim)' }}>カーブを再構築中…</p>
+        : hasData ? (
+          <ResponsiveContainer width="100%" height={190}>
+            <LineChart data={chart} margin={{ top: 4, right: 8, bottom: 0, left: -14 }}>
+              <CartesianGrid stroke="#e7dac6" vertical={false} />
+              <XAxis dataKey="k" {...CHART_AXIS} interval={19} />
+              <YAxis {...CHART_AXIS} allowDecimals={false} />
+              <Tooltip {...chartTooltip} formatter={(v: any, n: any) => [`${fmtNum(Number(v))}室`, n]} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line dataKey="当年" stroke="#D85A30" strokeWidth={2} dot={false} />
+              <Line dataKey="前年" stroke="#7F77DD" strokeWidth={2} strokeDasharray="4 3" dot={false} connectNulls />
+            </LineChart>
+          </ResponsiveContainer>
+        ) : <p className="text-xs py-8 text-center" style={{ color: 'var(--text-dim)' }}>この宿泊月のカーブデータがありません。</p>}
+    </div>
+  )
 }
+
 function aggEvents(events: Ev[], keyFn: (e: Ev) => string | null): Row[] {
   const m = new Map<string, Row>()
   for (const e of events) {
@@ -179,15 +255,21 @@ function aggEvents(events: Ev[], keyFn: (e: Ev) => string | null): Row[] {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return <div className="card p-4 mb-4"><h2 className="text-sm font-semibold mb-3">{title}</h2>{children}</div>
 }
-function KpiTable({ dim, rows, countLabel }: { dim: string; rows: Row[]; countLabel?: string }) {
+function KpiTable({ dim, rows, countLabel, prev, prevLabel }: {
+  dim: string; rows: Row[]; countLabel?: string; prev?: Row[]; prevLabel?: string
+}) {
   const total = rows.reduce((s, r) => s + (r.revenue || 0), 0)
-  const headers = [dim, ...(countLabel ? [countLabel] : []), '売上', '構成比', '室泊数', '人泊数', 'ADR', '客単価', 'GS']
+  const prevMap = new Map((prev ?? []).map((p) => [p.name, p]))
+  const showPrev = prev != null
+  const headers = [dim, ...(countLabel ? [countLabel] : []), '売上',
+    ...(showPrev ? [`売上(${prevLabel})`, `${prevLabel}比`] : []),
+    '構成比', '室泊数', '人泊数', 'ADR', '客単価', 'GS']
   return (
     <div className="card overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-left">
-            {headers.map((h, i) => <th key={i} className={`px-4 py-3 ${i > 0 ? 'text-right' : ''}`}>{h}</th>)}
+            {headers.map((h, i) => <th key={i} className={`px-4 py-3 ${i > 0 ? 'text-right' : ''} whitespace-nowrap`}>{h}</th>)}
           </tr>
         </thead>
         <tbody>
@@ -195,11 +277,15 @@ function KpiTable({ dim, rows, countLabel }: { dim: string; rows: Row[]; countLa
             const adr = r.rooms > 0 ? r.revenue / r.rooms : 0
             const gu = r.guests > 0 ? r.revenue / r.guests : 0
             const gs = r.rooms > 0 ? r.guests / r.rooms : 0
+            const p = prevMap.get(r.name)
+            const ratio = p && p.revenue > 0 ? r.revenue / p.revenue : null
             return (
               <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
                 <td className="px-4 py-2 font-medium">{r.name}</td>
                 {countLabel && <td className="px-4 py-2 text-right">{fmtNum(r.count)}</td>}
                 <td className="px-4 py-2 text-right">{fmtNum(r.revenue)}</td>
+                {showPrev && <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{p ? fmtNum(p.revenue) : '-'}</td>}
+                {showPrev && <td className="px-4 py-2 text-right font-medium" style={{ color: ratio == null ? undefined : ratio >= 1 ? 'var(--green)' : 'var(--red)' }}>{ratio != null ? pct(ratio) : '-'}</td>}
                 <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{total > 0 ? pct(r.revenue / total) : '-'}</td>
                 <td className="px-4 py-2 text-right">{fmtNum(r.rooms)}</td>
                 <td className="px-4 py-2 text-right">{fmtNum(r.guests)}</td>
@@ -216,7 +302,7 @@ function KpiTable({ dim, rows, countLabel }: { dim: string; rows: Row[]; countLa
 }
 
 /* ---- チャネル（横軸1円単位）---- */
-function ChannelTab({ rows }: { rows: Row[] }) {
+function ChannelTab({ rows, prev, prevLabel }: { rows: Row[]; prev: Row[]; prevLabel: string }) {
   if (rows.length === 0) return <Empty message="この月のデータがありません" />
   const sorted = [...rows].sort((a, b) => b.revenue - a.revenue)
   return (
@@ -233,7 +319,7 @@ function ChannelTab({ rows }: { rows: Row[] }) {
           </BarChart>
         </ResponsiveContainer>
       </Section>
-      <KpiTable dim="チャネル" rows={sorted} />
+      <KpiTable dim="チャネル" rows={sorted} prev={prev} prevLabel={prevLabel} />
     </>
   )
 }
@@ -242,7 +328,10 @@ function ChannelTab({ rows }: { rows: Row[] }) {
 const TYPE_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#06b6d4', '#a855f7']
 const daysInMonth = (ym: string) => { const [y, m] = ym.split('-').map(Number); return new Date(y, m, 0).getDate() }
 
-function RoomTab({ rooms, types, typeMonthly, capByType }: { rooms: Row[]; types: Row[]; typeMonthly: any[]; capByType: Record<string, number> }) {
+function RoomTab({ rooms, prevRooms, types, prevTypes, prevLabel, typeMonthly, capByType }: {
+  rooms: Row[]; prevRooms: Row[]; types: Row[]; prevTypes: Row[]; prevLabel: string
+  typeMonthly: any[]; capByType: Record<string, number>
+}) {
   const r = [...rooms].sort((a, b) => b.revenue - a.revenue)
   const t = [...types].sort((a, b) => b.revenue - a.revenue)
 
@@ -327,9 +416,9 @@ function RoomTab({ rooms, types, typeMonthly, capByType }: { rooms: Row[]; types
         </div>
       </div>
       <h3 className="text-sm font-semibold mb-2">客室別</h3>
-      <div className="mb-4"><KpiTable dim="客室" rows={r} /></div>
+      <div className="mb-4"><KpiTable dim="客室" rows={r} prev={prevRooms} prevLabel={prevLabel} /></div>
       <h3 className="text-sm font-semibold mb-2">部屋タイプ別</h3>
-      <KpiTable dim="部屋タイプ" rows={t} />
+      <KpiTable dim="部屋タイプ" rows={t} prev={prevTypes} prevLabel={prevLabel} />
       </>
       )}
     </>
@@ -337,7 +426,7 @@ function RoomTab({ rooms, types, typeMonthly, capByType }: { rooms: Row[]; types
 }
 
 /* ---- 居住地（都道府県・外国は国単位）---- */
-function ResidenceTab({ rows }: { rows: Row[] }) {
+function ResidenceTab({ rows, prev, prevLabel }: { rows: Row[]; prev: Row[]; prevLabel: string }) {
   if (rows.length === 0) return <Empty message="この月のデータがありません" />
   const chart = rows.slice(0, 15).map((r) => ({ name: r.name, revenue: r.revenue }))
   return (
@@ -352,7 +441,7 @@ function ResidenceTab({ rows }: { rows: Row[] }) {
           </BarChart>
         </ResponsiveContainer>
       </Section>
-      <KpiTable dim="居住地" rows={rows} />
+      <KpiTable dim="居住地" rows={rows} prev={prev} prevLabel={prevLabel} />
     </>
   )
 }
@@ -379,11 +468,11 @@ function PlanTab({ events }: { events: Ev[] }) {
   )
 }
 
-/* ---- 曜日（表追加）---- */
-function DowTab({ events, dateField }: { events: Ev[]; dateField: keyof Ev }) {
+/* ---- 曜日（宿泊日=C/I日ベース）---- */
+function DowTab({ events }: { events: Ev[] }) {
   if (events.length === 0) return <Empty message="この月のデータがありません" />
   const dowOf = (e: Ev) => {
-    const ds = e[dateField] as string | null; if (!ds) return null
+    const ds = e.checkin; if (!ds) return null
     return DOW_ORDER[(new Date(ds + 'T00:00:00').getDay() + 6) % 7]
   }
   const byDow = aggEvents(events, dowOf)
@@ -428,7 +517,7 @@ function MealTab({ rows, allMeal }: { rows: any[]; allMeal: any[] }) {
 
   return (
     <>
-      {rows.length > 0 && (
+      {rows.length > 0 ? (
         <>
           <Section title="喫食タイプ別 予約数（予約単位）">
             <ResponsiveContainer width="100%" height={240}>
@@ -442,6 +531,8 @@ function MealTab({ rows, allMeal }: { rows: any[]; allMeal: any[] }) {
           </Section>
           <div className="mb-6"><KpiTable dim="喫食タイプ" rows={unified} countLabel="予約数" /></div>
         </>
+      ) : (
+        <p className="text-xs mb-4" style={{ color: 'var(--text-dim)' }}>この月の喫食データはまだありません（喫食は基本商品情報の取込後・確定実績のみ）。</p>
       )}
 
       <h3 className="text-sm font-semibold mb-2">月次 喫食構成比（予約数ベース）</h3>
