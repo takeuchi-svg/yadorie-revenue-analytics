@@ -32,57 +32,76 @@ export async function buildBookingInsightMaterial(sb: SupabaseClient, facility: 
 
   const aliveNow = (r: any) => ALIVE.has(r.status ?? '')
   const aliveAt = (r: any, T: string) => !!r.booking_date && r.booking_date <= T && (r.status !== 'キャンセル' || (!!r.cancel_date && r.cancel_date > T))
-  // 宿泊月別: 現在の生存売上 / 前年同日時点の売上
+  // 宿泊月別（宿泊日ベース）: 現在の生存売上 / 前年同日時点の生存売上 / 生存室泊 / OTA別生存室泊
   const salesNow: Record<string, number> = {}; const salesPrevSame: Record<string, number> = {}
+  const rnNow: Record<string, number> = {}; const chNow: Record<string, Record<string, number>> = {}
   for (const r of resv as any[]) {
     const m = (r.checkin ?? '').slice(0, 7); if (!m) continue
-    if (aliveNow(r)) salesNow[m] = (salesNow[m] ?? 0) + (r.revenue_settled ?? 0)
+    if (aliveNow(r)) {
+      salesNow[m] = (salesNow[m] ?? 0) + (r.revenue_settled ?? 0)
+      rnNow[m] = (rnNow[m] ?? 0) + (r.nights ?? 0)
+      ;(chNow[m] ??= {}); chNow[m][r.channel] = (chNow[m][r.channel] ?? 0) + (r.nights ?? 0)
+    }
     if (aliveAt(r, tPrev)) salesPrevSame[m] = (salesPrevSame[m] ?? 0) + (r.revenue_settled ?? 0)
   }
   const curM = today.slice(0, 7)
-  const allMonths = [...new Set(Object.keys(salesNow))].sort()
-  const pastMonths = allMonths.filter((m) => m < curM).slice(-6)
+  const pastMonths = [...new Set(Object.keys(salesNow))].filter((m) => m < curM).sort().slice(-3).reverse()  // 先月を先頭に
   const pct1 = (v: number | null | undefined) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`)
 
-  const lines: string[] = [`売上状況の材料（${asOf}時点・金額=万円・前年同日=1年前の同じ日${tPrev}時点の入り）`]
+  const lines: string[] = [
+    `売上状況の材料（${asOf}時点・金額=万円）`,
+    '【軸の定義】宿泊日ベース＝「いつ泊まる分か」で集計 ／ 予約日ベース＝「いつ予約が入ったか」で集計（別軸）。',
+    `【比較の定義】予算比＝対計画 ／ 前年比＝前年の同じ宿泊月の確定値との比 ／ 前年同日比＝1年前の同じ日(${tPrev})時点の入り(オンハンド)との比。`,
+  ]
 
-  // ── 実績（宿泊月・直近6ヶ月・予算比/前年比） ──
-  lines.push('', '## 実績（確定した宿泊月・直近6ヶ月）')
+  // ── ① 宿泊実績（宿泊日ベース・確定した宿泊月・先月中心・予算比/前年比） ──
+  lines.push('', '## ① 宿泊実績（宿泊日ベース・確定した月・先月中心）')
   for (const m of pastMonths) {
     const pm = shiftYr(m)
     const s = salesNow[m] ?? 0
+    const tag = m === pastMonths[0] ? '【先月】' : ''
     const occLine = occMap[m] != null ? `OCC ${pct1(occMap[m])}（${occMap[pm] != null ? yoy(occMap[m], occMap[pm]) : '前年—'}）` : 'OCC—'
     const adrLine = adrMap[m] != null ? `室単価 ${fmtMan(adrMap[m])}（${adrMap[pm] != null ? yoy(adrMap[m], adrMap[pm]) : '前年—'}）` : ''
     const guLine = guMap[m] != null ? `客単価 ${fmtMan(guMap[m])}（${guMap[pm] != null ? yoy(guMap[m], guMap[pm]) : '前年—'}）` : ''
-    lines.push(`- ${m}: 売上 ${fmtMan(s)}（${rat(s, budMap[m], '予算比')} / ${yoy(s, salesNow[pm])}） / ${occLine} / ${adrLine} / ${guLine}`)
+    lines.push(`- ${tag}${m}: 売上 ${fmtMan(s)}（${rat(s, budMap[m], '予算比')} / ${yoy(s, salesNow[pm])}） / ${occLine} / ${adrLine} / ${guLine}`)
   }
 
-  // ── オンハンド（今後の宿泊月・対予算/前年同日比） ──
+  // ── ② オンハンド（宿泊日ベース・当月以降・現在の入り・予算比/前年同日比） ──
+  // 注意: mart_onhand は「当日以降の宿泊日」しか持たない。当月は月頭〜昨日の確定分が欠落し満月予算に対して過少になるため、
+  //       当月のみ満月ベースの生存予約(salesNow=実績確定+残りオンハンド)を採用。将来月(丸ごと先)は mart_onhand が正。
   const om: Record<string, number> = {}; const omRev: Record<string, number> = {}; const omByCh: Record<string, Record<string, number>> = {}
   for (const r of onhand as any[]) {
     const m = r.stay_date.slice(0, 7)
     om[m] = (om[m] ?? 0) + (r.rooms ?? 0); omRev[m] = (omRev[m] ?? 0) + (r.revenue ?? 0)
     ;(omByCh[m] ??= {}); omByCh[m][r.channel] = (omByCh[m][r.channel] ?? 0) + (r.rooms ?? 0)
   }
-  const future = Object.keys(om).filter((m) => m >= curM).sort().slice(0, 6)
-  lines.push('', '## オンハンド（今後の宿泊月・現在の入り・対予算/前年同日比）')
+  const futureSet = new Set<string>([curM])
+  for (const m of Object.keys(om)) if (m > curM) futureSet.add(m)
+  const future = [...futureSet].sort().slice(0, 7)
+  lines.push('', '## ② オンハンド（宿泊日ベース・当月以降のいま現在の入り。予算比＝満月予算に対する現在の入り率／前年同日比＝1年前の同日時点の入りとの比）')
   for (const m of future) {
     const pm = shiftYr(m)
-    const top = Object.entries(omByCh[m] ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([c, v]) => `${c}${v}室`).join('・')
-    lines.push(`- ${m}宿泊: ${om[m]}室 / 売上 ${fmtMan(omRev[m] ?? 0)}（${rat(omRev[m] ?? 0, budMap[m], '対予算')} / 前年同日比${salesPrevSame[pm] > 0 ? Math.round(((omRev[m] ?? 0) / salesPrevSame[pm]) * 100) + '%' : '—'}）（${top}）`)
+    const isCur = m === curM
+    const rev = isCur ? (salesNow[m] ?? 0) : (omRev[m] ?? 0)
+    const rn = isCur ? (rnNow[m] ?? 0) : (om[m] ?? 0)
+    const chMap = isCur ? (chNow[m] ?? {}) : (omByCh[m] ?? {})
+    const psame = salesPrevSame[pm] ?? 0
+    const top = Object.entries(chMap).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([c, v]) => `${c}${v}室`).join('・')
+    const note = isCur ? '（当月＝実績確定分＋残りオンハンドの満月ベース）' : ''
+    lines.push(`- ${m}宿泊${note}: ${rn}室泊 / 売上 ${fmtMan(rev)}（${rat(rev, budMap[m], '予算比')} / 前年同日比${psame > 0 ? Math.round((rev / psame) * 100) + '%' : '—'}）（${top}）`)
   }
 
-  // ── 予約日ベース（施策の効き・新規予約の前年同月比） ──
+  // ── ③ 予約日ベース（別軸：いつ予約が入ったか＝施策の効き・前年同月比） ──
   const bm: Record<string, { rn: number; rev: number }> = {}
   for (const r of flow as any[]) { const m = r.flow_date.slice(0, 7); (bm[m] ??= { rn: 0, rev: 0 }); bm[m].rn += r.new_room_nights ?? 0; bm[m].rev += r.new_revenue ?? 0 }
-  const recent = Object.keys(bm).sort().slice(-6)
-  lines.push('', '## 予約日ベース（いつ予約が入ったか＝施策の効き・直近6ヶ月・前年同月比）')
-  for (const m of recent) { const c = bm[m]; const p = bm[shiftYr(m)]; lines.push(`- ${m}予約分: 金額 ${fmtMan(c.rev)}（${yoy(c.rev, p?.rev)}） / 室泊 ${c.rn}（${yoy(c.rn, p?.rn)}）`) }
+  const recent = Object.keys(bm).sort().slice(-6).reverse()
+  lines.push('', '## ③ 予約日ベース：いつ予約が入ったか（①②の宿泊日ベースとは別軸。施策の効きを見る・前年同月比）')
+  for (const m of recent) { const c = bm[m]; const p = bm[shiftYr(m)]; lines.push(`- ${m}に入った予約: 金額 ${fmtMan(c.rev)}（${yoy(c.rev, p?.rev)}） / 室泊 ${c.rn}（${yoy(c.rn, p?.rn)}）`) }
 
   // ── 施策（約1年内） ──
   const cutoff = shiftYr(asOf)
   const acts = (actions as any[]).filter((a) => (a.end_date ?? a.start_date) >= cutoff).sort((a, b) => a.start_date.localeCompare(b.start_date))
-  lines.push('', '## 施策の記録（約1年内）')
+  lines.push('', '## ④ 施策の記録（約1年内・予約日ベースの動きと照合する材料）')
   if (acts.length === 0) lines.push('- 記録なし')
   else for (const a of acts) lines.push(`- ${a.start_date}${a.end_date && a.end_date !== a.start_date ? `〜${a.end_date}` : ''}: [${a.action_type}] ${a.title}（${a.channel ?? '全体'}）`)
 
