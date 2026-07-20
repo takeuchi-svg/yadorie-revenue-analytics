@@ -16,7 +16,7 @@ import BudgetReviewCard from '@/components/budget-review-card'
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export default function BudgetPage() {
-  const { current, isOwner } = useFacility()
+  const { current, isOwner, isAdmin } = useFacility()
   const toast = useToast()
   const [tab, setTab] = useState<'daily' | 'pl' | 'capex' | 'staffing'>('daily')
   const [fyList, setFyList] = useState<number[]>([])
@@ -40,7 +40,10 @@ export default function BudgetPage() {
     })()
   }, [current])
 
-  const locked = fy != null && lockedYears.has(String(fy))
+  // 予算作成はオーナー・管理者のみ編集可（来年度の予算編成時に解禁）。それ以外は閲覧のみ。
+  const canEdit = isAdmin
+  const yearLocked = fy != null && lockedYears.has(String(fy))
+  const locked = yearLocked || !canEdit   // 権限が無い場合も全タブ編集不可扱い
 
   const setLock = async (lock: boolean) => {
     if (!current || fy == null || !isOwner) return
@@ -74,15 +77,21 @@ export default function BudgetPage() {
                 {fyList.map((y) => <option key={y} value={y}>{y}年度</option>)}
               </select>
             )}
-            {locked && <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>🔒 {fy}年度は確定（ロック中）</span>}
+            {!canEdit && <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>閲覧のみ（予算編成期に解禁）</span>}
+            {canEdit && yearLocked && <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>🔒 {fy}年度は確定（ロック中）</span>}
             {isOwner && (
-              <button onClick={() => setLock(!locked)} className="text-xs px-3 py-1 rounded-md" style={{ background: 'var(--surface2)', color: 'var(--text)', border: '1px solid var(--border)' }}>
-                {locked ? '解錠する' : '施錠する（確定）'}
+              <button onClick={() => setLock(!yearLocked)} className="text-xs px-3 py-1 rounded-md" style={{ background: 'var(--surface2)', color: 'var(--text)', border: '1px solid var(--border)' }}>
+                {yearLocked ? '解錠する' : '施錠する（確定）'}
               </button>
             )}
           </span>
         )}
       </div>
+      {!canEdit && (
+        <p className="text-xs mb-2 px-3 py-2 rounded-md" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>
+          予算作成の編集はオーナー・管理者のみです。来年度の予算編成時に解禁します（項目・数値の閲覧は可能です）。
+        </p>
+      )}
       {tab === 'daily' && <BudgetDaily fy={fy} fyList={fyList} onFy={setFy} locked={locked} />}
       {tab === 'pl' && <BudgetPL fy={fy} fyList={fyList} onFy={setFy} locked={locked} />}
       {tab === 'capex' && <BudgetCapex fy={fy} locked={locked} />}
