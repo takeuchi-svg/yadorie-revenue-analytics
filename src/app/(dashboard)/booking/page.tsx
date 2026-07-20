@@ -14,6 +14,7 @@ import {
 } from 'recharts'
 import { fmtNum, fmtYen, pct, CHART_AXIS, chartTooltip, channelColor } from '@/lib/ui'
 import { Loading, Empty, LoadError } from '@/components/page-bits'
+import BookingInsightCard from '@/components/booking-insight-card'
 
 interface FlowRow {
   flow_date: string; channel: string
@@ -75,6 +76,7 @@ export default function BookingPage() {
 
   return (
     <div className="p-6">
+      <BookingInsightCard />
       <div className="flex rounded-md overflow-hidden mb-4 w-fit" style={{ border: '1px solid var(--border)' }}>
         {([['stack', '予約日ベース積み上げ'], ['yoy', '前年同日比較'], ['curve', 'ブッキングカーブ'], ['onhand', 'オンハンド断面']] as const).map(([v, l]) => (
           <button key={v} onClick={() => setView(v)} className="px-4 py-1.5 text-xs font-medium"

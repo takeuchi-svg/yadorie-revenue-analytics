@@ -375,6 +375,26 @@ export async function runBudgetReview(facility: string, fy: number, material: st
   return text
 }
 
+// 予約日ベース分析（M8）: 前年同期比の異変検知・OTA/室数・単価の分解・施策照合を灯が1回で生成。
+// 材料はクライアント算出。層3(施設プロフィール)注入。要因（在庫か料金か）は断定しない。
+export async function runBookingInsight(facility: string, asOf: string, material: string): Promise<string> {
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! })
+  const sb = makeSupabase()
+  const RUNTIME = `【この依頼の進め方】query_dataツールは使わず、ユーザーメッセージの【予約日ベースデータ】のみを根拠に分析する（推測の数値は作らない）。予約日ベース＝いつ予約が入ったか、宿泊日ベース＝いつ泊まるか。金額は万円、率は%。要因（在庫か料金か）は断定せず、検知・分解・施策照合と“確かめたい問い”まで。`
+  const [system, promptTpl] = await Promise.all([
+    buildSystemBlocks(sb, facility, { runtime: RUNTIME }),
+    getPrompt(sb, 'booking_insight'),
+  ])
+  const prompt = promptTpl.replaceAll('{as_of}', asOf)
+  const resp = await client.messages.create({
+    model: MODEL, max_tokens: 4000, thinking: NO_THINKING, system,
+    messages: [{ role: 'user', content: `${prompt}\n\n【予約日ベースデータ】\n${material}` }],
+  })
+  const text = resp.content.filter((c): c is Anthropic.TextBlock => c.type === 'text').map((c) => c.text).join('\n')
+  if (!text) throw new Error(`AIが空の応答を返しました（stop_reason=${resp.stop_reason ?? '不明'}）`)
+  return text
+}
+
 // kind='summary'|'issue' の本文を1回のLLM呼び出しで生成
 export async function runInsight(
   kind: 'summary' | 'issue',
