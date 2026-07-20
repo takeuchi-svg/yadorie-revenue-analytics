@@ -21,6 +21,7 @@ const MAX_MONTHS = 12
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 const shiftYr = (k: string) => `${Number(k.slice(0, 4)) - 1}${k.slice(4)}`
+const nextYr = (k: string) => `${Number(k.slice(0, 4)) + 1}${k.slice(4)}`
 // 基準日Tの時点で「生きていた」予約か: 予約済み(booking_date<=T) かつ 未キャンセル(status!=キャンセル または キャンセル日がTより後)
 const aliveAt = (r: Resv, T: string) =>
   !!r.booking_date && r.booking_date <= T && (r.status !== 'キャンセル' || (!!r.cancel_date && r.cancel_date > T))
@@ -59,9 +60,10 @@ export default function SameDayPage() {
         const g = (out[m].cur[ch] ??= emptyAgg())
         g.rev += r.revenue_settled ?? 0; g.rn += Math.max(r.nights ?? 1, 1); g.guests += r.guests_total ?? 0
       }
-      const pm = shiftYr(m)
-      if (out[pm] && aliveAt(r, prevAsOf)) {
-        const g = (out[pm].prev[ch] ??= emptyAgg())
+      // この予約(前年の宿泊月)を、1年後の表示月の「前」列へ入れる（2025-07予約→宿泊月2026-07の前年）
+      const dispM = nextYr(m)
+      if (out[dispM] && aliveAt(r, prevAsOf)) {
+        const g = (out[dispM].prev[ch] ??= emptyAgg())
         g.rev += r.revenue_settled ?? 0; g.rn += Math.max(r.nights ?? 1, 1); g.guests += r.guests_total ?? 0
       }
     }
