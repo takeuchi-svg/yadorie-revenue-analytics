@@ -2,14 +2,18 @@
 
 // シフト予実分析（SV05・支配人向け振り返り）。計画(予)vs実績(実)を月次で振り返る。
 // 「計画超過」(実績−計画)と「残業」(KOT)を厳密に使い分け（要件2.1）。要因の断定はせず可視化まで。
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, Fragment } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts'
 import { fmtYen, CHART_AXIS, chartTooltip } from '@/lib/ui'
 import { Loading, Empty, LoadError } from '@/components/page-bits'
-import { loadVariance, loadVarianceMonths, type VarianceBundle } from '@/lib/shift/variance'
+import { useToast } from '@/components/toast'
+import {
+  loadVariance, loadVarianceMonths, loadVarianceReasons, saveVarianceNote,
+  type VarianceBundle, type VarianceReason, type FacilityDaily,
+} from '@/lib/shift/variance'
 
 const WD = ['月', '火', '水', '木', '金', '土', '日']  // isodow 1..7
 const h = (min: number | null | undefined) => (min == null ? '—' : `${(min / 60).toFixed(1)}h`)
@@ -30,18 +34,21 @@ const TYPE_META: Record<string, { label: string; color: string }> = {
 
 export default function ShiftVariancePage() {
   const { current, currentFacility } = useFacility()
+  const toast = useToast()
   const [month, setMonth] = useState(thisMonth())
   const [months, setMonths] = useState<string[]>([])
   const [data, setData] = useState<VarianceBundle | null>(null)
+  const [reasons, setReasons] = useState<VarianceReason[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState('')
 
-  useEffect(() => { if (current) loadVarianceMonths(current).then(setMonths) }, [current])
-  useEffect(() => {
+  useEffect(() => { if (current) loadVarianceMonths(current).then(setMonths); loadVarianceReasons().then(setReasons) }, [current])
+  const reload = () => {
     if (!current) return
     setLoading(true); setErr('')
     loadVariance(current, month).then(setData).catch((e) => setErr(e instanceof Error ? e.message : String(e))).finally(() => setLoading(false))
-  }, [current, month])
+  }
+  useEffect(reload, [current, month])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const mo = data?.monthly
   const prev = data?.prevMonthly
@@ -96,13 +103,18 @@ export default function ShiftVariancePage() {
         <Empty message="この月の予実データがありません。シフト計画の公開＋勤怠取込がそろうと表示されます。" />
       ) : (
         <>
-          {/* 例外バッジ */}
+          {/* 例外リスト＋理由入力（SV06） */}
           {exceptionCount > 0 && (
-            <div className="card p-3 mb-4 text-sm flex items-center gap-2 flex-wrap" style={{ borderColor: 'var(--yellow)' }}>
-              <span className="px-1.5 py-0.5 rounded text-white text-[10px]" style={{ background: exceptionCount > reasonDone ? 'var(--red)' : 'var(--green)' }}>{exceptionCount > reasonDone ? '要入力' : '入力済'}</span>
-              <span>理由入力が必要な差異: <strong>{exceptionCount}件</strong>（入力済み {reasonDone}件）</span>
-              <span className="text-xs" style={{ color: 'var(--text-dim)' }}>※理由入力UIは次段（SV06）で追加予定。まずは例外日を下の表で確認できます。</span>
-            </div>
+            <ExceptionList
+              days={(data.facilityDaily ?? []).filter((d) => d.is_exception)}
+              reasons={reasons} exceptionCount={exceptionCount} reasonDone={reasonDone}
+              onSave={async (wd, codes, note) => {
+                if (!current) return
+                const { error } = await saveVarianceNote(current, wd, codes, note)
+                if (error) { toast(`エラー: ${error}`, 'error'); return }
+                toast('理由を保存しました'); reload()
+              }}
+            />
           )}
 
           {/* 1. 月次サマリー */}
@@ -221,6 +233,102 @@ export default function ShiftVariancePage() {
           </p>
         </>
       )}
+    </div>
+  )
+}
+
+// ── SV06 例外リスト＋理由入力（行内展開） ──
+function ExceptionList({ days, reasons, exceptionCount, reasonDone, onSave }: {
+  days: FacilityDaily[]; reasons: VarianceReason[]; exceptionCount: number; reasonDone: number
+  onSave: (workDate: string, codes: string[], note: string) => Promise<void>
+}) {
+  const [open, setOpen] = useState<string | null>(null)
+  const [sel, setSel] = useState<Set<string>>(new Set())
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const cats = useMemo(() => {
+    const m: Record<string, VarianceReason[]> = {}
+    for (const r of reasons) (m[r.category] ??= []).push(r)
+    return Object.entries(m)
+  }, [reasons])
+  const openRow = (d: FacilityDaily) => {
+    if (open === d.work_date) { setOpen(null); return }
+    setOpen(d.work_date); setSel(new Set(d.reason_codes ?? [])); setNote(d.note ?? '')
+  }
+  const toggle = (c: string) => setSel((p) => { const n = new Set(p); n.has(c) ? n.delete(c) : n.add(c); return n })
+  const wd = ['月', '火', '水', '木', '金', '土', '日']
+
+  return (
+    <div className="card overflow-hidden mb-5" style={{ borderColor: 'var(--accent)' }}>
+      <div className="px-4 py-3 flex items-center gap-2 flex-wrap" style={{ background: 'var(--surface2)' }}>
+        <span className="text-sm font-semibold">理由入力が必要な差異</span>
+        <span className="px-1.5 py-0.5 rounded text-white text-[10px]" style={{ background: exceptionCount > reasonDone ? 'var(--red)' : 'var(--green)' }}>
+          {exceptionCount}件（入力済み {reasonDone}）
+        </span>
+        <span className="text-xs" style={{ color: 'var(--text-dim)' }}>｜調整後差異｜が5時間以上の日。行をクリックして理由を選択（1件30秒）。</span>
+      </div>
+      <table className="w-full text-sm whitespace-nowrap">
+        <thead><tr style={{ color: 'var(--text-dim)' }} className="text-left">
+          <th className="px-4 py-2">日付</th><th className="px-4 py-2 text-right">調整後差異</th><th className="px-4 py-2 text-right">客数(予/実)</th>
+          <th className="px-4 py-2">内訳</th><th className="px-4 py-2">理由</th><th className="px-4 py-2"></th>
+        </tr></thead>
+        <tbody>
+          {days.map((d) => {
+            const isOpen = open === d.work_date
+            const dowLabel = wd[(d.weekday as number) - 1] ?? ''
+            const parts = [d.cnt_absence && `欠${d.cnt_absence}`, d.cnt_unplanned && `外${d.cnt_unplanned}`, d.cnt_spot && `ス${d.cnt_spot}`, d.cnt_help && `ヘ${d.cnt_help}`].filter(Boolean).join(' ')
+            return (
+              <Fragment key={d.work_date}>
+                <tr style={{ borderTop: '1px solid var(--border)', cursor: 'pointer', background: isOpen ? 'var(--surface2)' : undefined }} onClick={() => openRow(d)}>
+                  <td className="px-4 py-2 font-medium">{d.work_date.slice(5)}（{dowLabel}）</td>
+                  <td className="px-4 py-2 text-right font-medium" style={{ color: (d.adjusted_variance_min ?? 0) >= 0 ? 'var(--red)' : 'var(--green)' }}>
+                    {d.adjusted_variance_min == null ? '—' : `${d.adjusted_variance_min >= 0 ? '+' : ''}${(d.adjusted_variance_min / 60).toFixed(1)}h`}
+                    {d.flag_no_flex_down && <span className="ml-1 text-[9px] px-1 py-0.5 rounded text-white" style={{ background: 'var(--red)' }} title="客数減なのに労働が減っていない">変動費化不全</span>}
+                  </td>
+                  <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{d.guests_plan ?? '—'} / {d.guests_actual ?? '—'}</td>
+                  <td className="px-4 py-2 text-xs" style={{ color: 'var(--text-dim)' }}>{parts || '—'}</td>
+                  <td className="px-4 py-2">
+                    {d.reason_entered
+                      ? <span className="inline-flex flex-wrap gap-1">{(d.reason_codes ?? []).map((c) => <span key={c} className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>{reasons.find((r) => r.reason_code === c)?.label ?? c}</span>)}</span>
+                      : <span className="text-[10px] px-1.5 py-0.5 rounded text-white" style={{ background: 'var(--red)' }}>未入力</span>}
+                  </td>
+                  <td className="px-4 py-2 text-[10px]" style={{ color: 'var(--text-dim)' }}>{isOpen ? '▲' : '▼'}</td>
+                </tr>
+                {isOpen && (
+                  <tr>
+                    <td colSpan={6} className="px-4 pb-3" style={{ background: 'var(--surface2)' }}>
+                      <div className="pt-1 space-y-2">
+                        {cats.map(([cat, rs]) => (
+                          <div key={cat} className="flex items-start gap-2 flex-wrap">
+                            <span className="text-[11px] w-16 shrink-0 pt-1" style={{ color: 'var(--text-dim)' }}>{cat}</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {rs.map((r) => {
+                                const on = sel.has(r.reason_code)
+                                return (
+                                  <button key={r.reason_code} onClick={() => toggle(r.reason_code)}
+                                    className="text-xs px-2.5 py-1 rounded-full"
+                                    style={{ background: on ? 'var(--accent)' : 'var(--surface)', color: on ? '#fff' : 'var(--text)', border: `1px solid ${on ? 'var(--accent)' : 'var(--border)'}` }}>
+                                    {r.label}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                        <div className="flex items-center gap-2">
+                          <input className="field px-2 py-1 text-sm flex-1" placeholder="メモ（任意）" value={note} onChange={(e) => setNote(e.target.value)} />
+                          <button disabled={busy} onClick={async () => { setBusy(true); await onSave(d.work_date, [...sel], note); setBusy(false); setOpen(null) }}
+                            className="px-4 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>{busy ? '保存中…' : '保存'}</button>
+                        </div>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }

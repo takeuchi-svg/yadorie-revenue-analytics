@@ -62,6 +62,25 @@ export async function loadVariance(facility: string, month: string): Promise<Var
   }
 }
 
+// ── SV06 理由マスタ＋理由入力 ──
+export interface VarianceReason { reason_code: string; label: string; category: string; display_order: number }
+export async function loadVarianceReasons(): Promise<VarianceReason[]> {
+  const { data } = await supabase.from('dim_variance_reason').select('reason_code, label, category, display_order').eq('is_active', true).order('display_order')
+  return (data as VarianceReason[]) ?? []
+}
+// 理由の保存（施設×日でUPSERT。空配列＝理由なしなら削除）
+export async function saveVarianceNote(facility: string, workDate: string, reasonCodes: string[], note: string): Promise<{ error?: string }> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (reasonCodes.length === 0 && !note.trim()) {
+    const { error } = await supabase.from('raw_shift_variance_note').delete().eq('facility', facility).eq('work_date', workDate)
+    return { error: error?.message }
+  }
+  const { error } = await supabase.from('raw_shift_variance_note').upsert(
+    { facility, work_date: workDate, reason_codes: reasonCodes, note: note.trim() || null, input_by: user?.id ?? null, updated_at: new Date().toISOString() },
+    { onConflict: 'facility,work_date' })
+  return { error: error?.message }
+}
+
 // 対象施設で予実データ(実績)がある月の一覧（新しい順）
 export async function loadVarianceMonths(facility: string): Promise<string[]> {
   const { data } = await supabase.from('mart_shift_variance_facility_daily').select('work_date').eq('facility', facility).order('work_date', { ascending: false }).limit(2000)
