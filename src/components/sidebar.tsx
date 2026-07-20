@@ -51,6 +51,7 @@ const NAV_GROUPS: NavGroup[] = [
     key: 'shift', label: 'シフト労務',
     items: [
       { href: '/shift', label: 'シフト管理' },
+      { href: '/shift-variance', label: 'シフト予実分析' },
       { href: '#', label: 'スキルマップ', disabled: true, note: '準備中' },
     ],
   },
