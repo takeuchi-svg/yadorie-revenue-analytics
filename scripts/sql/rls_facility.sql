@@ -127,7 +127,8 @@ do $$
 declare v record;
 begin
   for v in select viewname from pg_views where schemaname = 'public'
-             and viewname like 'mart_%' and viewname <> 'mart_labor_cost_monthly' loop
+             and viewname like 'mart_%'
+             and viewname not in ('mart_labor_cost_monthly', 'mart_shift_variance_monthly') loop
     execute format('alter view %I set (security_invoker = on)', v.viewname);
   end loop;
 end $$;
