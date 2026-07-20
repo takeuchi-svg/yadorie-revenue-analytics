@@ -82,6 +82,14 @@ export default function YojitsuPage() {
       [budget, actual, kpi, occ, opRooms, totalRooms, fy, forecast])
   useEffect(() => { if (months.length && !months.includes(month)) setMonth(months[0]) }, [months, month])
 
+  // 実績の欠損: 実績月の金額行は NULL→0 で表示・計算（率/単価/係数は0が誤解を招くため '-' のまま）
+  const NO_ZERO = new Set(['稼働率', '食材原価率', '同伴係数', '客単価', '室単価'])
+  const getActualZ = (code: string, m: string): number | null => {
+    const a = getActual(code, m)
+    if (a != null) return a
+    return (actualMonths.has(m) && !NO_ZERO.has(code)) ? 0 : null
+  }
+
   const toggle = (cat: string) => setCollapsed((p) => { const n = new Set(p); n.has(cat) ? n.delete(cat) : n.add(cat); return n })
   const isHidden = (it: { code: string; category: string | null }) =>
     it.category != null && it.category in COLLAPSIBLE && collapsed.has(it.category) && it.code !== COLLAPSIBLE[it.category]
@@ -119,8 +127,8 @@ export default function YojitsuPage() {
   const derivYearBudget = sumAgg((m) => (c) => getBudget(c, m))
 
   return (
-    <div className="p-6">
-      <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
+    <div className="p-4">
+      <div className="flex items-end justify-between mb-2 flex-wrap gap-3">
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
             {(['month', 'year'] as const).map((v) => (
@@ -171,24 +179,24 @@ export default function YojitsuPage() {
           {view === 'month' ? (
             /* ===== 単月ビュー ===== */
             <>
-            <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 200px)' }}>
-              <table className="w-full text-sm">
+            <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 132px)' }}>
+              <table className="w-full text-xs">
                 <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-[var(--surface2)]">
                   <tr style={{ color: 'var(--text-dim)' }} className="text-left">
-                    <th className="px-4 py-3 whitespace-nowrap">項目（{month}）</th>
-                    <th className="px-4 py-3 text-right">実績</th>
-                    <th className="px-4 py-3 text-right">予算</th>
-                    <th className="px-4 py-3 text-right">予算差異</th>
-                    <th className="px-4 py-3 text-right">達成率</th>
-                    <th className="px-4 py-3 text-right">昨年</th>
-                    <th className="px-4 py-3 text-right">前年比</th>
+                    <th className="px-2 py-1.5 whitespace-nowrap">項目（{month}）</th>
+                    <th className="px-2 py-1.5 text-right">実績</th>
+                    <th className="px-2 py-1.5 text-right">予算</th>
+                    <th className="px-2 py-1.5 text-right">予算差異</th>
+                    <th className="px-2 py-1.5 text-right">達成率</th>
+                    <th className="px-2 py-1.5 text-right">昨年</th>
+                    <th className="px-2 py-1.5 text-right">前年比</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibleItems.map((it) => {
                     const b = getBudget(it.code, month)
-                    const a = getActual(it.code, month)
-                    const prior = getActual(it.code, priorYM(month))
+                    const a = getActualZ(it.code, month)
+                    const prior = getActualZ(it.code, priorYM(month))
                     const diff = a != null && b != null ? a - b : null
                     const rate = a != null && b ? a / b : null
                     const yoy = a != null && prior ? a / prior : null
@@ -197,7 +205,7 @@ export default function YojitsuPage() {
                     const isGroupHead = cat != null && it.code === COLLAPSIBLE[cat]
                     return (
                       <tr key={it.code} style={{ borderTop: '1px solid var(--border)', background: isTotal ? 'var(--surface2)' : undefined }}>
-                        <td className={`px-4 py-2 whitespace-nowrap ${isTotal ? 'font-semibold' : ''}`}>
+                        <td className={`px-2 py-1 whitespace-nowrap ${isTotal ? 'font-semibold' : ''}`}>
                           {isGroupHead ? (
                             <button onClick={() => toggle(cat!)} className="flex items-center gap-1.5">
                               <span style={{ color: 'var(--text-dim)', width: 12, display: 'inline-block' }}>{collapsed.has(cat!) ? '▸' : '▾'}</span>
@@ -207,12 +215,12 @@ export default function YojitsuPage() {
                             <span className={isTotal ? '' : 'pl-4'} style={{ color: isTotal ? undefined : 'var(--text-dim)' }}>{it.name}</span>
                           )}
                         </td>
-                        <td className="px-4 py-2 text-right">{fmtVal(it.code, a)}</td>
-                        <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{fmtVal(it.code, b)}</td>
-                        <td className="px-4 py-2 text-right" style={{ color: diff == null ? undefined : diff >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtDiff(it.code, diff)}</td>
-                        <td className="px-4 py-2 text-right" style={{ color: rate == null ? undefined : rate >= 1 ? 'var(--green)' : 'var(--red)' }}>{pct(rate)}</td>
-                        <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{fmtVal(it.code, prior)}</td>
-                        <td className="px-4 py-2 text-right">{pct(yoy)}</td>
+                        <td className="px-2 py-1 text-right">{fmtVal(it.code, a)}</td>
+                        <td className="px-2 py-1 text-right" style={{ color: 'var(--text-dim)' }}>{fmtVal(it.code, b)}</td>
+                        <td className="px-2 py-1 text-right" style={{ color: diff == null ? undefined : diff >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtDiff(it.code, diff)}</td>
+                        <td className="px-2 py-1 text-right" style={{ color: rate == null ? undefined : rate >= 1 ? 'var(--green)' : 'var(--red)' }}>{pct(rate)}</td>
+                        <td className="px-2 py-1 text-right" style={{ color: 'var(--text-dim)' }}>{fmtVal(it.code, prior)}</td>
+                        <td className="px-2 py-1 text-right">{pct(yoy)}</td>
                       </tr>
                     )
                   })}
@@ -222,17 +230,17 @@ export default function YojitsuPage() {
 
             {/* ===== 損益分岐点・原価分析（単月） ===== */}
             <div className="text-sm font-semibold mt-6 mb-2" style={{ color: 'var(--text)' }}>損益分岐点・原価分析</div>
-            <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 200px)' }}>
-              <table className="w-full text-sm">
+            <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 132px)' }}>
+              <table className="w-full text-xs">
                 <thead className="[&_th]:sticky [&_th]:top-0 [&_th]:z-10 [&_th]:bg-[var(--surface2)]">
                   <tr style={{ color: 'var(--text-dim)' }} className="text-left">
-                    <th className="px-4 py-3 whitespace-nowrap">項目（{month}）</th>
-                    <th className="px-4 py-3 text-right">実績</th>
-                    <th className="px-4 py-3 text-right">予算</th>
-                    <th className="px-4 py-3 text-right">予算差異</th>
-                    <th className="px-4 py-3 text-right">達成率</th>
-                    <th className="px-4 py-3 text-right">昨年</th>
-                    <th className="px-4 py-3 text-right">前年比</th>
+                    <th className="px-2 py-1.5 whitespace-nowrap">項目（{month}）</th>
+                    <th className="px-2 py-1.5 text-right">実績</th>
+                    <th className="px-2 py-1.5 text-right">予算</th>
+                    <th className="px-2 py-1.5 text-right">予算差異</th>
+                    <th className="px-2 py-1.5 text-right">達成率</th>
+                    <th className="px-2 py-1.5 text-right">昨年</th>
+                    <th className="px-2 py-1.5 text-right">前年比</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -245,13 +253,13 @@ export default function YojitsuPage() {
                     const yoy = a != null && prior ? a / prior : null
                     return (
                       <tr key={d.code} style={{ borderTop: '1px solid var(--border)' }}>
-                        <td className="px-4 py-2 whitespace-nowrap" style={{ color: 'var(--text-dim)' }}>{d.name}</td>
-                        <td className="px-4 py-2 text-right">{fmtDerivVal(d.kind, a)}</td>
-                        <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{fmtDerivVal(d.kind, b)}</td>
-                        <td className="px-4 py-2 text-right" style={{ color: goodColor(diff, 0, d.up) }}>{fmtDerivDiff(d.kind, diff)}</td>
-                        <td className="px-4 py-2 text-right" style={{ color: goodColor(rate, 1, d.up) }}>{pct(rate)}</td>
-                        <td className="px-4 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{fmtDerivVal(d.kind, prior)}</td>
-                        <td className="px-4 py-2 text-right">{pct(yoy)}</td>
+                        <td className="px-2 py-1 whitespace-nowrap" style={{ color: 'var(--text-dim)' }}>{d.name}</td>
+                        <td className="px-2 py-1 text-right">{fmtDerivVal(d.kind, a)}</td>
+                        <td className="px-2 py-1 text-right" style={{ color: 'var(--text-dim)' }}>{fmtDerivVal(d.kind, b)}</td>
+                        <td className="px-2 py-1 text-right" style={{ color: goodColor(diff, 0, d.up) }}>{fmtDerivDiff(d.kind, diff)}</td>
+                        <td className="px-2 py-1 text-right" style={{ color: goodColor(rate, 1, d.up) }}>{pct(rate)}</td>
+                        <td className="px-2 py-1 text-right" style={{ color: 'var(--text-dim)' }}>{fmtDerivVal(d.kind, prior)}</td>
+                        <td className="px-2 py-1 text-right">{pct(yoy)}</td>
                       </tr>
                     )
                   })}
@@ -267,22 +275,22 @@ export default function YojitsuPage() {
                 <span className="flex items-center gap-1"><span style={{ width: 10, height: 10, background: 'var(--border)', borderRadius: 2, display: 'inline-block' }} />予算（着地見込み）</span>
                 <span>上段=実績／予算、下段={yCmp}</span>
               </div>
-              <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
-                <table className="w-full text-sm border-separate" style={{ borderSpacing: 0 }}>
+              <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 150px)' }}>
+                <table className="w-full text-xs border-separate" style={{ borderSpacing: 0 }}>
                   <thead>
                     <tr style={{ color: 'var(--text-dim)' }}>
-                      <th className="px-4 h-14 whitespace-nowrap text-left sticky left-0 top-0 z-30"
+                      <th className="px-2 py-1 whitespace-nowrap text-left sticky left-0 top-0 z-30"
                         style={{ background: 'var(--surface2)', borderRight: '2px solid var(--border)' }}>項目</th>
                       {months.map((m) => {
                         const act = actualMonths.has(m)
                         return (
-                          <th key={m} className="px-3 h-14 text-right whitespace-nowrap sticky top-0 z-20" style={{ minWidth: 104, background: 'var(--surface2)' }}>
+                          <th key={m} className="px-2 py-1 text-right whitespace-nowrap sticky top-0 z-20" style={{ minWidth: 82, background: 'var(--surface2)' }}>
                             <div style={{ color: act ? 'var(--accent)' : 'var(--text-dim)', fontWeight: act ? 600 : 400 }}>{m.slice(5)}月</div>
                             <div className="text-[10px]">{act ? '実績' : '予算'}</div>
                           </th>
                         )
                       })}
-                      <th className="px-3 h-14 text-right whitespace-nowrap sticky top-0 z-20" style={{ minWidth: 116, background: 'var(--surface)', borderLeft: '2px solid var(--border)' }}>
+                      <th className="px-2 py-1 text-right whitespace-nowrap sticky top-0 z-20" style={{ minWidth: 96, background: 'var(--surface)', borderLeft: '2px solid var(--border)' }}>
                         <div className="font-semibold" style={{ color: 'var(--text)' }}>年度合計</div>
                         <div className="text-[10px]">着地見込み</div>
                       </th>
@@ -299,7 +307,7 @@ export default function YojitsuPage() {
                       const ydiff = land != null && yb != null ? land - yb : null
                       return (
                         <tr key={it.code} style={{ background: isTotal ? 'var(--surface2)' : undefined }}>
-                          <td className={`px-4 h-14 whitespace-nowrap sticky left-0 z-10 ${isTotal ? 'font-semibold' : ''}`}
+                          <td className={`px-2 py-1 whitespace-nowrap sticky left-0 z-10 ${isTotal ? 'font-semibold' : ''}`}
                             style={{ background: rowBg, borderTop: '1px solid var(--border)', borderRight: '2px solid var(--border)' }}>
                             {isGroupHead ? (
                               <button onClick={() => toggle(cat!)} className="flex items-center gap-1.5">
@@ -312,7 +320,7 @@ export default function YojitsuPage() {
                           </td>
                           {months.map((m) => {
                             const act = actualMonths.has(m)
-                            const a = getActual(it.code, m)
+                            const a = getActualZ(it.code, m)
                             const b = getBudget(it.code, m)
                             const top = act ? a : b
                             let sub = ''
@@ -324,17 +332,17 @@ export default function YojitsuPage() {
                               } else if (yCmp === '予算比') {
                                 const r = b ? a / b : null; sub = pct(r); subColor = r == null ? 'var(--text-dim)' : r >= 1 ? 'var(--green)' : 'var(--red)'
                               } else {
-                                const p = getActual(it.code, priorYM(m)); const r = p ? a / p : null; sub = pct(r); subColor = r == null ? 'var(--text-dim)' : r >= 1 ? 'var(--green)' : 'var(--red)'
+                                const p = getActualZ(it.code, priorYM(m)); const r = p ? a / p : null; sub = pct(r); subColor = r == null ? 'var(--text-dim)' : r >= 1 ? 'var(--green)' : 'var(--red)'
                               }
                             }
                             return (
-                              <td key={m} className="px-3 h-14 text-right whitespace-nowrap" style={{ minWidth: 104, borderTop: '1px solid var(--border)' }}>
+                              <td key={m} className="px-2 py-1 text-right whitespace-nowrap" style={{ minWidth: 82, borderTop: '1px solid var(--border)' }}>
                                 <div style={{ color: act ? 'var(--text)' : 'var(--text-dim)', fontStyle: act ? undefined : 'italic' }}>{fmtVal(it.code, top)}</div>
                                 <div className="text-[10px]" style={{ color: subColor }}>{sub}</div>
                               </td>
                             )
                           })}
-                          <td className="px-3 h-14 text-right whitespace-nowrap" style={{ minWidth: 116, background: 'var(--surface)', borderLeft: '2px solid var(--border)', borderTop: '1px solid var(--border)' }}>
+                          <td className="px-2 py-1 text-right whitespace-nowrap" style={{ minWidth: 96, background: 'var(--surface)', borderLeft: '2px solid var(--border)', borderTop: '1px solid var(--border)' }}>
                             <div className={isTotal ? 'font-semibold' : ''}>{fmtVal(it.code, land)}</div>
                             <div className="text-[10px]" style={{ color: ydiff == null ? 'var(--text-dim)' : ydiff >= 0 ? 'var(--green)' : 'var(--red)' }}>{ydiff == null ? '' : fmtDiff(it.code, ydiff)}</div>
                           </td>
@@ -347,22 +355,22 @@ export default function YojitsuPage() {
 
               {/* ===== 損益分岐点・原価分析（年度） ===== */}
               <div className="text-sm font-semibold mt-6 mb-2" style={{ color: 'var(--text)' }}>損益分岐点・原価分析</div>
-              <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 220px)' }}>
-                <table className="w-full text-sm border-separate" style={{ borderSpacing: 0 }}>
+              <div className="card overflow-auto" style={{ maxHeight: 'calc(100vh - 150px)' }}>
+                <table className="w-full text-xs border-separate" style={{ borderSpacing: 0 }}>
                   <thead>
                     <tr style={{ color: 'var(--text-dim)' }}>
-                      <th className="px-4 h-14 whitespace-nowrap text-left sticky left-0 top-0 z-30"
+                      <th className="px-2 py-1 whitespace-nowrap text-left sticky left-0 top-0 z-30"
                         style={{ background: 'var(--surface2)', borderRight: '2px solid var(--border)' }}>項目</th>
                       {months.map((m) => {
                         const act = actualMonths.has(m)
                         return (
-                          <th key={m} className="px-3 h-14 text-right whitespace-nowrap sticky top-0 z-20" style={{ minWidth: 104, background: 'var(--surface2)' }}>
+                          <th key={m} className="px-2 py-1 text-right whitespace-nowrap sticky top-0 z-20" style={{ minWidth: 82, background: 'var(--surface2)' }}>
                             <div style={{ color: act ? 'var(--accent)' : 'var(--text-dim)', fontWeight: act ? 600 : 400 }}>{m.slice(5)}月</div>
                             <div className="text-[10px]">{act ? '実績' : '予算'}</div>
                           </th>
                         )
                       })}
-                      <th className="px-3 h-14 text-right whitespace-nowrap sticky top-0 z-20" style={{ minWidth: 116, background: 'var(--surface)', borderLeft: '2px solid var(--border)' }}>
+                      <th className="px-2 py-1 text-right whitespace-nowrap sticky top-0 z-20" style={{ minWidth: 96, background: 'var(--surface)', borderLeft: '2px solid var(--border)' }}>
                         <div className="font-semibold" style={{ color: 'var(--text)' }}>年度合計</div>
                         <div className="text-[10px]">着地見込み</div>
                       </th>
@@ -375,7 +383,7 @@ export default function YojitsuPage() {
                       const ydiff = land != null && yb != null ? land - yb : null
                       return (
                         <tr key={d.code}>
-                          <td className="px-4 h-14 whitespace-nowrap sticky left-0 z-10"
+                          <td className="px-2 py-1 whitespace-nowrap sticky left-0 z-10"
                             style={{ background: 'var(--surface)', borderTop: '1px solid var(--border)', borderRight: '2px solid var(--border)', color: 'var(--text-dim)' }}>{d.name}</td>
                           {months.map((m) => {
                             const act = actualMonths.has(m)
@@ -395,13 +403,13 @@ export default function YojitsuPage() {
                               }
                             }
                             return (
-                              <td key={m} className="px-3 h-14 text-right whitespace-nowrap" style={{ minWidth: 104, borderTop: '1px solid var(--border)' }}>
+                              <td key={m} className="px-2 py-1 text-right whitespace-nowrap" style={{ minWidth: 82, borderTop: '1px solid var(--border)' }}>
                                 <div style={{ color: act ? 'var(--text)' : 'var(--text-dim)', fontStyle: act ? undefined : 'italic' }}>{fmtDerivVal(d.kind, top)}</div>
                                 <div className="text-[10px]" style={{ color: subColor }}>{sub}</div>
                               </td>
                             )
                           })}
-                          <td className="px-3 h-14 text-right whitespace-nowrap" style={{ minWidth: 116, background: 'var(--surface)', borderLeft: '2px solid var(--border)', borderTop: '1px solid var(--border)' }}>
+                          <td className="px-2 py-1 text-right whitespace-nowrap" style={{ minWidth: 96, background: 'var(--surface)', borderLeft: '2px solid var(--border)', borderTop: '1px solid var(--border)' }}>
                             <div>{fmtDerivVal(d.kind, land)}</div>
                             <div className="text-[10px]" style={{ color: goodColor(ydiff, 0, d.up) ?? 'var(--text-dim)' }}>{ydiff == null ? '' : fmtDerivDiff(d.kind, ydiff)}</div>
                           </td>
