@@ -67,13 +67,13 @@ export default function BudgetPage() {
             {label}
           </button>
         ))}
-        {(tab === 'capex' || tab === 'staffing') && fy != null && (
-          <select className="ml-auto field px-3 py-1.5 text-sm" value={fy} onChange={(e) => setFy(Number(e.target.value))}>
-            {fyList.map((y) => <option key={y} value={y}>{y}年度</option>)}
-          </select>
-        )}
-        {(tab === 'daily' || tab === 'pl') && fy != null && (
+        {fy != null && (
           <span className="ml-auto flex items-center gap-2">
+            {(tab === 'capex' || tab === 'staffing') && (
+              <select className="field px-3 py-1.5 text-sm" value={fy} onChange={(e) => setFy(Number(e.target.value))}>
+                {fyList.map((y) => <option key={y} value={y}>{y}年度</option>)}
+              </select>
+            )}
             {locked && <span className="text-[11px] px-2 py-0.5 rounded" style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }}>🔒 {fy}年度は確定（ロック中）</span>}
             {isOwner && (
               <button onClick={() => setLock(!locked)} className="text-xs px-3 py-1 rounded-md" style={{ background: 'var(--surface2)', color: 'var(--text)', border: '1px solid var(--border)' }}>
@@ -85,8 +85,8 @@ export default function BudgetPage() {
       </div>
       {tab === 'daily' && <BudgetDaily fy={fy} fyList={fyList} onFy={setFy} locked={locked} />}
       {tab === 'pl' && <BudgetPL fy={fy} fyList={fyList} onFy={setFy} locked={locked} />}
-      {tab === 'capex' && <BudgetCapex fy={fy} />}
-      {tab === 'staffing' && <BudgetStaffing fy={fy} />}
+      {tab === 'capex' && <BudgetCapex fy={fy} locked={locked} />}
+      {tab === 'staffing' && <BudgetStaffing fy={fy} locked={locked} />}
       {(tab === 'daily' || tab === 'pl') && <BudgetReviewCard fy={fy} />}
     </div>
   )
