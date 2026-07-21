@@ -157,8 +157,8 @@ export default function RevenuePage() {
         )}
       </div>
 
-      {/* 選択月のブッキングカーブ（切り口タブより上） */}
-      {month && <CurveMini month={month} />}
+      {/* 選択月の売上積み上げ（宿泊日ベース・切り口タブより上） */}
+      {month && <CurveMini resv={resv} month={month} isOnhand={isOnhand} prevPoint={prevPoint} aliveNow={aliveNow} aliveAtT={aliveAtT} />}
 
       <div className="flex gap-1 mb-2 flex-wrap">
         {TABS.map((t) => (
@@ -189,86 +189,80 @@ export default function RevenuePage() {
   )
 }
 
-/* ---- 選択月のブッキングカーブ（コンパクト） ---- */
-interface CurveRowM { stay_date: string; booking_date: string | null; cancel_date: string | null; rooms: number | null; revenue: number | null }
-const lastDayISO = (ym: string) => { const [y, m] = ym.split('-').map(Number); return `${ym}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}` }
-const addDaysISO = (iso: string, k: number) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + k); return d.toISOString().slice(0, 10) }
-const mmddISO = (iso: string) => { const [, m, dd] = iso.split('-'); return `${+m}/${+dd}` }
+/* ---- 選択月の売上積み上げ（宿泊日ベース・累積） ---- */
+const lastDayNum = (ym: string) => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).getUTCDate() }
 
-// ブッキングカーブ（横軸=予約日カレンダー・右端=選択月の末日。オンハンド月は当年が今日で途切れ・前年は末日まで）
-function CurveMini({ month }: { month: string }) {
-  const { current } = useFacility()
-  const [curve, setCurve] = useState<CurveRowM[] | null>(null)
+// 宿泊日ベースの累積カーブ。横軸=宿泊日（月内1〜末日）、縦軸=その日までの累積売上/室泊。
+// 当年=現在の生存予約（オンハンド込みで末日まで）／前年=オンハンド月は前年同日時点で再構築・過去月は前年確定。
+// ページ他セクション（チャネル等）と同じ集計軸に統一（旧・予約日ベースのブッキングカーブは /booking の詳細へ）。
+function CurveMini({ resv, month, isOnhand, prevPoint, aliveNow, aliveAtT }: {
+  resv: Resv[]; month: string; isOnhand: boolean; prevPoint: string
+  aliveNow: (r: Resv) => boolean; aliveAtT: (r: Resv, T: string) => boolean
+}) {
   const [unit, setUnit] = useState<'revenue' | 'rooms'>('revenue')
-  useEffect(() => {
-    if (!current) return
-    setCurve(null)
-    fetchAll<CurveRowM>(() => supabase.from('mart_booking_curve')
-      .select('stay_date, booking_date, cancel_date, rooms, revenue').eq('facility', current))
-      .then((c) => setCurve(c ?? [])).catch(() => setCurve([]))
-  }, [current])
+  const pm = shiftYr(month)
+  const prevLabel = isOnhand ? '前年同日' : '前年'
 
-  const MAXK = 150  // 末日から遡る日数
   const chart = useMemo(() => {
-    if (!month || curve === null) return []
-    const today = new Date().toISOString().slice(0, 10)
-    const meCur = lastDayISO(month), mePrev = lastDayISO(shiftYr(month))
-    const rowsOf = (m: string) => curve.filter((r) => r.stay_date.slice(0, 7) === m && r.booking_date)
-    const rM = rowsOf(month), rP = rowsOf(shiftYr(month))
-    const onbooks = (rows: CurveRowM[], T: string) => {
-      let v = 0
-      for (const r of rows) {
-        if (r.booking_date! > T) continue
-        if (r.cancel_date && r.cancel_date <= T) continue
-        v += unit === 'revenue' ? (r.revenue ?? 0) : (r.rooms ?? 1)
-      }
-      return v
+    if (!month) return []
+    const val = (r: Resv) => (unit === 'revenue' ? (r.revenue_settled ?? 0) : Math.max(r.nights ?? 1, 1))
+    // 宿泊日（=チェックイン日）ごとに当年/前年を積む
+    const curByDay: Record<number, number> = {}, prevByDay: Record<number, number> = {}
+    let prevCount = 0
+    for (const r of resv) {
+      const ym = r.checkin?.slice(0, 7)
+      if (ym === month && aliveNow(r)) { const d = Number(r.checkin!.slice(8, 10)); curByDay[d] = (curByDay[d] ?? 0) + val(r) }
+      else if (ym === pm && (isOnhand ? aliveAtT(r, prevPoint) : aliveNow(r))) { const d = Number(r.checkin!.slice(8, 10)); prevByDay[d] = (prevByDay[d] ?? 0) + val(r); prevCount++ }
     }
-    const out: { label: string; 当年: number | null; 前年: number | null }[] = []
-    const hasPrev = rP.length > 0
-    for (let k = MAXK; k >= 0; k--) {
-      const Tcur = addDaysISO(meCur, -k), Tprev = addDaysISO(mePrev, -k)
-      out.push({
-        label: mmddISO(Tcur),
-        当年: Tcur > today ? null : onbooks(rM, Tcur),   // 未来日は当年データ無し→線が途切れる
-        前年: hasPrev ? onbooks(rP, Tprev) : null,
-      })
+    const mm = Number(month.slice(5, 7))
+    const days = lastDayNum(month)
+    const out: { label: string; 当年: number; 前年: number | null }[] = []
+    let cCum = 0, pCum = 0
+    for (let d = 1; d <= days; d++) {
+      cCum += curByDay[d] ?? 0; pCum += prevByDay[d] ?? 0
+      out.push({ label: `${mm}/${d}`, 当年: cCum, 前年: prevCount > 0 ? pCum : null })
     }
     return out
-  }, [curve, month, unit])
-  const hasData = chart.some((d) => (d.当年 ?? 0) > 0 || (d.前年 ?? 0) > 0)
+  }, [resv, month, unit, isOnhand, prevPoint, pm, aliveNow, aliveAtT])
+
+  const hasData = chart.some((d) => d.当年 > 0 || (d.前年 ?? 0) > 0)
+  const last = chart[chart.length - 1]
+  const ratio = last && last.前年 != null && last.前年 > 0 ? last.当年 / last.前年 : null
 
   return (
     <div className="card p-4 mb-4">
       <div className="flex items-center justify-between mb-2 flex-wrap gap-2">
-        <h2 className="text-sm font-semibold">ブッキングカーブ（{month}宿泊・予約の入り方・前年同月重ね）</h2>
+        <h2 className="text-sm font-semibold">
+          売上の積み上がり（{month}・宿泊日ベース・{prevLabel}重ね）
+          {ratio != null && <span className="ml-2 text-xs" style={{ color: ratio >= 1 ? 'var(--green)' : 'var(--red)' }}>末時点 {prevLabel}比 {pct(ratio)}</span>}
+        </h2>
         <div className="flex items-center gap-2">
           <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-            {([['revenue', '売上'], ['rooms', '室数']] as const).map(([v, l]) => (
+            {([['revenue', '売上'], ['rooms', '室泊']] as const).map(([v, l]) => (
               <button key={v} onClick={() => setUnit(v)} className="px-3 py-1 text-xs"
                 style={{ background: unit === v ? 'var(--accent)' : 'var(--surface)', color: unit === v ? '#fff' : 'var(--text-dim)' }}>{l}</button>
             ))}
           </div>
-          <Link href={`/booking?tab=curve&month=${month}`} className="text-xs" style={{ color: 'var(--accent)' }}>→ 詳細（D-n・他月比較）</Link>
+          <Link href={`/booking?tab=curve&month=${month}`} className="text-xs" style={{ color: 'var(--accent)' }}>→ 予約日ベースのブッキングカーブ</Link>
         </div>
       </div>
-      {curve === null ? <p className="text-xs py-8 text-center" style={{ color: 'var(--text-dim)' }}>カーブを再構築中…</p>
-        : hasData ? (
-          <ResponsiveContainer width="100%" height={210}>
-            <LineChart data={chart} margin={{ top: 4, right: 12, bottom: 0, left: unit === 'revenue' ? 4 : -14 }}>
-              <CartesianGrid stroke="#e7dac6" vertical={false} />
-              <XAxis dataKey="label" {...CHART_AXIS} interval={Math.max(9, Math.floor(chart.length / 12))} minTickGap={24} />
-              <YAxis {...CHART_AXIS} allowDecimals={false} tickFormatter={unit === 'revenue' ? (v) => `${Math.round(Number(v) / 10000)}万` : undefined} />
-              <Tooltip {...chartTooltip} formatter={(v: any, n: any) => [unit === 'revenue' ? fmtYen(Number(v)) : `${fmtNum(Number(v))}室`, n]} />
-              <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Line dataKey="当年" stroke="#D85A30" strokeWidth={2} dot={false} connectNulls={false} />
-              <Line dataKey="前年" stroke="#7F77DD" strokeWidth={2} strokeDasharray="4 3" dot={false} connectNulls />
-            </LineChart>
-          </ResponsiveContainer>
-        ) : <p className="text-xs py-8 text-center" style={{ color: 'var(--text-dim)' }}>この宿泊月のカーブデータがありません。</p>}
+      {hasData ? (
+        <ResponsiveContainer width="100%" height={210}>
+          <LineChart data={chart} margin={{ top: 4, right: 12, bottom: 0, left: unit === 'revenue' ? 4 : -14 }}>
+            <CartesianGrid stroke="#e7dac6" vertical={false} />
+            <XAxis dataKey="label" {...CHART_AXIS} interval={Math.max(2, Math.floor(chart.length / 12))} minTickGap={24} />
+            <YAxis {...CHART_AXIS} allowDecimals={false} tickFormatter={unit === 'revenue' ? (v) => `${Math.round(Number(v) / 10000)}万` : undefined} />
+            <Tooltip {...chartTooltip} formatter={(v: any, n: any) => [unit === 'revenue' ? fmtYen(Number(v)) : `${fmtNum(Number(v))}室泊`, n === '当年' ? '当年' : prevLabel]} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            <Line dataKey="当年" stroke="#D85A30" strokeWidth={2} dot={false} />
+            <Line dataKey="前年" name={prevLabel} stroke="#7F77DD" strokeWidth={2} strokeDasharray="4 3" dot={false} connectNulls />
+          </LineChart>
+        </ResponsiveContainer>
+      ) : <p className="text-xs py-8 text-center" style={{ color: 'var(--text-dim)' }}>この宿泊月のデータがありません。</p>}
       <p className="text-[10px] mt-1" style={{ color: 'var(--text-dim)' }}>
-        横軸＝予約日（右端＝{month}の末日）、縦軸＝その時点で入っていた{unit === 'revenue' ? '売上' : '室数'}。橙=当年・紫破線=前年同月。
-        未来の月は当年の線が今日で途切れ、前年は末日まで伸びます（前年同時点との差が「入りの速さ」）。
+        横軸＝宿泊日（月内1〜末日）、縦軸＝その日までの累積{unit === 'revenue' ? '売上' : '室泊'}。橙=当年（現在の予約状況・オンハンド込み）・紫破線={prevLabel}。
+        {isOnhand ? `オンハンド月なので前年は前年同日（${prevPoint}）時点で再構築。末端で橙が紫を上回れば${prevLabel}超。` : '過去月は当年・前年とも確定値。'}
+        予約日ベース（入りの速さ・D-n）は「→ 予約日ベースのブッキングカーブ」へ。
       </p>
     </div>
   )
