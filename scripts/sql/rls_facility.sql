@@ -1,19 +1,21 @@
 -- ============================================================
 --  RLS 施設スコープ化（フェーズ0-③）  Supabase SQL Editor で実行（冪等）
 --  方針:
---   admin(app_user.role='admin') = 全施設の読み書き
---   member = user_facility に登録された施設のみ読み書き
---   マスタ(dim_facility等) = 全員読める / 書けるのはadminのみ
---   app_user / user_facility = 本人とadminのみ読める / 書き込みはAPI(service_role)経由のみ
+--   admin / owner (app_user.role in ('admin','owner')) = 全施設の読み書き
+--   member = user_facility に登録された施設のみ読み書き（未登録だと何も見えない）
+--   マスタ(dim_facility等) = 全員読める / 書けるのはadmin/ownerのみ
+--   app_user / user_facility = 本人とadmin/ownerのみ読める / 書き込みはAPI(service_role)経由のみ
 --   mart_ ビュー = security_invoker で下表のRLSを継承
---  【実行前チェック】以下で自分が admin で登録済みなことを必ず確認:
---    select user_id, email, role from app_user where role = 'admin';
+--  【実行前チェック】以下で自分が admin/owner で登録済みなことを必ず確認:
+--    select user_id, email, role from app_user where role in ('admin','owner');
 -- ============================================================
 
 -- ---- 権限判定関数（SECURITY DEFINERでapp_user/user_facilityを参照） ----
+-- owner も admin 相当（全施設アクセス）。ai_knowledge_setup.sql と定義を一致させ、
+-- どちらを後に流しても owner が締め出されないようにする（棚卸2026-07-21）。
 create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = public as
-$$ select exists (select 1 from app_user where user_id = auth.uid() and role = 'admin') $$;
+$$ select exists (select 1 from app_user where user_id = auth.uid() and role in ('admin','owner')) $$;
 
 create or replace function public.can_access_facility(f text) returns boolean
 language sql stable security definer set search_path = public as

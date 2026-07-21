@@ -12,6 +12,8 @@
 --   4) dim_staff_wage（個人別賃金）を撤去 ＝ 個人給与がこの場から消える
 --  ※ mart_labor_cost_monthly / mart_shift_variance_monthly は security_invoker=off を維持
 --     （rls_facility.sql の mart_ 一括 invoker=on 設定から除外のまま）。
+--     invoker=off のため両ビューの最終SELECTに can_access_facility() ゲートを内蔵する
+--     （このファイル単体を後から流しても anon 漏洩しない＝冪等安全。棚卸2026-07-21）。
 -- ============================================================
 
 -- ---- 1) 旧・個人別人件費ビューを撤去（順序: monthly が actual に依存しうるため先に） ----
@@ -72,7 +74,8 @@ select
 from keys k
 left join reg     on reg.facility = k.facility     and reg.month = k.month
 left join pt_cost on pt_cost.facility = k.facility and pt_cost.month = k.month
-left join spot    on spot.facility = k.facility    and spot.month = k.month;
+left join spot    on spot.facility = k.facility    and spot.month = k.month
+where public.can_access_facility(k.facility);  -- ★自前ゲート（invoker=off のため必須。admin/owner or 担当宿）
 alter view mart_labor_cost_monthly set (security_invoker = off);
 
 -- ---- 3) シフト予実 月次の人件費影響を新式へ（正社員=0・残業廃止） ----
@@ -123,7 +126,8 @@ select
 from final_actual f
 left join baseline b on b.facility = f.facility and b.ym = f.ym
 left join cost c on c.facility = f.facility and c.ym = f.ym
-left join revisions r on r.facility = f.facility and r.ym = f.ym;
+left join revisions r on r.facility = f.facility and r.ym = f.ym
+where public.can_access_facility(f.facility);  -- ★自前ゲート（invoker=off のため必須。人件費影響を含むため）
 alter view mart_shift_variance_monthly set (security_invoker = off);
 
 -- ---- 4) 個人別賃金テーブルを撤去（個人給与がこの場から消える） ----

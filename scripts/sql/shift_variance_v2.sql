@@ -288,16 +288,23 @@ final_actual as (
          count(*) filter (where is_exception and reason_entered) as reason_entered_days
   from mart_shift_variance_facility_daily group by 1, 2
 ),
-cost as ( -- v1賃金ロジック流用: 賃金は dim_staff_wage、時給/スポット=差×時給、月給=残業(overtime)超過×月給按分×1.25
+cost as ( -- 人件費モデルv2: アルバイト=時間差×宿の標準時給 / スポット=時給差のみ / 正社員=0(固定) / 残業廃止
+  --   ※ 個人給与(dim_staff_wage)は撤去済み。この定義は labor_model_v2_phase3.sql と一致させ、
+  --     どちらを後に流しても同じ（v2・ゲート付き）結果になるようにしている（棚卸2026-07-21）。
   select v.facility, date_trunc('month', v.work_date)::date as ym,
-    round(sum(case when (w.wage_type = '時給' or coalesce(ds.is_spot,false))
-      then v.variance_min / 60.0 * coalesce(w.hourly_wage, 0) else 0 end)) as cost_impact_hourly,
-    round(sum(case when w.wage_type = '月給'
-      then greatest(0, v.overtime_min) / 60.0 * (w.monthly_salary / nullif(w.contracted_monthly_hours, 0)) * 1.25
-      else 0 end)) as cost_impact_monthly_ot
+    round(sum(
+      case
+        when coalesce(ds.is_spot, false) then
+          case when p.spot_wage_kind = '時給' then v.variance_min / 60.0 * coalesce(p.spot_wage_amount, 0) else 0 end
+        when ds.employment_type = 'アルバイト' then v.variance_min / 60.0 * coalesce(lr.hourly_wage, 0)
+        else 0
+      end
+    )) as cost_impact_hourly,
+    0::numeric as cost_impact_monthly_ot
   from mart_shift_variance_staff_daily v
   join dim_staff ds on ds.staff_code = v.staff_code
-  left join dim_staff_wage w on w.staff_code = v.staff_code
+  left join dim_labor_rate lr on lr.facility = v.facility
+  left join raw_shift_plan p on p.staff_code = v.staff_code and p.work_facility = v.facility and p.work_date = v.work_date
   group by 1, 2
 ),
 revisions as (
@@ -315,7 +322,8 @@ select
 from final_actual f
 left join baseline b on b.facility = f.facility and b.ym = f.ym
 left join cost c on c.facility = f.facility and c.ym = f.ym
-left join revisions r on r.facility = f.facility and r.ym = f.ym;
+left join revisions r on r.facility = f.facility and r.ym = f.ym
+where public.can_access_facility(f.facility);  -- ★自前ゲート（invoker=off のため必須）
 -- 賃金由来のため invoker=off（定義者権限で集計。施設×月合計は施設メンバー可・mart_labor_cost_monthly と同方式）
 alter view mart_shift_variance_monthly set (security_invoker = off);
 

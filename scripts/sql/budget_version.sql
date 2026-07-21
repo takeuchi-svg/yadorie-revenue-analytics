@@ -27,6 +27,7 @@ create or replace view mart_budget_revenue_monthly as
 select facility, month, amount as revenue_budget
 from budget_monthly
 where item_code = 'sales_total' and version = '当初';
+alter view mart_budget_revenue_monthly set (security_invoker = on);  -- 再定義でinvokerが落ちるため明示（棚卸2026-07-21）
 
 create or replace view mart_budget_daily_monthly as
 select

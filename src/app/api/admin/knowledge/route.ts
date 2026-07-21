@@ -169,6 +169,8 @@ export async function POST(req: NextRequest) {
         if (!hasApiKey()) return NextResponse.json({ error: 'ANTHROPIC_API_KEY 未設定' }, { status: 400 })
         const q = (body.question ?? '').toString().trim()
         if (!q) return NextResponse.json({ error: '質問が空です' }, { status: 400 })
+        // ゴールデン質問の試走コンテキスト（読み取り専用・書き込みなし）。UIが宿を渡さない場合のみ
+        // 先行施設(FRY)を既定にする。ここでの facility は灯が回答を作る際の文脈で、DB書き込み先ではない。
         const facility = (body.facility || 'FRY').toString()
         try {
           const text = await runAgent([{ role: 'user', content: q }], facility, null)

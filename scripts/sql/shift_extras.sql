@@ -29,6 +29,8 @@ from budget_daily b
 left join raw_daily_plan_context c
   on c.facility = b.facility
  and c.work_date = b.date;
+-- 再定義で invoker が落ちるため明示（budget_daily/raw_daily_plan_context のRLSを閲覧者権限で継承。棚卸2026-07-21）
+alter view mart_daily_plan_context set (security_invoker = on);
 
 -- 確認:
 --   select name from dim_shift_pattern where facility is null order by sort_order;

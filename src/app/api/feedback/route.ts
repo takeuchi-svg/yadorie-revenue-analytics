@@ -1,7 +1,7 @@
 // 改善要望API（第3弾A）。submit=全ユーザー / list・update=owner のみ。
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { requireUser, isAuthErr } from '@/lib/ai/auth'
+import { requireUser, isAuthErr, facilityAllowed } from '@/lib/ai/auth'
 
 export const runtime = 'nodejs'
 
@@ -23,6 +23,8 @@ export async function POST(req: NextRequest) {
     if (action === 'submit') {
       const source = body.source as string
       if (!['chat', 'summary', 'issue'].includes(source)) return NextResponse.json({ error: '不正な種別' }, { status: 400 })
+      // 施設を指定する場合は自分がアクセス可能な宿のみ（任意の施設コード付与を防ぐ。未指定=全社要望はOK）
+      if (body.facility && !facilityAllowed(auth, body.facility)) return NextResponse.json({ error: 'この宿への送信権限がありません。' }, { status: 403 })
       const { error } = await sb.from('ai_feedback').insert({
         facility: body.facility || null,
         created_by: myEmail,

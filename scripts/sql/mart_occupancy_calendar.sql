@@ -38,6 +38,8 @@ left join dim_facility f on rs.facility = f.facility
 left join dim_operating_days od on od.facility = rs.facility and od.month = rs.source_month
 where rs.scope = 'total'
 group by rs.facility, rs.source_month;
+-- 再定義で security_invoker が初期化されるため必ず on に戻す（下表RLSを閲覧者権限で継承。棚卸2026-07-21）
+alter view mart_occupancy_monthly set (security_invoker = on);
 
 -- ---- mart_ai: select * ビューを再作成して新列を反映 ----
 create or replace view mart_ai.mart_occupancy_monthly as select * from public.mart_occupancy_monthly;
