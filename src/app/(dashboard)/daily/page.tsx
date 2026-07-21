@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { useFacility } from '@/lib/facility-context'
 import { supabase } from '@/lib/supabase/client'
 import { fetchAll } from '@/lib/supabase/fetch-all'
@@ -69,22 +69,18 @@ const KPIS: { key: keyof Metrics; label: string; color: string; fmt: (v: any) =>
   { key: 'companion', label: '同伴係数', color: '#84cc16', fmt: (v) => (v == null ? '-' : Number(v).toFixed(2)) },
   { key: 'revpar', label: 'RevPAR', color: '#ec4899', fmt: (v) => fmtYen(v) },
 ]
-// 表用（¥なし・元の見た目に合わせる）
-const COLS: { key: keyof Metrics; label: string; fmt: (v: any) => string }[] = [
-  { key: 'revenue', label: '売上', fmt: (v) => fmtNum(v) },
-  { key: 'sold', label: '室数', fmt: (v) => fmtNum(v) },
-  { key: 'guests', label: '人数', fmt: (v) => fmtNum(v) },
-  { key: 'guestUnit', label: '客単価', fmt: (v) => fmtNum(v) },
-  { key: 'adr', label: '室単価', fmt: (v) => fmtNum(v) },
-  { key: 'occ', label: '稼働率', fmt: (v) => pct(v) },
-  { key: 'companion', label: '同伴係数', fmt: (v) => (v == null ? '-' : Number(v).toFixed(2)) },
-  { key: 'revpar', label: 'RevPAR', fmt: (v) => fmtNum(v) },
+// 表用（4項目に厳選・今年/前年or予算/比を横並び）。室数は下に小さく稼働率。
+const M4: { key: keyof Metrics; label: string; fmt: (v: any) => string; sub?: { key: keyof Metrics; fmt: (v: any) => string } }[] = [
+  { key: 'revenue', label: '売上', fmt: (v) => (v == null ? '-' : fmtYen(v)) },
+  { key: 'sold', label: '室数', fmt: (v) => (v == null ? '-' : `${fmtNum(v)}室`), sub: { key: 'occ', fmt: (v) => (v == null ? '-' : pct(v)) } },
+  { key: 'guestUnit', label: '客単価', fmt: (v) => (v == null ? '-' : fmtYen(v)) },
+  { key: 'adr', label: '室単価', fmt: (v) => (v == null ? '-' : fmtYen(v)) },
 ]
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 interface Res { checkin: string; nights: number | null; revenue_settled: number | null; guests_total: number | null; status: string | null; booking_date: string | null; cancel_date: string | null }
 interface RateRow { snapshot_date: string; stay_date: string; rate_rank: number | null }
-type CmpMode = 'budget' | 'py' | 'none'
+type CmpMode = 'budget' | 'py'
 type Agg = { r: number; g: number; v: number }  // rooms / guests / revenue
 
 export default function DailyPage() {
@@ -115,7 +111,7 @@ export default function DailyPage() {
   const [showBudget, setShowBudget] = useState(true)
   const [showPY, setShowPY] = useState(false)
   const [showPM, setShowPM] = useState(false)
-  const [cmpMode, setCmpMode] = useState<CmpMode>('budget')  // 表の比較列
+  const [cmpMode, setCmpMode] = useState<CmpMode>('py')  // 表の比較列（既定=前年）
 
   useEffect(() => {
     if (!current) return
@@ -284,16 +280,13 @@ export default function DailyPage() {
   const HROW = 'h-9', HHEAD = 'h-11'
   const toggle = (key: string) => setVisible((prev) => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
 
-  // 比較セル（現在値の下に小さく：予算比 or 前年比）
-  const ratioLabel = cmpMode === 'budget' ? '予' : '前'
-  const cmpVal = (cell: { py: Metrics | null; bud: Metrics | null }, key: keyof Metrics): number | null =>
-    cmpMode === 'none' ? null : (cmpMode === 'budget' ? cell.bud?.[key] ?? null : cell.py?.[key] ?? null)
-  function RatioLine({ cur, comp }: { cur: number | null; comp: number | null }) {
-    if (cmpMode === 'none') return null
-    if (cur == null || comp == null || comp === 0) return <div className="text-[9px] leading-none" style={{ color: 'var(--text-dim)' }}>{ratioLabel}-</div>
+  // 横並び比較（今年 / 前年or予算 / 比）
+  const cmpHead = cmpMode === 'budget' ? '予算' : '前年'
+  const cmpColHead = cmpMode === 'budget' ? '予算' : '前年同曜'
+  const ratioOf = (cur: number | null | undefined, comp: number | null | undefined): { txt: string; good: boolean } | null => {
+    if (cur == null || comp == null || comp === 0) return null
     const r = Math.round((cur / comp) * 100)
-    const good = r >= 100
-    return <div className="text-[9px] leading-none" style={{ color: good ? 'var(--green)' : 'var(--red)' }}>{ratioLabel}{r}%</div>
+    return { txt: `${r}%`, good: r >= 100 }
   }
 
   return (
@@ -303,9 +296,10 @@ export default function DailyPage() {
           <input type="date" className="field px-3 py-1.5 text-sm" value={from} onChange={(e) => setFrom(e.target.value)} />
           <span style={{ color: 'var(--text-dim)' }}>〜</span>
           <input type="date" className="field px-3 py-1.5 text-sm" value={to} onChange={(e) => setTo(e.target.value)} />
-          {/* 表の比較トグル */}
-          <div className="flex rounded-md overflow-hidden ml-2" style={{ border: '1px solid var(--border)' }}>
-            {([['budget', '予算比'], ['py', '前年比'], ['none', '比較なし']] as [CmpMode, string][]).map(([m, lbl]) => (
+          {/* 横並び比較の相手（前年 or 予算） */}
+          <span className="text-xs ml-2" style={{ color: 'var(--text-dim)' }}>比較:</span>
+          <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+            {([['py', '前年'], ['budget', '予算']] as [CmpMode, string][]).map(([m, lbl]) => (
               <button key={m} onClick={() => setCmpMode(m)} className="px-3 py-1.5 text-xs"
                 style={{ background: cmpMode === m ? 'var(--accent)' : 'var(--surface)', color: cmpMode === m ? '#fff' : 'var(--text-dim)' }}>{lbl}</button>
             ))}
@@ -372,10 +366,21 @@ export default function DailyPage() {
             <div className="flex">
               <table className="text-sm shrink-0" style={{ borderRight: '2px solid var(--border)' }}>
                 <thead>
-                  <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-left">
-                    <th className={`px-3 ${HHEAD} whitespace-nowrap`}>日付</th>
-                    {COLS.map((c) => (
-                      <th key={c.key} className={`px-3 ${HHEAD} text-right whitespace-nowrap`}>{c.label}</th>
+                  {/* 1段目: 指標グループ見出し */}
+                  <tr style={{ background: 'var(--surface2)', color: 'var(--text)' }}>
+                    <th rowSpan={2} className="px-3 text-left whitespace-nowrap align-bottom pb-1">日付</th>
+                    {M4.map((m) => (
+                      <th key={m.key} colSpan={3} className="px-2 h-6 text-center text-xs font-semibold" style={{ borderLeft: '1px solid var(--border)' }}>{m.label}</th>
+                    ))}
+                  </tr>
+                  {/* 2段目: 今年 / 前年or予算 / 比 */}
+                  <tr style={{ background: 'var(--surface2)', color: 'var(--text-dim)' }} className="text-[10px]">
+                    {M4.map((m) => (
+                      <Fragment key={m.key}>
+                        <th className="px-2 h-6 text-right whitespace-nowrap font-medium" style={{ borderLeft: '1px solid var(--border)', color: 'var(--text)' }}>今年</th>
+                        <th className="px-2 h-6 text-right whitespace-nowrap">{cmpColHead}</th>
+                        <th className="px-2 h-6 text-right whitespace-nowrap">比</th>
+                      </Fragment>
                     ))}
                   </tr>
                 </thead>
@@ -384,29 +389,49 @@ export default function DailyPage() {
                     const dw = dowOf(row.date)
                     const dcolor = dw === 0 ? 'var(--red)' : dw === 6 ? '#378ADD' : 'var(--text)'
                     const oh = row.kind === 'onhand'
+                    const comp = cmpMode === 'budget' ? row.bud : row.py
                     return (
                       <tr key={row.date} style={{ borderTop: '1px solid var(--border)', background: oh ? 'color-mix(in srgb, var(--accent) 5%, transparent)' : undefined }}>
                         <td className={`px-3 ${HROW} whitespace-nowrap font-medium`} style={{ color: dcolor }}>
                           {mmdd(row.date)}({DOW[dw]})
                           {oh && <span className="ml-1.5 text-[8px] px-1 py-0.5 rounded align-middle" style={{ background: 'var(--accent)', color: '#fff' }}>オンハンド</span>}
                         </td>
-                        {COLS.map((c) => (
-                          <td key={c.key} className={`px-3 ${HROW} text-right align-middle`}>
-                            <div className="leading-tight">{c.fmt(row.cur[c.key])}</div>
-                            <RatioLine cur={row.cur[c.key] as number | null} comp={cmpVal(row, c.key)} />
-                          </td>
-                        ))}
+                        {M4.map((m) => {
+                          const cv = row.cur[m.key] as number | null
+                          const pv = (comp?.[m.key] ?? null) as number | null
+                          const r = ratioOf(cv, pv)
+                          return (
+                            <Fragment key={m.key}>
+                              <td className={`px-2 ${HROW} text-right align-middle`} style={{ borderLeft: '1px solid var(--border)' }}>
+                                <div className="font-medium leading-tight">{m.fmt(cv)}</div>
+                                {m.sub && <div className="text-[10px] leading-tight" style={{ color: 'var(--text-dim)' }}>{m.sub.fmt(row.cur[m.sub.key])}</div>}
+                              </td>
+                              <td className={`px-2 ${HROW} text-right align-middle text-xs`} style={{ color: 'var(--text-dim)' }}>{m.fmt(pv)}</td>
+                              <td className={`px-2 ${HROW} text-right align-middle text-xs whitespace-nowrap`}>{r ? <span style={{ color: r.good ? 'var(--green)' : 'var(--red)' }}>{r.txt}</span> : '-'}</td>
+                            </Fragment>
+                          )
+                        })}
                       </tr>
                     )
                   })}
                   <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--surface2)' }} className="font-semibold">
-                    <td className={`px-3 ${HHEAD} whitespace-nowrap`}>合計/平均</td>
-                    {COLS.map((c) => (
-                      <td key={c.key} className={`px-3 ${HHEAD} text-right align-middle`}>
-                        <div className="leading-tight">{c.fmt(model.total.cur[c.key])}</div>
-                        <RatioLine cur={model.total.cur[c.key] as number | null} comp={cmpMode === 'budget' ? (model.total.bud[c.key] as number | null) : (model.total.py[c.key] as number | null)} />
-                      </td>
-                    ))}
+                    <td className={`px-3 ${HHEAD} whitespace-nowrap`}>月間合計</td>
+                    {M4.map((m) => {
+                      const cv = model.total.cur[m.key] as number | null
+                      const compT = cmpMode === 'budget' ? model.total.bud : model.total.py
+                      const pv = (compT[m.key] ?? null) as number | null
+                      const r = ratioOf(cv, pv)
+                      return (
+                        <Fragment key={m.key}>
+                          <td className={`px-2 ${HHEAD} text-right align-middle`} style={{ borderLeft: '1px solid var(--border)' }}>
+                            <div className="leading-tight">{m.fmt(cv)}</div>
+                            {m.sub && <div className="text-[10px] leading-tight font-normal" style={{ color: 'var(--text-dim)' }}>{m.sub.fmt(model.total.cur[m.sub.key])}</div>}
+                          </td>
+                          <td className={`px-2 ${HHEAD} text-right align-middle text-xs font-normal`} style={{ color: 'var(--text-dim)' }}>{m.fmt(pv)}</td>
+                          <td className={`px-2 ${HHEAD} text-right align-middle text-xs whitespace-nowrap`}>{r ? <span style={{ color: r.good ? 'var(--green)' : 'var(--red)' }}>{r.txt}</span> : '-'}</td>
+                        </Fragment>
+                      )
+                    })}
                   </tr>
                 </tbody>
               </table>
@@ -450,19 +475,16 @@ export default function DailyPage() {
 
           {/* 凡例 */}
           <div className="flex items-center gap-4 mt-3 text-xs flex-wrap" style={{ color: 'var(--text-dim)' }}>
+            <span>
+              各指標を <b style={{ color: 'var(--text)' }}>今年 / {cmpColHead} / 比</b> で横並び（比: <span style={{ color: 'var(--green)' }}>緑</span>=100%以上・<span style={{ color: 'var(--red)' }}>赤</span>=未達）。
+              {cmpMode === 'py' && '実績日=前年同曜／オンハンド日=前年同日比（1年前の同時点の入り）。'}
+            </span>
+            {model.hasOnhand && <span>薄い色の行＝<b style={{ color: 'var(--text)' }}>オンハンド</b>（当日以降・現在の入り）。</span>}
             <div className="flex items-center gap-2">
               <span>料金ランク</span><span>低</span>
-              <span style={{ display: 'inline-block', width: 160, height: 12, borderRadius: 4, background: 'linear-gradient(90deg, hsl(140,78%,55%), hsl(70,78%,45%), hsl(0,78%,35%))' }} />
+              <span style={{ display: 'inline-block', width: 120, height: 10, borderRadius: 4, background: 'linear-gradient(90deg, hsl(140,78%,55%), hsl(70,78%,45%), hsl(0,78%,35%))' }} />
               <span>高</span>
             </div>
-            {cmpMode !== 'none' && (
-              <span>
-                各数値の下=<b style={{ color: 'var(--text)' }}>{cmpMode === 'budget' ? '予算比' : '前年比'}</b>
-                （<span style={{ color: 'var(--green)' }}>緑</span>=100%以上/<span style={{ color: 'var(--red)' }}>赤</span>=未達）。
-                {cmpMode === 'py' && '実績日=前年同日（曜日合わせ）／オンハンド日=前年同日比（1年前の同時点の入り）。'}
-              </span>
-            )}
-            {model.hasOnhand && <span>薄い色の行＝<b style={{ color: 'var(--text)' }}>オンハンド</b>（当日以降・現在の予約の入り）。</span>}
           </div>
         </>
       )}
