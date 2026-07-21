@@ -126,24 +126,44 @@ export async function saveLaborStandardManual(facility: string, value: number | 
 
 // 施設所属の従業員（フラット表示用）
 export async function loadStaff(facility: string): Promise<StaffLite[]> {
-  // 人件費モデルv2: 個人給与(dim_staff_wage)は撤去。賃金列は互換のため null 固定。
+  // 人件費モデルv2: 個人給与(dim_staff_wage)は撤去。賃金列は互換のため null 固定。並び順=各宿設定。
   const { data } = await supabase.from('dim_staff')
     .select('staff_code, name, employment_type, is_spot')
-    .eq('home_facility', facility).order('staff_code')
+    .eq('home_facility', facility).order('sort_order').order('staff_code')
   return ((data as StaffLite[]) ?? []).map((s) => ({
     ...s, wage_type: null, hourly_wage: null, monthly_salary: null, deemed_ot_hours: null, contracted_monthly_hours: null,
   }))
 }
 
+// 人件費 予算（宿×月）＝ 給料手当＋雑給＋外注費(人材)＋外注費(清掃)。シフトの人件費と対予算比較する相手。
+const LABOR_BUDGET_CODES = ['給料手当', '雑給', '外注費_人材_', '外注費_清掃_']
+export async function loadLaborBudget(facility: string, month: string): Promise<number | null> {
+  const fy = String(Number(month.slice(5, 7)) >= 4 ? Number(month.slice(0, 4)) : Number(month.slice(0, 4)) - 1)
+  const { data } = await supabase.from('budget_monthly')
+    .select('amount, item_code').eq('facility', facility).eq('fiscal_year', fy).eq('month', month).eq('version', '当初')
+    .in('item_code', LABOR_BUDGET_CODES)
+  const rows = (data as { amount: number | null }[]) ?? []
+  if (!rows.length) return null
+  return rows.reduce((s, r) => s + (r.amount ?? 0), 0)
+}
+
 /* ===== 人件費モデルv2: 従業員マスタ手動編集 / アルバイト標準時給 / 正社員月額 ===== */
 export type EmpType = '正社員' | 'アルバイト' | 'スポット'
-export interface StaffRow { staff_code: string; name: string | null; employment_type: string | null; is_spot: boolean | null; source: string | null }
+export interface StaffRow { staff_code: string; name: string | null; employment_type: string | null; is_spot: boolean | null; source: string | null; sort_order?: number | null }
 
 export async function loadStaffRoster(facility: string): Promise<StaffRow[]> {
   const { data } = await supabase.from('dim_staff')
-    .select('staff_code, name, employment_type, is_spot, source')
-    .eq('home_facility', facility).order('employment_type').order('name')
+    .select('staff_code, name, employment_type, is_spot, source, sort_order')
+    .eq('home_facility', facility).order('sort_order').order('name')
   return (data as StaffRow[]) ?? []
+}
+// 並び順の入替（隣と sort_order を交換）
+export async function saveStaffOrder(items: { staff_code: string; sort_order: number }[]): Promise<{ error?: string }> {
+  for (const it of items) {
+    const { error } = await supabase.from('dim_staff').update({ sort_order: it.sort_order, updated_at: new Date().toISOString() }).eq('staff_code', it.staff_code)
+    if (error) return { error: error.message }
+  }
+  return {}
 }
 // 手動追加（各宿設定）。staff_code は勤怠(KOT)コードが分かれば入力、空なら自動採番。
 export async function addStaff(facility: string, p: { name: string; employment_type: EmpType; staff_code?: string }): Promise<{ error?: string }> {

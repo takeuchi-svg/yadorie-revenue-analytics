@@ -8,7 +8,7 @@ import { useFacility } from '@/lib/facility-context'
 import { useToast } from '@/components/toast'
 import { Loading } from '@/components/page-bits'
 import {
-  loadStaffRoster, addStaff, updateStaff, deleteStaff,
+  loadStaffRoster, addStaff, updateStaff, deleteStaff, saveStaffOrder,
   loadLaborRate, saveLaborRate, type StaffRow, type EmpType,
 } from '@/lib/shift/data'
 
@@ -57,6 +57,15 @@ export default function StaffAdmin() {
     if (v.trim() === (s.name ?? '')) return
     const { error } = await updateStaff(s.staff_code, { name: v })
     if (error) { toast(`エラー: ${error}`, 'error'); load() }
+  }
+  const move = async (i: number, dir: -1 | 1) => {
+    const j = i + dir
+    if (j < 0 || j >= rows.length) return
+    const a = rows[i], b = rows[j]
+    const soA = a.sort_order ?? (i + 1) * 10, soB = b.sort_order ?? (j + 1) * 10
+    const { error } = await saveStaffOrder([{ staff_code: a.staff_code, sort_order: soB }, { staff_code: b.staff_code, sort_order: soA }])
+    if (error) { toast(`エラー: ${error}`, 'error'); return }
+    load()
   }
   const remove = async (s: StaffRow) => {
     if (!confirm(`${s.name ?? s.staff_code} を削除しますか？（シフト・勤怠がある従業員は削除できません）`)) return
@@ -118,6 +127,7 @@ export default function StaffAdmin() {
         <table className="w-full text-sm">
           <thead>
             <tr style={{ color: 'var(--text-dim)' }} className="text-left">
+              <th className="py-1.5 px-2">順</th>
               <th className="py-1.5 px-2">氏名</th>
               <th className="py-1.5 px-2">区分</th>
               <th className="py-1.5 px-2">勤怠コード</th>
@@ -127,9 +137,13 @@ export default function StaffAdmin() {
           </thead>
           <tbody>
             {rows.length === 0 ? (
-              <tr><td colSpan={5} className="py-4 text-center text-xs" style={{ color: 'var(--text-dim)' }}>従業員がいません。上のフォームから追加してください。</td></tr>
-            ) : rows.map((s) => (
+              <tr><td colSpan={6} className="py-4 text-center text-xs" style={{ color: 'var(--text-dim)' }}>従業員がいません。上のフォームから追加してください。</td></tr>
+            ) : rows.map((s, i) => (
               <tr key={s.staff_code} style={{ borderTop: '1px solid var(--border)' }}>
+                <td className="py-1 px-2 whitespace-nowrap">
+                  <button onClick={() => move(i, -1)} disabled={i === 0} className="text-xs px-1 disabled:opacity-30" title="上へ">▲</button>
+                  <button onClick={() => move(i, 1)} disabled={i === rows.length - 1} className="text-xs px-1 disabled:opacity-30" title="下へ">▼</button>
+                </td>
                 <td className="py-1 px-2">
                   <input className="field px-2 py-1 text-sm w-40" defaultValue={s.name ?? ''} onBlur={(e) => rename(s, e.target.value)} />
                 </td>

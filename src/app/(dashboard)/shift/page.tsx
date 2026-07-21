@@ -5,7 +5,7 @@ import { useFacility } from '@/lib/facility-context'
 import { fmtNum, fmtYen } from '@/lib/ui'
 import { Loading, Empty } from '@/components/page-bits'
 import {
-  loadMasters, loadStaff, loadShiftMonth, loadLaborRate,
+  loadMasters, loadStaff, loadShiftMonth, loadLaborRate, loadRegularLabor, loadLaborBudget,
   saveShiftCell, deleteShiftCell, savePlanContext, saveSegments,
   createSpotStaff, saveSpotActual, deleteSpotActual,
   patternMinutes, segMinutes,
@@ -86,6 +86,8 @@ export default function ShiftPage() {
   const [spotWageAmount, setSpotWageAmount] = useState<number | ''>('')
   const [spotWageMap, setSpotWageMap] = useState<Record<string, SpotWage>>({})  // スポットの賃金(日当/時給)。計画行に保存し、置いたセルへ反映
   const [laborRate, setLaborRate] = useState<number | null>(null)  // この宿のアルバイト標準時給（人件費モデルv2）
+  const [regularCost, setRegularCost] = useState<number | null>(null)  // 正社員固定費（当月・全社設定）
+  const [laborBudget, setLaborBudget] = useState<number | null>(null)  // 人件費予算（給料手当＋雑給＋外注人材＋外注清掃）
   const [paperSize, setPaperSize] = useState<'A3' | 'A4'>('A3')  // PDF/印刷の用紙（張り出し=A3横が既定）
   // SV02 公開
   const [pubs, setPubs] = useState<Publication[]>([])
@@ -125,10 +127,13 @@ export default function ShiftPage() {
   const reload = useCallback(async () => {
     if (!current || !month) return
     setLoading(true); setMsg('')
-    const [{ roles, patterns }, st, mo, rate] = await Promise.all([
+    const [{ roles, patterns }, st, mo, rate, regList, labBud] = await Promise.all([
       loadMasters(current), loadStaff(current), loadShiftMonth(current, month), loadLaborRate(current),
+      loadRegularLabor(current), loadLaborBudget(current, month),
     ])
     setRoles(roles); setPatterns(patterns); setStaff(st); setLaborRate(rate)
+    setRegularCost(regList.find((r) => r.month === month)?.amount ?? null)
+    setLaborBudget(labBud)
     const c: Record<string, Cell> = {}
     const swm: Record<string, SpotWage> = {}
     mo.plans.forEach((p) => {
@@ -151,6 +156,10 @@ export default function ShiftPage() {
   // SV02: シフト公開（月初版スナップショット）
   const doPublish = async () => {
     if (!current || !month) return
+    if (missingForecast.length > 0) {
+      setMsg(`Error: 予測販売室数が未入力の日があります（${missingForecast.map((d) => d.slice(5).replace('-', '/')).join('・')}）。休館日は「休」で設定してください。`)
+      return
+    }
     const isFirst = pubs.length === 0
     const ok = confirm(isFirst
       ? `${month} を「月初版（基準計画）」として記録します。\n予実分析の基準になります。`
@@ -458,6 +467,8 @@ export default function ShiftPage() {
   }, [staff, rowAgg, spotWageMap, laborRate])
 
   const dirtyCount = dirtyCells.size + dirtyCtx.size
+  // ④ 月初版記録の前提: 休館以外の全日に「予測販売室数」が入っていること
+  const missingForecast = days.filter((d) => !ctx[d.date]?.is_closed && (ctx[d.date]?.forecast_rooms == null || Number.isNaN(Number(ctx[d.date]?.forecast_rooms)))).map((d) => d.date)
   const save = async () => {
     setSaving(true); setMsg('')
     try {
@@ -520,8 +531,8 @@ export default function ShiftPage() {
           <button onClick={save} disabled={saving || dirtyCount === 0} className="px-4 py-1.5 text-sm rounded-md text-white hover:opacity-90 disabled:opacity-40" style={{ background: 'var(--accent)' }}>
             {saving ? '保存中...' : dirtyCount > 0 ? `保存（${dirtyCount}）` : '保存'}
           </button>
-          <button onClick={doPublish} disabled={publishing || loading} className="px-4 py-1.5 text-sm rounded-md hover:opacity-90 disabled:opacity-40"
-            style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }} title="この月の月初版＝予実分析の基準として記録します">
+          <button onClick={doPublish} disabled={publishing || loading || missingForecast.length > 0} className="px-4 py-1.5 text-sm rounded-md hover:opacity-90 disabled:opacity-40"
+            style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }} title={missingForecast.length > 0 ? `予測販売室数が未入力の日があります（${missingForecast.length}日）` : 'この月の月初版＝予実分析の基準として記録します'}>
             {publishing ? '記録中…' : pubs.length ? '基準を再記録' : '月初版を記録'}
           </button>
         </div>
@@ -673,28 +684,82 @@ export default function ShiftPage() {
                   {days.map((d) => <td key={d.date} className="px-1 h-9 text-center" style={{ background: isClosed(d.date) ? CLOSED_BG : 'var(--surface2)', borderTop: '2px solid var(--border)' }}>{dayTotal(d.date).toFixed(1)}</td>)}
                   <td style={{ background: 'var(--surface2)', borderTop: '2px solid var(--border)', borderLeft: '2px solid var(--border)' }} /><td style={{ background: 'var(--surface2)', borderTop: '2px solid var(--border)' }} />
                 </tr>
+                <tr>
+                  <td className="px-2 h-8 text-right whitespace-nowrap sticky left-0 z-10" style={{ background: 'var(--surface2)', borderRight: '2px solid var(--border)', color: 'var(--text-dim)', fontSize: 11 }} title="1日の総労働時間 ÷ 予測販売室数">1室あたり時間</td>
+                  {days.map((d) => {
+                    const f = ctx[d.date]?.forecast_rooms
+                    const v = f && f > 0 ? dayTotal(d.date) / f : null
+                    return <td key={d.date} className="px-1 h-8 text-center" style={{ background: isClosed(d.date) ? CLOSED_BG : 'var(--surface2)', color: 'var(--text-dim)', fontSize: 11, fontVariantNumeric: 'tabular-nums' }}>{v == null ? '—' : v.toFixed(1)}</td>
+                  })}
+                  <td style={{ background: 'var(--surface2)', borderLeft: '2px solid var(--border)' }} /><td style={{ background: 'var(--surface2)' }} />
+                </tr>
               </tbody>
             </table>
             </div>
 
-          <div className="grid grid-cols-3 gap-3 mt-4">
-            <div className="card p-4"><div className="text-xs" style={{ color: 'var(--text-dim)' }}>月次 労働時間 合計</div><div className="text-xl font-bold">{fmtNum(summary.totalH)} h</div></div>
-            <div className="card p-4"><div className="text-xs" style={{ color: 'var(--text-dim)' }}>月次 変動人件費（計画）</div><div className="text-xl font-bold">{fmtYen(summary.varCost)}</div><div className="text-[10px] mt-0.5" style={{ color: 'var(--text-dim)' }}>アルバイト(時間×標準時給)＋スポット。正社員は全社設定の月額固定で別。</div></div>
-            <div className="card p-4"><div className="text-xs" style={{ color: 'var(--text-dim)' }}>うち 派遣・その他 時間</div><div className="text-xl font-bold">{fmtNum(summary.spotH)} h</div></div>
-          </div>
+          {(() => {
+            const totalLabor = (regularCost ?? 0) + summary.varCost                 // 固定＋変動（計画）
+            const gap = laborBudget != null ? totalLabor - laborBudget : null        // 対予算 乖離（＋=超過）
+            return (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+                <div className="card p-4">
+                  <div className="text-xs" style={{ color: 'var(--text-dim)' }}>月次 労働時間 合計</div>
+                  <div className="text-xl font-bold">{fmtNum(summary.totalH)} h</div>
+                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-dim)' }}>うち 派遣・その他 {fmtNum(summary.spotH)} h</div>
+                </div>
+                <div className="card p-4">
+                  <div className="text-xs" style={{ color: 'var(--text-dim)' }}>月次 人件費 合計（計画）</div>
+                  <div className="text-xl font-bold">{fmtYen(totalLabor)}</div>
+                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-dim)' }}>固定(正社員) {regularCost != null ? fmtYen(regularCost) : '—'} ／ 変動 {fmtYen(summary.varCost)}</div>
+                </div>
+                <div className="card p-4">
+                  <div className="text-xs" style={{ color: 'var(--text-dim)' }}>人件費 予算</div>
+                  <div className="text-xl font-bold">{laborBudget != null ? fmtYen(laborBudget) : '—'}</div>
+                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-dim)' }}>給料手当＋雑給＋外注費(人材)＋外注費(清掃)</div>
+                </div>
+                <div className="card p-4">
+                  <div className="text-xs" style={{ color: 'var(--text-dim)' }}>対予算 乖離</div>
+                  <div className="text-xl font-bold" style={{ color: gap == null ? undefined : gap > 0 ? 'var(--red)' : 'var(--green)' }}>{gap == null ? '—' : `${gap > 0 ? '+' : ''}${fmtYen(gap)}`}</div>
+                  <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-dim)' }}>計画人件費 − 予算（＋＝予算超過）</div>
+                </div>
+              </div>
+            )
+          })()}
+          <p className="text-[10px] mt-1" style={{ color: 'var(--text-dim)' }}>
+            固定費＝正社員（全社設定の月額）／変動費＝アルバイト(時間×標準時給)＋スポット。予算・固定費が未設定の宿は「—」表示。
+          </p>
 
           {msg && <p className="text-sm mt-3" style={{ color: msg.startsWith('Error') ? 'var(--red)' : 'var(--green)' }}>{msg}</p>}
-          <div className="text-xs mt-3 leading-relaxed" style={{ color: 'var(--text-dim)' }}>
-            <div className="font-semibold mb-1" style={{ color: 'var(--text)' }}>使い方</div>
-            <ul className="space-y-0.5" style={{ listStyle: 'disc', paddingLeft: 18 }}>
-              <li>セルでパターン（日勤・休など）を選び、<b>時間数は直接編集</b>できます（時間数を増やすと終了時刻も自動で伸びます）</li>
-              <li>時間帯「9:00–17:00」を<b>クリックで開始・終了・休憩を編集</b>。勤務セルを<b>ダブルクリックで役割分割</b>（1日を複数役割に）</li>
-              <li><b>ペイント</b>：上の「ペイント」でパターンを選び、セルをなぞって連続入力</li>
-              <li><b>コピー</b>：Shiftを押しながらドラッグで範囲選択 → コピー → 貼付先の左上をクリックで形のまま複製（Ctrl+C / Ctrl+V 可）</li>
-              <li><b>1日コピー</b>：日付にカーソルを当てて「コ」でその日の全員をコピー → 別の日で「貼」</li>
-              <li>日付を<b>クリックでその日のガント</b>（時間帯の重なり）を表示。バーの端をドラッグで15分調整</li>
+          <div className="text-xs mt-4 leading-relaxed" style={{ color: 'var(--text-dim)' }}>
+            <div className="font-semibold mb-1 text-sm" style={{ color: 'var(--text)' }}>使い方（マニュアル）</div>
+
+            <div className="mt-2 font-semibold" style={{ color: 'var(--text)' }}>■ 事前の設定（各宿設定）</div>
+            <ol className="space-y-0.5 mt-0.5" style={{ listStyle: 'decimal', paddingLeft: 20 }}>
+              <li>「各宿設定」で<b>シフトパターン</b>（早番・遅番・公休など）を設定する</li>
+              <li>「各宿設定」で<b>従業員を追加</b>する（表示する並び順もここで▲▼で決められます）</li>
+            </ol>
+
+            <div className="mt-2 font-semibold" style={{ color: 'var(--text)' }}>■ シフトの作り方</div>
+            <ol className="space-y-0.5 mt-0.5" style={{ listStyle: 'decimal', paddingLeft: 20 }}>
+              <li><b>休館日を設定</b>：日付にカーソルを合わせて「<b>休</b>」をクリック（その列がグレーになります。旧館の出勤などは記入できます）</li>
+              <li><b>希望休を全員ぶんプロット</b>（休日パターンの「希望休」を選びます）</li>
+              <li>各日に<b>オンハンド室数／予測販売室数／メモ</b>を記入（<b>予測販売室数は「月初版を記録」に必須</b>です）</li>
+              <li><b>1日ごと、または人ごとにシフトを入力</b>。パターンより<b>労働時間が長い・短い、休憩が変わる</b>ときは、そのセルの時間帯（例「9:00–17:00」）をクリックして個別に調整します。<br /><span style={{ color: 'var(--accent)' }}>※ 予測販売室数（＝需要）に合わせて、しっかり考えて組むことが大事です</span></li>
+              <li><b>人が足りない日</b>は「スポット追加」でタイミー等を登録し、その日にアサインします（賃金は日当/時給で入力）</li>
+              <li>作り終えたら、下の指標をチェックして修正：<b>日別の予定合計・1室あたり時間・各人の公休数・各人の労働時間・月次の総労働時間・人件費合計（対予算の乖離）</b></li>
+              <li>「<b>月初版を記録</b>」を押す（記入漏れがあると押せません）。→ 「PDF/印刷（A3横）」で刷って配布します</li>
+            </ol>
+
+            <div className="mt-2 font-semibold" style={{ color: 'var(--text)' }}>■ 便利な操作（補足）</div>
+            <ul className="space-y-0.5 mt-0.5" style={{ listStyle: 'disc', paddingLeft: 20 }}>
+              <li><b>ペイント</b>：上の「ペイント」でパターンを選び、セルをなぞると連続で入力できます</li>
+              <li><b>まとめてコピー</b>：①コピーしたい範囲の<b>左上</b>で Shift を押しながら<b>右下までドラッグ</b>（範囲が枠で囲まれます）→ ②「コピー」（Ctrl+C）→ ③貼り付けたい場所の<b>左上のセルをクリック</b> → ④「貼付」（Ctrl+V）。ある1週間を選んで次の週に貼る、のように<b>並びをそのまま複製</b>できます</li>
+              <li><b>1日まるごとコピー</b>：日付にカーソルを当てて「コ」でその日の全員をコピー → 別の日で「貼」</li>
+              <li><b>時間帯・役割の編集</b>：「9:00–17:00」をクリックで開始・終了・休憩を編集。勤務セルを<b>ダブルクリック</b>すると1日を複数の役割に分けられます</li>
+              <li><b>ガント表示</b>：日付をクリックすると、その日の時間帯の重なりを見られます（バーの端をドラッグで15分ずつ調整）</li>
+              <li><b>全画面／文字サイズ（A−・A+）</b>で見やすく調整できます</li>
             </ul>
-            <p className="mt-1">※ スポットの実働は保存時に勤怠実績へ記録され、労働時間・KPIに反映されます。人件費は計画ベースの月次合計です。</p>
+            <p className="mt-1">※ スポットの実働は保存時に勤怠実績へ記録され、労働時間・人件費に反映されます。人件費は計画ベースの月次合計です。</p>
           </div>
 
           {/* 役割分割モーダル（T08）※全画面でも出るよう fsRef 内に配置 */}
