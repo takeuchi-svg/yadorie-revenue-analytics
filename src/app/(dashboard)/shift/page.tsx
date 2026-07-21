@@ -10,7 +10,7 @@ import {
   createSpotStaff, saveSpotActual, deleteSpotActual,
   patternMinutes, segMinutes,
   loadPublications, publishShiftPlan,
-  type Role, type ShiftPattern, type StaffLite, type PlanContext, type ShiftSegment, type Publication,
+  type Role, type ShiftPattern, type StaffLite, type PlanContext, type ShiftSegment, type Publication, type SpotWage,
 } from '@/lib/shift/data'
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -69,7 +69,10 @@ export default function ShiftPage() {
   const fsRef = useRef<HTMLDivElement>(null)
   const [memoPop, setMemoPop] = useState<{ text: string; x: number; y: number } | null>(null)  // メモのホバー表示
   const [spotOpen, setSpotOpen] = useState(false)
-  const [spotName, setSpotName] = useState(''); const [spotWage, setSpotWage] = useState<number | ''>('')
+  const [spotName, setSpotName] = useState('')
+  const [spotWageKind, setSpotWageKind] = useState<'日当' | '時給'>('時給')
+  const [spotWageAmount, setSpotWageAmount] = useState<number | ''>('')
+  const [spotWageMap, setSpotWageMap] = useState<Record<string, SpotWage>>({})  // スポットの賃金(日当/時給)。計画行に保存し、置いたセルへ反映
   // SV02 公開
   const [pubs, setPubs] = useState<Publication[]>([])
   const [publishing, setPublishing] = useState(false)
@@ -113,8 +116,13 @@ export default function ShiftPage() {
     ])
     setRoles(roles); setPatterns(patterns); setStaff(st)
     const c: Record<string, Cell> = {}
-    mo.plans.forEach((p) => { c[ck(p.staff_code, p.work_date)] = { patternId: p.pattern_id, minutes: p.planned_minutes, shiftId: p.shift_id } })
+    const swm: Record<string, SpotWage> = {}
+    mo.plans.forEach((p) => {
+      c[ck(p.staff_code, p.work_date)] = { patternId: p.pattern_id, minutes: p.planned_minutes, shiftId: p.shift_id }
+      if (p.spot_wage_kind && p.spot_wage_amount != null) swm[p.staff_code] = { kind: p.spot_wage_kind as '日当' | '時給', amount: p.spot_wage_amount }
+    })
     setCells(c)
+    setSpotWageMap((prev) => ({ ...prev, ...swm }))  // DB由来を優先しつつ、追加直後のセッション値は保持
     const sb: Record<number, ShiftSegment[]> = {}
     mo.segments.forEach((s) => { if (s.shift_id != null) (sb[s.shift_id] ??= []).push(s) })
     setSegByShift(sb)
@@ -400,35 +408,39 @@ export default function ShiftPage() {
 
   // ---- スポット追加（T11）----
   const addSpot = async () => {
-    if (!spotName || spotWage === '') { setMsg('氏名と時給を入力してください'); return }
+    if (!spotName || spotWageAmount === '') { setMsg('氏名と金額を入力してください'); return }
     setSaving(true)
     try {
-      await createSpotStaff(current, spotName, Number(spotWage))
-      setSpotOpen(false); setSpotName(''); setSpotWage('')
-      await reload(); setMsg('スポット要員を追加しました')
+      const code = await createSpotStaff(current, spotName)
+      setSpotWageMap((m) => ({ ...m, [code]: { kind: spotWageKind, amount: Number(spotWageAmount) } }))
+      setSpotOpen(false); setSpotName(''); setSpotWageAmount('')
+      await reload(); setMsg('スポット要員を追加しました。日付にシフトを置いて保存すると賃金が記録されます')
     } catch (e: any) { setMsg('Error: ' + (e?.message ?? String(e))) }
     finally { setSaving(false) }
   }
 
   // ---- 集計 ----
   const rowAgg = useCallback((sc: string) => {
-    let min = 0, off = 0
-    for (const d of days) { const c = cells[ck(sc, d.date)]; if (!c || c.patternId == null) continue; const p = patMap[c.patternId]; if (p?.pattern_type === '休日') off += 1; else min += c.minutes }
-    return { hours: min / 60, off }
+    let min = 0, off = 0, workDays = 0
+    for (const d of days) { const c = cells[ck(sc, d.date)]; if (!c || c.patternId == null) continue; const p = patMap[c.patternId]; if (p?.pattern_type === '休日') off += 1; else { min += c.minutes; workDays += 1 } }
+    return { hours: min / 60, off, workDays }
   }, [cells, days, patMap])
   const dayTotal = (date: string) => { let min = 0; for (const s of staff) { const c = cells[ck(s.staff_code, date)]; if (c && c.patternId != null && patMap[c.patternId]?.pattern_type !== '休日') min += c.minutes } return min / 60 }
   const summary = useMemo(() => {
     let totalH = 0, totalCost = 0, spotH = 0
     for (const s of staff) {
-      const { hours } = rowAgg(s.staff_code); totalH += hours
-      if (s.is_spot) spotH += hours
-      if (s.wage_type === '月給' && s.monthly_salary && s.contracted_monthly_hours) {
+      const agg = rowAgg(s.staff_code); const hours = agg.hours; totalH += hours
+      if (s.is_spot) {
+        spotH += hours
+        const sw = spotWageMap[s.staff_code]
+        if (sw) totalCost += sw.kind === '日当' ? sw.amount * agg.workDays : Math.round(hours * sw.amount)
+      } else if (s.wage_type === '月給' && s.monthly_salary && s.contracted_monthly_hours) {
         const ot = Math.max(0, hours - s.contracted_monthly_hours - (s.deemed_ot_hours ?? 0))
         totalCost += s.monthly_salary + Math.round(ot * (s.monthly_salary / s.contracted_monthly_hours) * 1.25)
       } else if (s.hourly_wage) totalCost += Math.round(hours * s.hourly_wage)
     }
     return { totalH, totalCost, spotH }
-  }, [staff, rowAgg])
+  }, [staff, rowAgg, spotWageMap])
 
   const dirtyCount = dirtyCells.size + dirtyCtx.size
   const save = async () => {
@@ -436,8 +448,15 @@ export default function ShiftPage() {
     try {
       for (const key of dirtyCells) {
         const [sc, date] = key.split('|'); const c = cells[key]; const isSpot = !!staffMap[sc]?.is_spot
+        const sw = isSpot ? spotWageMap[sc] : undefined
         if (!c || c.patternId == null) { await deleteShiftCell(sc, current, date); if (isSpot) await deleteSpotActual(sc, current, date) }
-        else { await saveShiftCell({ staff_code: sc, work_facility: current, work_date: date, pattern_id: c.patternId, planned_minutes: c.minutes }); if (isSpot) await saveSpotActual(sc, current, date, c.minutes) }
+        else {
+          await saveShiftCell({
+            staff_code: sc, work_facility: current, work_date: date, pattern_id: c.patternId, planned_minutes: c.minutes,
+            ...(sw ? { spot_wage_kind: sw.kind, spot_wage_amount: sw.amount } : {}),
+          })
+          if (isSpot) await saveSpotActual(sc, current, date, c.minutes)
+        }
       }
       for (const date of dirtyCtx) { const r = ctx[date]; await savePlanContext(current, date, { onhand_rooms: r?.onhand_rooms ?? null, forecast_rooms: r?.forecast_rooms ?? null, memo: r?.memo ?? null }) }
       const nc = dirtyCells.size, nx = dirtyCtx.size
@@ -691,13 +710,27 @@ export default function ShiftPage() {
             <h3 className="text-base font-semibold mb-3">スポット要員を追加（{currentFacility?.name ?? current}）</h3>
             <label className="block text-xs mb-1" style={{ color: 'var(--text-dim)' }}>氏名 / 表示名</label>
             <input className="field px-3 py-2 text-sm w-full mb-3" value={spotName} onChange={(e) => setSpotName(e.target.value)} placeholder="例: 派遣 山田（タイミー）" />
-            <label className="block text-xs mb-1" style={{ color: 'var(--text-dim)' }}>時給（円）</label>
-            <input type="number" min={0} className="field px-3 py-2 text-sm w-full mb-4" value={spotWage} onChange={(e) => setSpotWage(e.target.value === '' ? '' : Number(e.target.value))} placeholder="例: 1300" />
+            <label className="block text-xs mb-1" style={{ color: 'var(--text-dim)' }}>賃金</label>
+            <div className="flex gap-2 mb-1">
+              <div className="flex rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                {(['時給', '日当'] as const).map((k) => (
+                  <button key={k} onClick={() => setSpotWageKind(k)} className="px-3 py-2 text-sm"
+                    style={{ background: spotWageKind === k ? 'var(--accent)' : 'var(--surface)', color: spotWageKind === k ? '#fff' : 'var(--text-dim)' }}>{k}</button>
+                ))}
+              </div>
+              <div className="flex items-center gap-1 flex-1">
+                <span className="text-xs" style={{ color: 'var(--text-dim)' }}>¥</span>
+                <input type="number" min={0} className="field px-3 py-2 text-sm w-full" value={spotWageAmount}
+                  onChange={(e) => setSpotWageAmount(e.target.value === '' ? '' : Number(e.target.value))}
+                  placeholder={spotWageKind === '日当' ? '例: 12000（1日）' : '例: 1300（1時間）'} />
+              </div>
+            </div>
+            <p className="text-[11px] mb-4" style={{ color: 'var(--text-dim)' }}>{spotWageKind === '日当' ? '日当＝出勤日数 × 金額（時間に依らず固定）' : '時給＝実働時間 × 金額'}。個人給与としては保存せず、このスポットのシフト行に紐づきます。</p>
             <div className="flex justify-end gap-2">
               <button className="text-sm px-3 py-1.5 rounded-md" style={{ border: '1px solid var(--border)' }} onClick={() => setSpotOpen(false)}>キャンセル</button>
               <button className="text-sm px-4 py-1.5 rounded-md text-white" style={{ background: 'var(--accent)' }} onClick={addSpot} disabled={saving}>追加</button>
             </div>
-            <p className="text-[11px] mt-3" style={{ color: 'var(--text-dim)' }}>追加後、グリッドに行が現れます。実働時間を入力→保存で実績に記録されKPIへ反映します。</p>
+            <p className="text-[11px] mt-3" style={{ color: 'var(--text-dim)' }}>追加後、グリッドに行が現れます。日付にシフトを置いて保存すると、賃金と実働がKPIへ反映します。</p>
           </div>
         </div>
       )}

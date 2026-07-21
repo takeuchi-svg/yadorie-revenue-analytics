@@ -26,7 +26,10 @@ export interface ShiftPlan {
   pattern_id: number | null
   planned_minutes: number
   note?: string | null
+  spot_wage_kind?: string | null   // スポット行のみ: '日当' | '時給'
+  spot_wage_amount?: number | null // 日当=1日の額 / 時給=円/時
 }
+export type SpotWage = { kind: '日当' | '時給'; amount: number }
 export interface ShiftSegment {
   segment_id?: number
   shift_id?: number
@@ -205,7 +208,7 @@ export async function loadShiftMonth(facility: string, month: string): Promise<{
   const { start, end } = monthRange(month)
   // ページング必須: 素の select は1000行で無警告に切り捨てられる（スタッフ数×日数で超えうる）
   const plans = await fetchAll<ShiftPlan>(() => supabase.from('raw_shift_plan')
-    .select('shift_id, staff_code, work_facility, work_date, pattern_id, planned_minutes, note')
+    .select('shift_id, staff_code, work_facility, work_date, pattern_id, planned_minutes, note, spot_wage_kind, spot_wage_amount')
     .eq('work_facility', facility).gte('work_date', start).lte('work_date', end).order('shift_id'))
   const ids = plans.map((p) => p.shift_id).filter((x): x is number => x != null)
   let segments: ShiftSegment[] = []
@@ -223,12 +226,16 @@ export async function loadShiftMonth(facility: string, month: string): Promise<{
 
 // 1セル保存（勤務/休日）。(staff_code, work_facility, work_date) で upsert。shift_id を返す
 export async function saveShiftCell(p: ShiftPlan): Promise<number | null> {
+  const row: Record<string, unknown> = {
+    staff_code: p.staff_code, work_facility: p.work_facility, work_date: p.work_date,
+    pattern_id: p.pattern_id, planned_minutes: p.planned_minutes, note: p.note ?? null,
+    updated_at: new Date().toISOString(),
+  }
+  // スポット賃金は指定があるときのみ更新（誤って既存値を消さない）
+  if (p.spot_wage_kind !== undefined) row.spot_wage_kind = p.spot_wage_kind
+  if (p.spot_wage_amount !== undefined) row.spot_wage_amount = p.spot_wage_amount
   const { data, error } = await supabase.from('raw_shift_plan')
-    .upsert({
-      staff_code: p.staff_code, work_facility: p.work_facility, work_date: p.work_date,
-      pattern_id: p.pattern_id, planned_minutes: p.planned_minutes, note: p.note ?? null,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'staff_code,work_facility,work_date' })
+    .upsert(row, { onConflict: 'staff_code,work_facility,work_date' })
     .select('shift_id').single()
   if (error) throw error
   return (data as { shift_id: number } | null)?.shift_id ?? null
@@ -266,20 +273,15 @@ export async function savePlanContext(facility: string, work_date: string, patch
   if (error) throw error
 }
 
-// スポット要員を登録（dim_staff: is_spot / dim_staff_wage: 時給）。staff_code は非KOT系で自動採番
-export async function createSpotStaff(facility: string, name: string, hourlyWage: number): Promise<string> {
+// スポット要員を登録（dim_staff のみ・個人給与は持たない）。賃金(日当/時給)はシフト計画行に都度持たせる。
+export async function createSpotStaff(facility: string, name: string): Promise<string> {
   const staff_code = `SP-${facility}-${Date.now().toString(36).toUpperCase()}`
   const { error } = await supabase.from('dim_staff').insert({
     staff_code, name, home_facility: facility, employment_type: 'スポット',
-    is_monthly_salary: false, is_spot: true,
+    is_monthly_salary: false, is_spot: true, source: 'manual',
     updated_at: new Date().toISOString(),
   })
   if (error) throw error
-  // 賃金はINSERTのみ施設メンバーに許可（読み返し・変更は給与閲覧権限が必要）
-  const { error: wErr } = await supabase.from('dim_staff_wage').insert({
-    staff_code, wage_type: '時給', hourly_wage: hourlyWage, updated_at: new Date().toISOString(),
-  })
-  if (wErr) throw wErr
   return staff_code
 }
 
