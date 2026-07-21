@@ -125,22 +125,13 @@ export async function saveLaborStandardManual(facility: string, value: number | 
 
 // 施設所属の従業員（フラット表示用）
 export async function loadStaff(facility: string): Promise<StaffLite[]> {
+  // 人件費モデルv2: 個人給与(dim_staff_wage)は撤去。賃金列は互換のため null 固定。
   const { data } = await supabase.from('dim_staff')
     .select('staff_code, name, employment_type, is_spot')
     .eq('home_facility', facility).order('staff_code')
-  const staff = ((data as StaffLite[]) ?? []).map((s) => ({
+  return ((data as StaffLite[]) ?? []).map((s) => ({
     ...s, wage_type: null, hourly_wage: null, monthly_salary: null, deemed_ot_hours: null, contracted_monthly_hours: null,
   }))
-  // 賃金は別テーブル（給与閲覧権限がないとRLSで0行＝nullのまま）
-  if (staff.length) {
-    const { data: wages } = await supabase.from('dim_staff_wage')
-      .select('staff_code, wage_type, hourly_wage, monthly_salary, deemed_ot_hours, contracted_monthly_hours')
-      .in('staff_code', staff.map((s) => s.staff_code))
-    const m: Record<string, Partial<StaffLite>> = {}
-    ;((wages as StaffLite[]) ?? []).forEach((w) => { m[w.staff_code] = w })
-    for (const s of staff) Object.assign(s, m[s.staff_code] ?? {})
-  }
-  return staff
 }
 
 /* ===== 人件費モデルv2: 従業員マスタ手動編集 / アルバイト標準時給 / 正社員月額 ===== */

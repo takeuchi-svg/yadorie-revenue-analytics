@@ -37,9 +37,9 @@ type Agg = {
   workHours: number; overtime: number          // 勤怠（労働月のみ）
   staffSum: number; parttimeSum: number; n: number
   pRevenue: number; pGross: number; pRooms: number; pGuests: number // 労働月のみ（mart由来）
-  dispatchHours: number; deemedPay: number      // 勤怠×賃金から自動算出(mart_labor_cost_monthly)
+  dispatchHours: number      // 派遣・その他の労働時間（mart_labor_cost_monthly.spot_hours）
 }
-const ZERO: Agg = { laborCost: 0, plSales: 0, workHours: 0, overtime: 0, staffSum: 0, parttimeSum: 0, n: 0, pRevenue: 0, pGross: 0, pRooms: 0, pGuests: 0, dispatchHours: 0, deemedPay: 0 }
+const ZERO: Agg = { laborCost: 0, plSales: 0, workHours: 0, overtime: 0, staffSum: 0, parttimeSum: 0, n: 0, pRevenue: 0, pGross: 0, pRooms: 0, pGuests: 0, dispatchHours: 0 }
 
 type Kind = 'pct' | 'yen' | 'hours' | 'hours2' | 'count' | 'perYen'
 const KPIS: { code: string; name: string; kind: Kind; up: boolean | null; card?: boolean }[] = [
@@ -54,7 +54,6 @@ const KPIS: { code: string; name: string; kind: Kind; up: boolean | null; card?:
   { code: 'avg_overtime', name: '月給社員1人あたり平均残業時間', kind: 'hours2', up: false },
   { code: 'hours_per_guest', name: '顧客1人あたりの労働時間', kind: 'hours2', up: false },
   { code: 'dispatch_hours', name: '労働時間（派遣・その他）', kind: 'hours', up: null },
-  { code: 'deemed_pay', name: 'みなし残業超の残業代', kind: 'perYen', up: false },
 ]
 
 function calc(code: string, a: Agg): number | null {
@@ -72,7 +71,6 @@ function calc(code: string, a: Agg): number | null {
     case 'avg_overtime': return staff ? a.overtime / staff : null
     case 'hours_per_guest': return div(a.workHours, a.pGuests)
     case 'dispatch_hours': return a.dispatchHours || null
-    case 'deemed_pay': return a.deemedPay || null
   }
   return null
 }
@@ -111,7 +109,7 @@ export default function ProductivityPage() {
       fetchAll(() => supabase.from('mart_labor_monthly').select('month, staff_count_monthly, parttime_count, total_work_hours, total_overtime_hours').eq('facility', current)),
       fetchAll(() => supabase.from('mart_monthly_kpi').select('month, revenue, guests, rooms_sold').eq('facility', current)),
       fetchAll(() => supabase.from('actual_monthly').select('month, item_code, item_name, actual').eq('facility', current).order('id')),
-      supabase.from('mart_labor_cost_monthly').select('month, deemed_ot_excess_pay, spot_hours').eq('facility', current).then((r) => r),
+      supabase.from('mart_labor_cost_monthly').select('month, spot_hours').eq('facility', current).then((r) => r),
     ]).then(([l, k, a, m]: any[]) => {
       setLabor((l as LaborRow[]) ?? [])
       setKpi((k as KpiRow[]) ?? [])
@@ -158,9 +156,8 @@ export default function ProductivityPage() {
       a.pRooms = km?.rooms_sold ?? 0
       a.pGuests = km?.guests ?? 0
     }
-    const cm = costMap[ym]  // T13: 勤怠×賃金からの自動算出値
+    const cm = costMap[ym]  // 派遣・その他の労働時間（mart_labor_cost_monthly）
     a.dispatchHours = cm?.spot_hours ?? 0
-    a.deemedPay = cm?.deemed_ot_excess_pay ?? 0
     return a
   }
 
@@ -169,7 +166,7 @@ export default function ProductivityPage() {
     for (const ym of months) {
       const a = aggOf(ym)
       out.laborCost += a.laborCost; out.plSales += a.plSales
-      out.dispatchHours += a.dispatchHours; out.deemedPay += a.deemedPay
+      out.dispatchHours += a.dispatchHours
       if (a.n) {
         out.workHours += a.workHours; out.overtime += a.overtime
         out.staffSum += a.staffSum; out.parttimeSum += a.parttimeSum; out.n += 1

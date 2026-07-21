@@ -127,6 +127,9 @@ export interface LaborCostMonthlyRow {
   facility?: string
   month: string
   labor_cost?: number | null
-  deemed_ot_excess_pay: number | null
+  regular_cost?: number | null
+  parttime_cost?: number | null
+  parttime_hours?: number | null
+  spot_cost?: number | null
   spot_hours: number | null
 }

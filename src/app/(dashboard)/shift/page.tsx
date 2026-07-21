@@ -5,7 +5,7 @@ import { useFacility } from '@/lib/facility-context'
 import { fmtNum, fmtYen } from '@/lib/ui'
 import { Loading, Empty } from '@/components/page-bits'
 import {
-  loadMasters, loadStaff, loadShiftMonth,
+  loadMasters, loadStaff, loadShiftMonth, loadLaborRate,
   saveShiftCell, deleteShiftCell, savePlanContext, saveSegments,
   createSpotStaff, saveSpotActual, deleteSpotActual,
   patternMinutes, segMinutes,
@@ -73,6 +73,7 @@ export default function ShiftPage() {
   const [spotWageKind, setSpotWageKind] = useState<'日当' | '時給'>('時給')
   const [spotWageAmount, setSpotWageAmount] = useState<number | ''>('')
   const [spotWageMap, setSpotWageMap] = useState<Record<string, SpotWage>>({})  // スポットの賃金(日当/時給)。計画行に保存し、置いたセルへ反映
+  const [laborRate, setLaborRate] = useState<number | null>(null)  // この宿のアルバイト標準時給（人件費モデルv2）
   // SV02 公開
   const [pubs, setPubs] = useState<Publication[]>([])
   const [publishing, setPublishing] = useState(false)
@@ -111,10 +112,10 @@ export default function ShiftPage() {
   const reload = useCallback(async () => {
     if (!current || !month) return
     setLoading(true); setMsg('')
-    const [{ roles, patterns }, st, mo] = await Promise.all([
-      loadMasters(current), loadStaff(current), loadShiftMonth(current, month),
+    const [{ roles, patterns }, st, mo, rate] = await Promise.all([
+      loadMasters(current), loadStaff(current), loadShiftMonth(current, month), loadLaborRate(current),
     ])
-    setRoles(roles); setPatterns(patterns); setStaff(st)
+    setRoles(roles); setPatterns(patterns); setStaff(st); setLaborRate(rate)
     const c: Record<string, Cell> = {}
     const swm: Record<string, SpotWage> = {}
     mo.plans.forEach((p) => {
@@ -427,20 +428,21 @@ export default function ShiftPage() {
   }, [cells, days, patMap])
   const dayTotal = (date: string) => { let min = 0; for (const s of staff) { const c = cells[ck(s.staff_code, date)]; if (c && c.patternId != null && patMap[c.patternId]?.pattern_type !== '休日') min += c.minutes } return min / 60 }
   const summary = useMemo(() => {
-    let totalH = 0, totalCost = 0, spotH = 0
+    // 人件費モデルv2の変動費: アルバイト=時間×宿の標準時給 / スポット=日当×日数 or 時給×時間。
+    // 正社員は月額固定（全社設定）なのでシフトからは算出しない。
+    let totalH = 0, varCost = 0, spotH = 0
     for (const s of staff) {
       const agg = rowAgg(s.staff_code); const hours = agg.hours; totalH += hours
       if (s.is_spot) {
         spotH += hours
         const sw = spotWageMap[s.staff_code]
-        if (sw) totalCost += sw.kind === '日当' ? sw.amount * agg.workDays : Math.round(hours * sw.amount)
-      } else if (s.wage_type === '月給' && s.monthly_salary && s.contracted_monthly_hours) {
-        const ot = Math.max(0, hours - s.contracted_monthly_hours - (s.deemed_ot_hours ?? 0))
-        totalCost += s.monthly_salary + Math.round(ot * (s.monthly_salary / s.contracted_monthly_hours) * 1.25)
-      } else if (s.hourly_wage) totalCost += Math.round(hours * s.hourly_wage)
+        if (sw) varCost += sw.kind === '日当' ? sw.amount * agg.workDays : Math.round(hours * sw.amount)
+      } else if (s.employment_type === 'アルバイト' && laborRate != null) {
+        varCost += Math.round(hours * laborRate)
+      }
     }
-    return { totalH, totalCost, spotH }
-  }, [staff, rowAgg, spotWageMap])
+    return { totalH, varCost, spotH }
+  }, [staff, rowAgg, spotWageMap, laborRate])
 
   const dirtyCount = dirtyCells.size + dirtyCtx.size
   const save = async () => {
@@ -596,7 +598,7 @@ export default function ShiftPage() {
                   )
                 })}
                 {staff.map((s, ri) => {
-                  const agg = rowAgg(s.staff_code); const tag = s.is_spot ? 'スポット' : (s.wage_type || '未設定')
+                  const agg = rowAgg(s.staff_code); const tag = s.is_spot ? 'スポット' : (s.employment_type || '未設定')
                   return (
                     <tr key={s.staff_code} style={s.is_spot ? { borderTop: '1px dashed var(--border)' } : undefined}>
                       <td className="px-2 h-12 whitespace-nowrap sticky left-0 z-10" style={{ background: 'var(--surface)', borderTop: '1px solid var(--border)', borderRight: '2px solid var(--border)' }}>
@@ -651,7 +653,7 @@ export default function ShiftPage() {
 
           <div className="grid grid-cols-3 gap-3 mt-4">
             <div className="card p-4"><div className="text-xs" style={{ color: 'var(--text-dim)' }}>月次 労働時間 合計</div><div className="text-xl font-bold">{fmtNum(summary.totalH)} h</div></div>
-            <div className="card p-4"><div className="text-xs" style={{ color: 'var(--text-dim)' }}>月次 人件費 合計（計画）</div><div className="text-xl font-bold">{staff.some((s) => s.wage_type != null || s.hourly_wage != null || s.monthly_salary != null) ? fmtYen(summary.totalCost) : '-'}</div>{!staff.some((s) => s.wage_type != null || s.hourly_wage != null || s.monthly_salary != null) && <div className="text-[10px] mt-0.5" style={{ color: 'var(--text-dim)' }}>給与閲覧権限または賃金設定が必要</div>}</div>
+            <div className="card p-4"><div className="text-xs" style={{ color: 'var(--text-dim)' }}>月次 変動人件費（計画）</div><div className="text-xl font-bold">{fmtYen(summary.varCost)}</div><div className="text-[10px] mt-0.5" style={{ color: 'var(--text-dim)' }}>アルバイト(時間×標準時給)＋スポット。正社員は全社設定の月額固定で別。</div></div>
             <div className="card p-4"><div className="text-xs" style={{ color: 'var(--text-dim)' }}>うち 派遣・その他 時間</div><div className="text-xl font-bold">{fmtNum(summary.spotH)} h</div></div>
           </div>
 
