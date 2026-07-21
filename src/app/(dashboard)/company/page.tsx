@@ -51,7 +51,8 @@ function MoneyCell({ t, cmp, higherBetter = true }: { t: Triple; cmp: Cmp; highe
   )
 }
 
-// 年度一覧のコンパクトセル: 実額 ＋ 差(vs選択・小)。sep=宿の区切り(左太線)、strong=年間行(上太線)
+// 年度一覧のコンパクトセル: 実額(=着地) ＋ 差(vs選択・小)。列幅は数字に合わせて固定。
+const AW = 82  // 年度一覧の1数値列の固定幅（宿名の長さに依らず統一）
 function AnnualCell({ t, cmp, higherBetter = true, sep = false, strong = false }: { t: Triple; cmp: Cmp; higherBetter?: boolean; sep?: boolean; strong?: boolean }) {
   const compVal = cmp === 'budget' ? t.bud : t.prior
   const r = rate(t.act, compVal)
@@ -59,7 +60,7 @@ function AnnualCell({ t, cmp, higherBetter = true, sep = false, strong = false }
   const diff = t.act != null && compVal != null ? t.act - compVal : null
   const rColor = r == null ? 'var(--text-dim)' : (r >= 1) === higherBetter ? 'var(--green)' : 'var(--red)'
   return (
-    <td className="px-2 py-1 text-right whitespace-nowrap align-top" style={{ background: heatBg(dev), borderTop: strong ? '2px solid var(--border)' : '1px solid var(--border)', borderLeft: sep ? '2px solid var(--border)' : undefined }}>
+    <td className="px-2 py-1 text-right whitespace-nowrap align-top overflow-hidden" style={{ width: AW, minWidth: AW, maxWidth: AW, background: heatBg(dev), borderTop: strong ? '2px solid var(--border)' : '1px solid var(--border)', borderLeft: sep ? '2px solid var(--border)' : undefined }}>
       <div className="text-[12px]">{t.act == null ? '—' : fmtMan(t.act)}</div>
       <div className="text-[9px] leading-none" style={{ color: rColor }}>{diff == null ? '' : `${signedMan(diff)}${r != null ? ` ${pct(r)}` : ''}`}</div>
     </td>
@@ -261,16 +262,16 @@ function AnnualTable({ annual, scope, cmp }: { annual: CompanyAnnual; scope: Sto
           <tr style={{ color: 'var(--text-dim)' }}>
             <th rowSpan={2} className="px-3 py-2 text-left whitespace-nowrap sticky left-0 top-0 z-30 align-bottom" style={{ background: 'var(--surface2)', borderRight: '2px solid var(--border)' }}>月</th>
             {facs.map((f) => (
-              <th key={f.facility} colSpan={2} className="px-2 py-2 text-center whitespace-nowrap sticky top-0 z-20" style={{ background: 'var(--surface2)', borderLeft: '2px solid var(--border)' }}>
-                {f.name}<span className="ml-1 text-[9px]" style={{ color: 'var(--text-dim)' }}>{CLS_LABEL[f.cls]}</span>
+              <th key={f.facility} colSpan={2} className="px-2 py-2 text-center sticky top-0 z-20" style={{ width: AW * 2, minWidth: AW * 2, maxWidth: AW * 2, background: 'var(--surface2)', borderLeft: '2px solid var(--border)' }}>
+                <div className="truncate" title={f.name}>{f.name}<span className="ml-1 text-[9px]" style={{ color: 'var(--text-dim)' }}>{CLS_LABEL[f.cls]}</span></div>
               </th>
             ))}
           </tr>
           <tr style={{ color: 'var(--text-dim)' }} className="text-[11px]">
             {facs.map((f) => (
               <Fragment key={f.facility}>
-                <th className="px-2 py-1 text-right whitespace-nowrap sticky z-20" style={{ top: 33, background: 'var(--surface2)', borderLeft: '2px solid var(--border)' }}>売上</th>
-                <th className="px-2 py-1 text-right whitespace-nowrap sticky z-20" style={{ top: 33, background: 'var(--surface2)' }}>営業利益</th>
+                <th className="px-2 py-1 text-right whitespace-nowrap sticky z-20" style={{ top: 33, width: AW, minWidth: AW, maxWidth: AW, background: 'var(--surface2)', borderLeft: '2px solid var(--border)' }}>売上</th>
+                <th className="px-2 py-1 text-right whitespace-nowrap sticky z-20" style={{ top: 33, width: AW, minWidth: AW, maxWidth: AW, background: 'var(--surface2)' }}>営業利益</th>
               </Fragment>
             ))}
           </tr>
@@ -328,8 +329,8 @@ export default function CompanyPage() {
   const [scope, setScope] = useState<StoreScope>('all')
   const [cmp, setCmp] = useState<Cmp>('budget')          // 比較の相手（予算/前年）
   const [viewMode, setViewMode] = useState<ViewMode>('month')
-  const [sortKey, setSortKey] = useState<string>('sales')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
+  const [sortKey, setSortKey] = useState<string>('order')  // 既定=宿の並び順（設定順）
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
   const [selected, setSelected] = useState<FacilityMetrics | null>(null)
@@ -418,8 +419,12 @@ export default function CompanyPage() {
   ], [cmp])
 
   const sortedRows = useMemo(() => {
-    const col = cols.find((c) => c.key === sortKey) ?? cols[0]
     const dir = sortDir === 'asc' ? 1 : -1
+    if (sortKey === 'order') {
+      // 宿の並び順（sortOrder）。rows は既に昇順なので方向だけ反映
+      return [...rows].sort((a, b) => ((a.sortOrder ?? 9e9) - (b.sortOrder ?? 9e9)) * dir)
+    }
+    const col = cols.find((c) => c.key === sortKey) ?? cols[0]
     return [...rows].sort((a, b) => {
       const va = col.sortVal(a), vb = col.sortVal(b)
       if (va == null && vb == null) return 0
@@ -431,7 +436,7 @@ export default function CompanyPage() {
 
   const clickSort = (key: string) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-    else { setSortKey(key); setSortDir(key === 'laborRatio' ? 'asc' : 'desc') }
+    else { setSortKey(key); setSortDir(key === 'laborRatio' || key === 'order' ? 'asc' : 'desc') }
   }
 
   const avgLaborRatio = agg?.laborRatio ?? null
@@ -494,10 +499,10 @@ export default function CompanyPage() {
         <>
           <div className="flex items-center justify-between mb-2">
             <div className="text-sm font-semibold">年度一覧（{fyNum}年度・{cmp === 'budget' ? '予算比' : '前年比'}）</div>
-            <div className="text-[11px]" style={{ color: 'var(--text-dim)' }}>縦=月／横=宿の売上・営業利益。各セル: 実績 ＋ {cmp === 'budget' ? '予算' : '前年'}との差/比（緑=上回り・赤=下回り）。</div>
+            <div className="text-[11px]" style={{ color: 'var(--text-dim)' }}>縦=月／横=宿の売上・営業利益。各セル: 着地 ＋ {cmp === 'budget' ? '予算' : '前年'}との差/比（緑=上回り・赤=下回り）。</div>
           </div>
           {annualLoading || !annual ? <Loading /> : <AnnualTable annual={annual} scope={scope} cmp={cmp} />}
-          <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>金額=万円。売上/営業利益は宿ごとにPL明細から再計算（予実ページと同一）。「比較」で予算/前年を切替えられます。</p>
+          <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>金額=万円。数値は<b>着地見込</b>（実績がある月は実績、未到来の月は見込があれば見込・無ければ予算）。売上/営業利益は宿ごとにPL明細から再計算（予実ページと同一）。「比較」で予算/前年を切替えられます。</p>
         </>
       ) : (
         /* 単月 */
@@ -539,7 +544,11 @@ export default function CompanyPage() {
             <table className="w-full text-sm border-separate" style={{ borderSpacing: 0 }}>
               <thead>
                 <tr style={{ color: 'var(--text-dim)' }}>
-                  <th className="px-3 py-2.5 text-left whitespace-nowrap sticky left-0 top-0 z-30" style={{ background: 'var(--surface2)', borderRight: '2px solid var(--border)' }}>宿</th>
+                  <th onClick={() => clickSort('order')}
+                    className="px-3 py-2.5 text-left whitespace-nowrap sticky left-0 top-0 z-30 cursor-pointer select-none"
+                    style={{ background: 'var(--surface2)', borderRight: '2px solid var(--border)' }}>
+                    宿{sortKey === 'order' && <span className="ml-0.5 text-[10px]">{sortDir === 'asc' ? '▲' : '▼'}</span>}
+                  </th>
                   {cols.map((c) => (
                     <th key={c.key} onClick={() => clickSort(c.key)}
                       className="px-2.5 py-2.5 text-right whitespace-nowrap sticky top-0 z-20 cursor-pointer select-none"

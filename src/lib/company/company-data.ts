@@ -28,6 +28,7 @@ export interface FacilityMetrics {
   name: string
   facilityType: string | null
   openingDate: string | null
+  sortOrder: number | null      // 全社ダッシュボードの表示順（dim_facility.sort_order）
   cls: FacilityClass
   // PL（施設ごとに pl-compute で算出）
   sales: Triple
@@ -71,7 +72,7 @@ export async function loadCompanyData(sb: SupabaseClient, targetMonth: string): 
   const monthList = [targetMonth, priorMonth]
 
   const [dimFac, dimProf, budget, actual, occ, kpi, labor, feedback, nps] = await Promise.all([
-    fetchAll(() => sb.from('dim_facility').select('facility, name, total_rooms, opening_date')),
+    fetchAll(() => sb.from('dim_facility').select('facility, name, total_rooms, opening_date, sort_order')),
     fetchAll(() => sb.from('dim_facility_profile').select('facility, facility_type')),
     fetchAll(() => sb.from('budget_monthly').select('facility, fiscal_year, month, category, item_code, item_name, amount, sort_order').in('fiscal_year', fyList).eq('version', '当初').order('id')),
     fetchAll(() => sb.from('actual_monthly').select('facility, fiscal_year, month, item_code, actual').in('fiscal_year', fyList).order('id')),
@@ -125,6 +126,7 @@ export async function loadCompanyData(sb: SupabaseClient, targetMonth: string): 
       name: f.name ?? f.facility,
       facilityType: profByFac.get(f.facility) ?? null,
       openingDate: f.opening_date ?? null,
+      sortOrder: num(f.sort_order),
       cls: classifyFacility(f.opening_date ?? null, targetMonth),
       sales: triple('sales_total'),
       operatingIncome: triple('operating_income'),
@@ -146,13 +148,22 @@ export async function loadCompanyData(sb: SupabaseClient, targetMonth: string): 
     }
   })
 
+  sortByOrder(facilities)
   return { targetMonth, priorMonth, facilities }
+}
+
+// 表示順: sort_order（未設定は末尾）→ 名前
+function sortByOrder<T extends { sortOrder?: number | null; name: string }>(arr: T[]): void {
+  arr.sort((a, b) => {
+    const sa = a.sortOrder ?? 9e9, sb = b.sortOrder ?? 9e9
+    return sa !== sb ? sa - sb : a.name.localeCompare(b.name, 'ja')
+  })
 }
 
 /* ===== 年度一覧（全宿×12ヶ月の売上・営業利益。実績/予算/前年） ===== */
 export interface AnnualCell { month: string; sales: Triple; oi: Triple }
 export interface FacilityAnnual {
-  facility: string; name: string; facilityType: string | null; cls: FacilityClass
+  facility: string; name: string; facilityType: string | null; cls: FacilityClass; sortOrder: number | null
   months: AnnualCell[]; totalSales: Triple; totalOi: Triple
 }
 export interface CompanyAnnual { fy: number; months: string[]; facilities: FacilityAnnual[] }
@@ -171,11 +182,13 @@ const sumT = (cells: AnnualCell[], pick: (c: AnnualCell) => Triple): Triple => {
 export async function loadCompanyAnnual(sb: SupabaseClient, fy: number): Promise<CompanyAnnual> {
   const fyList = [String(fy), String(fy - 1)]
   const months = fyMonths(fy)
-  const [dimFac, dimProf, budget, actual] = await Promise.all([
-    fetchAll(() => sb.from('dim_facility').select('facility, name, opening_date')),
+  const [dimFac, dimProf, budget, actual, forecast] = await Promise.all([
+    fetchAll(() => sb.from('dim_facility').select('facility, name, opening_date, sort_order')),
     fetchAll(() => sb.from('dim_facility_profile').select('facility, facility_type')),
     fetchAll(() => sb.from('budget_monthly').select('facility, fiscal_year, month, item_code, amount, sort_order').in('fiscal_year', fyList).eq('version', '当初').order('id')),
     fetchAll(() => sb.from('actual_monthly').select('facility, fiscal_year, month, item_code, actual').in('fiscal_year', fyList).order('id')),
+    // 見込(着地): 当年度の version like '見込%'。version 昇順で最新が上書きされる（実績＞見込＞予算）
+    fetchAll(() => sb.from('budget_monthly').select('facility, fiscal_year, month, item_code, amount').eq('fiscal_year', String(fy)).like('version', '見込%').order('version')),
   ])
   /* eslint-disable @typescript-eslint/no-explicit-any */
   const profByFac = new Map<string, string | null>()
@@ -184,23 +197,28 @@ export async function loadCompanyAnnual(sb: SupabaseClient, fy: number): Promise
   ;((budget as any[]) ?? []).forEach((r) => { const a = budByFac.get(r.facility) ?? []; a.push(r); budByFac.set(r.facility, a) })
   const actByFac = new Map<string, ActualRow[]>()
   ;((actual as any[]) ?? []).forEach((r) => { const a = actByFac.get(r.facility) ?? []; a.push(r); actByFac.set(r.facility, a) })
+  const foreByFac = new Map<string, BudgetRow[]>()
+  ;((forecast as any[]) ?? []).forEach((r) => { const a = foreByFac.get(r.facility) ?? []; a.push(r); foreByFac.set(r.facility, a) })
   const lastMonth = months[months.length - 1]
 
   const facilities: FacilityAnnual[] = ((dimFac as any[]) ?? []).map((f) => {
     const facBud = budByFac.get(f.facility) ?? []
     const facAct = actByFac.get(f.facility) ?? []
-    const R = makePlResolver({ budget: facBud, actual: facAct, fy: String(fy) })
+    const facFore = foreByFac.get(f.facility) ?? []
+    const R = makePlResolver({ budget: facBud, actual: facAct, forecast: facFore, fy: String(fy) })
     const hasBudget = facBud.some((b) => b.fiscal_year === String(fy))
+    // act = 着地(実績＞見込＞予算) / bud = 予算 / prior = 前年実績
     const tri = (code: string, m: string): Triple => hasBudget
-      ? { act: R.getActual(code, m), bud: R.getBudget(code, m), prior: R.getActual(code, priorYM(m)) }
+      ? { act: R.landingFor(code, m), bud: R.getBudget(code, m), prior: R.getActual(code, priorYM(m)) }
       : { act: null, bud: null, prior: null }
     const cells: AnnualCell[] = months.map((m) => ({ month: m, sales: tri('sales_total', m), oi: tri('operating_income', m) }))
     return {
       facility: f.facility, name: f.name ?? f.facility, facilityType: profByFac.get(f.facility) ?? null,
-      cls: classifyFacility(f.opening_date ?? null, lastMonth), months: cells,
+      sortOrder: num(f.sort_order), cls: classifyFacility(f.opening_date ?? null, lastMonth), months: cells,
       totalSales: sumT(cells, (c) => c.sales), totalOi: sumT(cells, (c) => c.oi),
     }
   })
+  sortByOrder(facilities)
   return { fy, months, facilities }
 }
 
