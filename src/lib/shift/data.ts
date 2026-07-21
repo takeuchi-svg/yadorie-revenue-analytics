@@ -48,6 +48,7 @@ export interface PlanContext {
   onhand_rooms?: number | null
   forecast_rooms?: number | null
   memo?: string | null
+  is_closed?: boolean | null   // 休館日（列をグレー表示。旧館出勤等の記入は可能）
 }
 export interface StaffLite {
   staff_code: string
@@ -210,7 +211,7 @@ export async function loadShiftMonth(facility: string, month: string): Promise<{
     segments.sort((a, b) => ((a.shift_id ?? 0) - (b.shift_id ?? 0)) || (a.seq - b.seq))
   }
   const ctxRes = await supabase.from('mart_daily_plan_context')
-    .select('facility, work_date, budget_rooms, budget_guests, onhand_rooms, forecast_rooms, memo')
+    .select('facility, work_date, budget_rooms, budget_guests, onhand_rooms, forecast_rooms, memo, is_closed')
     .eq('facility', facility).gte('work_date', start).lte('work_date', end)
   return { plans, segments, context: (ctxRes.data as PlanContext[]) ?? [] }
 }
@@ -258,7 +259,7 @@ export async function saveSegments(shift_id: number, segments: ShiftSegment[]): 
 }
 
 // 稼働前提（オンハンド/予測/メモ）の保存
-export async function savePlanContext(facility: string, work_date: string, patch: { onhand_rooms?: number | null; forecast_rooms?: number | null; memo?: string | null }): Promise<void> {
+export async function savePlanContext(facility: string, work_date: string, patch: { onhand_rooms?: number | null; forecast_rooms?: number | null; memo?: string | null; is_closed?: boolean | null }): Promise<void> {
   const { error } = await supabase.from('raw_daily_plan_context')
     .upsert({ facility, work_date, ...patch, updated_at: new Date().toISOString() }, { onConflict: 'facility,work_date' })
   if (error) throw error

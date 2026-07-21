@@ -100,7 +100,7 @@ export default function ShiftPatternAdmin() {
           <thead>
             <tr className="text-left" style={{ color: 'var(--text-dim)' }}>
               <th className="px-2 py-2">種別</th><th className="px-2 py-2">名称</th><th className="px-2 py-2">開始</th><th className="px-2 py-2">終了</th>
-              <th className="px-2 py-2 text-right">休憩(分)</th><th className="px-2 py-2">既定の役割</th><th className="px-2 py-2 text-center">有給</th>
+              <th className="px-2 py-2 text-right">休憩(分)</th><th className="px-2 py-2">既定の役割<span className="ml-0.5 text-[10px]" style={{ color: 'var(--text-dim)' }}>（任意）</span></th><th className="px-2 py-2 text-center">有給</th>
               <th className="px-2 py-2">色</th><th className="px-2 py-2 text-right">表示順</th><th className="px-2 py-2 text-center">有効</th><th className="px-2 py-2"></th>
             </tr>
           </thead>
@@ -112,7 +112,7 @@ export default function ShiftPatternAdmin() {
                 <td className="px-1 py-1"><input type="time" className={`${inp} w-24`} value={r.start_time} onChange={(e) => setCell(i, 'start_time', e.target.value)} /></td>
                 <td className="px-1 py-1"><input type="time" className={`${inp} w-24`} value={r.end_time} onChange={(e) => setCell(i, 'end_time', e.target.value)} /></td>
                 <td className="px-1 py-1 text-right"><input type="number" min={0} className={`${inp} w-16 text-right`} value={r.break_minutes} onChange={(e) => setCell(i, 'break_minutes', e.target.value)} /></td>
-                <td className="px-1 py-1"><select className={`${inp} w-28`} value={r.default_role_id} onChange={(e) => setCell(i, 'default_role_id', e.target.value)}><option value="">—</option>{roles.map((rl) => <option key={rl.role_id} value={rl.role_id}>{rl.role_name}</option>)}</select></td>
+                <td className="px-1 py-1"><select className={`${inp} w-28`} value={r.default_role_id} onChange={(e) => setCell(i, 'default_role_id', e.target.value)}><option value="">（任意・未設定）</option>{roles.map((rl) => <option key={rl.role_id} value={rl.role_id}>{rl.role_name}</option>)}</select></td>
                 <td className="px-1 py-1 text-center"><input type="checkbox" checked={r.is_paid} onChange={(e) => setCell(i, 'is_paid', e.target.checked)} /></td>
                 <td className="px-1 py-1"><input type="color" className="w-8 h-7 p-0 border rounded" style={{ borderColor: 'var(--border)' }} value={r.color} onChange={(e) => setCell(i, 'color', e.target.value)} /></td>
                 <td className="px-1 py-1 text-right"><input type="number" className={`${inp} w-14 text-right`} value={r.sort_order} onChange={(e) => setCell(i, 'sort_order', e.target.value)} /></td>

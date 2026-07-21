@@ -18,6 +18,18 @@ type Cell = { patternId: number | null; minutes: number; shiftId?: number }
 const WD = ['日', '月', '火', '水', '木', '金', '土']
 const ck = (staff: string, date: string) => `${staff}|${date}`
 
+// 日本の祝日（2025〜2027・振替/国民の休日含む）。土=青・日/祝=赤の表示用。
+const JP_HOLIDAYS = new Set<string>([
+  // 2025
+  '2025-01-01','2025-01-13','2025-02-11','2025-02-23','2025-02-24','2025-03-20','2025-04-29','2025-05-03','2025-05-04','2025-05-05','2025-05-06','2025-07-21','2025-08-11','2025-09-15','2025-09-23','2025-10-13','2025-11-03','2025-11-23','2025-11-24',
+  // 2026
+  '2026-01-01','2026-01-12','2026-02-11','2026-02-23','2026-03-20','2026-04-29','2026-05-03','2026-05-04','2026-05-05','2026-05-06','2026-07-20','2026-08-11','2026-09-21','2026-09-22','2026-09-23','2026-10-12','2026-11-03','2026-11-23',
+  // 2027
+  '2027-01-01','2027-01-11','2027-02-11','2027-02-23','2027-03-21','2027-03-22','2027-04-29','2027-05-03','2027-05-04','2027-05-05','2027-07-19','2027-08-11','2027-09-20','2027-09-23','2027-10-11','2027-11-03','2027-11-23',
+])
+// 日付ヘッダの色: 日/祝=赤・土=青・平日=淡色
+const dateColor = (date: string, wd: number) => (wd === 0 || JP_HOLIDAYS.has(date)) ? 'var(--red)' : wd === 6 ? '#378ADD' : 'var(--text-dim)'
+
 function daysOfMonth(month: string): { date: string; day: number; wd: number }[] {
   if (!month) return []
   const y = +month.slice(0, 4), m = +month.slice(5, 7)
@@ -74,6 +86,7 @@ export default function ShiftPage() {
   const [spotWageAmount, setSpotWageAmount] = useState<number | ''>('')
   const [spotWageMap, setSpotWageMap] = useState<Record<string, SpotWage>>({})  // スポットの賃金(日当/時給)。計画行に保存し、置いたセルへ反映
   const [laborRate, setLaborRate] = useState<number | null>(null)  // この宿のアルバイト標準時給（人件費モデルv2）
+  const [paperSize, setPaperSize] = useState<'A3' | 'A4'>('A3')  // PDF/印刷の用紙（張り出し=A3横が既定）
   // SV02 公開
   const [pubs, setPubs] = useState<Publication[]>([])
   const [publishing, setPublishing] = useState(false)
@@ -140,16 +153,16 @@ export default function ShiftPage() {
     if (!current || !month) return
     const isFirst = pubs.length === 0
     const ok = confirm(isFirst
-      ? `${month} のシフトを公開します。\nこの月の「月初版（基準計画）」として記録されます（予実分析の基準になります）。`
-      : `${month} のシフトを再公開します。\n月初版は変更されません（再公開履歴として残ります）。`)
+      ? `${month} を「月初版（基準計画）」として記録します。\n予実分析の基準になります。`
+      : `${month} の基準を再記録します。\n月初版は変更されません（再記録の履歴として残ります）。`)
     if (!ok) return
-    if (dirtyCount > 0) { const s = confirm('未保存の変更があります。先に保存してから公開しますか？'); if (s) { await save() } }
+    if (dirtyCount > 0) { const s = confirm('未保存の変更があります。先に保存してから記録しますか？'); if (s) { await save() } }
     setPublishing(true); setMsg('')
     const { id, error } = await publishShiftPlan(current, month)
     setPublishing(false)
-    if (error || id == null) { setMsg('Error: 公開に失敗しました' + (error ? `（${error}）` : '')); return }
+    if (error || id == null) { setMsg('Error: 記録に失敗しました' + (error ? `（${error}）` : '')); return }
     setPubs(await loadPublications(current, month))
-    setMsg(isFirst ? `${month} を公開しました（月初版として記録）` : `${month} を再公開しました`)
+    setMsg(isFirst ? `${month} を月初版として記録しました` : `${month} の基準を再記録しました`)
   }
 
   const setCell = (staff: string, date: string, patch: Partial<Cell>) => {
@@ -460,7 +473,7 @@ export default function ShiftPage() {
           if (isSpot) await saveSpotActual(sc, current, date, c.minutes)
         }
       }
-      for (const date of dirtyCtx) { const r = ctx[date]; await savePlanContext(current, date, { onhand_rooms: r?.onhand_rooms ?? null, forecast_rooms: r?.forecast_rooms ?? null, memo: r?.memo ?? null }) }
+      for (const date of dirtyCtx) { const r = ctx[date]; await savePlanContext(current, date, { onhand_rooms: r?.onhand_rooms ?? null, forecast_rooms: r?.forecast_rooms ?? null, memo: r?.memo ?? null, is_closed: r?.is_closed ?? false }) }
       const nc = dirtyCells.size, nx = dirtyCtx.size
       await reload(); setMsg(`保存しました（シフト${nc}件・稼働前提${nx}件）`)
     } catch (e: any) { setMsg('Error: ' + (e?.message ?? String(e))) }
@@ -477,13 +490,15 @@ export default function ShiftPage() {
   }, [])
 
   const patOptions = useMemo(() => ({ work: patterns.filter((p) => p.pattern_type === '勤務'), off: patterns.filter((p) => p.pattern_type === '休日') }), [patterns])
-  const wdColor = (wd: number) => (wd === 0 ? 'var(--red)' : wd === 6 ? 'var(--accent)' : 'var(--text-dim)')
+  const isClosed = (date: string) => !!ctx[date]?.is_closed
+  const toggleClosed = (date: string) => setCtxField(date, { is_closed: !ctx[date]?.is_closed })
+  const CLOSED_BG = '#e6e4df'  // 休館列の薄いグレー
   const btnGhost = 'px-3 py-1.5 text-xs rounded-md hover:opacity-80'
 
   return (
     <div className="p-6">
-      {/* 印刷/PDF: シフト表だけを横向きで出力（張り出し用） */}
-      <style>{`@media print { body * { visibility: hidden !important; } .shift-print, .shift-print * { visibility: visible !important; } .shift-print { position: absolute !important; left: 0; top: 0; width: auto !important; max-height: none !important; overflow: visible !important; box-shadow: none !important; } .shift-print table { zoom: 1 !important; } @page { size: A4 landscape; margin: 8mm; } }`}</style>
+      {/* 印刷/PDF: シフト表だけを横向きで出力（張り出し用・A3/A4横） */}
+      <style>{`.shift-print-title { display: none; } @media print { body * { visibility: hidden !important; } .shift-print, .shift-print * { visibility: visible !important; } .shift-print { position: absolute !important; left: 0; top: 0; width: auto !important; max-height: none !important; overflow: visible !important; box-shadow: none !important; } .shift-print table { zoom: 1 !important; } .shift-print-title { display: block !important; font-size: 15px; font-weight: 700; margin-bottom: 6px; } @page { size: ${paperSize} landscape; margin: 8mm; } }`}</style>
       <div className="flex items-end justify-between mb-4 flex-wrap gap-3">
         <div className="flex items-center gap-2 flex-wrap">
           <input type="month" className="field px-3 py-1.5 text-sm" value={month} onChange={(e) => setMonth(e.target.value)} />
@@ -492,7 +507,12 @@ export default function ShiftPage() {
             <button onClick={() => setZoom((z) => Math.min(2, +(z + 0.1).toFixed(2)))} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }} title="文字を大きく">A+</button>
           </div>
           <button onClick={enterFull} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>全画面</button>
-          <button onClick={printShift} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>PDF/印刷</button>
+          <div className="flex items-center rounded-md overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+            <button onClick={printShift} className="px-3 py-1.5 text-xs hover:opacity-80" style={{ color: 'var(--text-dim)' }}>PDF/印刷</button>
+            {(['A3', 'A4'] as const).map((sz) => (
+              <button key={sz} onClick={() => setPaperSize(sz)} className="px-2 py-1.5 text-[11px]" style={{ borderLeft: '1px solid var(--border)', background: paperSize === sz ? 'var(--accent)' : 'var(--surface)', color: paperSize === sz ? '#fff' : 'var(--text-dim)' }} title={`${sz}横で出力`}>{sz}</button>
+            ))}
+          </div>
           <button onClick={copyPrevMonth} disabled={saving} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>前月コピー</button>
           <button onClick={() => setSpotOpen(true)} className={btnGhost} style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>スポット追加</button>
           {copyBuf && <button onClick={doPaste} className={btnGhost} style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>貼付（{copyBuf.rows === 1 && copyBuf.cols === 1 && sel.size ? `${sel.size}セル` : `${copyBuf.rows}×${copyBuf.cols}`}）</button>}
@@ -501,8 +521,8 @@ export default function ShiftPage() {
             {saving ? '保存中...' : dirtyCount > 0 ? `保存（${dirtyCount}）` : '保存'}
           </button>
           <button onClick={doPublish} disabled={publishing || loading} className="px-4 py-1.5 text-sm rounded-md hover:opacity-90 disabled:opacity-40"
-            style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }} title="スタッフへ提示＝予実分析の基準として記録">
-            {publishing ? '公開中…' : pubs.length ? '再公開' : '公開'}
+            style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }} title="この月の月初版＝予実分析の基準として記録します">
+            {publishing ? '記録中…' : pubs.length ? '基準を再記録' : '月初版を記録'}
           </button>
         </div>
       </div>
@@ -511,12 +531,12 @@ export default function ShiftPage() {
       {!loading && staff.length > 0 && (
         <div className="flex items-center gap-2 mb-2 text-[11px] flex-wrap" style={{ color: 'var(--text-dim)' }}>
           {pubs.length === 0 ? (
-            <span>未公開（「公開」でスタッフへ提示＝この月の月初版として記録されます）</span>
+            <span>月初版 未記録（「月初版を記録」でこの月の基準計画として保存されます＝予実分析の基準）</span>
           ) : (
             <>
-              <span className="px-2 py-0.5 rounded" style={{ background: 'var(--surface2)' }}>公開済 {pubs.length}回</span>
+              <span className="px-2 py-0.5 rounded" style={{ background: 'var(--surface2)' }}>記録 {pubs.length}回</span>
               <span>月初版: {new Date(pubs[pubs.length - 1].published_at).toLocaleString('ja-JP')}</span>
-              <span>／ 最終公開: {new Date(pubs[0].published_at).toLocaleString('ja-JP')}</span>
+              <span>／ 最終記録: {new Date(pubs[0].published_at).toLocaleString('ja-JP')}</span>
             </>
           )}
         </div>
@@ -555,21 +575,27 @@ export default function ShiftPage() {
 
           {/* 月グリッド */}
           <div className="card overflow-auto shift-print" style={{ maxHeight: fullscreen ? 'calc(100vh - 110px)' : 'calc(100vh - 280px)' }}>
+            <div className="shift-print-title">{currentFacility?.name ?? current} 　{month} シフト表</div>
             <table className="text-xs border-separate" style={{ borderSpacing: 0, zoom }}>
               <thead>
                 <tr>
                   <th className="px-2 h-12 text-left whitespace-nowrap sticky left-0 top-0 z-30" style={{ minWidth: 150, background: 'var(--surface2)', borderRight: '2px solid var(--border)' }} />
-                  {days.map((d) => (
-                    <th key={d.date} className="px-1 h-12 text-center whitespace-nowrap sticky top-0 z-20 group relative" style={{ minWidth: 58, background: 'var(--surface2)' }}>
+                  {days.map((d) => {
+                    const closed = isClosed(d.date)
+                    return (
+                    <th key={d.date} className="px-1 h-12 text-center whitespace-nowrap sticky top-0 z-20 group relative" style={{ minWidth: 58, background: closed ? CLOSED_BG : 'var(--surface2)' }}>
                       <div onClick={() => setGanttDate(d.date)} className="cursor-pointer hover:opacity-80" title="クリックでこの日のシフトをガント表示">
-                        <div>{d.day}</div><div style={{ fontSize: 10, color: wdColor(d.wd) }}>{WD[d.wd]}</div>
+                        <div style={{ color: dateColor(d.date, d.wd) }}>{d.day}</div><div style={{ fontSize: 10, color: dateColor(d.date, d.wd) }}>{WD[d.wd]}</div>
                       </div>
+                      {closed && <div className="text-[8px] leading-none" style={{ color: 'var(--text-dim)' }}>休館</div>}
                       <div className="absolute left-0 right-0 hidden group-hover:flex justify-center gap-0.5 z-40" style={{ bottom: 1 }}>
+                        <button onClick={(e) => { e.stopPropagation(); toggleClosed(d.date) }} className="text-[9px] leading-none px-1 py-0.5 rounded" style={{ border: `1px solid ${closed ? 'var(--accent)' : 'var(--border)'}`, background: 'var(--surface)', color: closed ? 'var(--accent)' : 'var(--text-dim)' }} title={closed ? '休館を解除' : 'この日を休館にする'}>{closed ? '開' : '休'}</button>
                         <button onClick={(e) => { e.stopPropagation(); copyDay(d.date) }} className="text-[9px] leading-none px-1 py-0.5 rounded" style={{ border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-dim)' }} title="この日の全員をコピー">コ</button>
                         {dayBuf && <button onClick={(e) => { e.stopPropagation(); pasteDay(d.date) }} className="text-[9px] leading-none px-1 py-0.5 rounded" style={{ border: '1px solid var(--accent)', background: 'var(--surface)', color: 'var(--accent)' }} title={`${dayBufDate} の1日分をここに貼付`}>貼</button>}
                       </div>
                     </th>
-                  ))}
+                    )
+                  })}
                   <th className="px-1 h-12 text-center sticky top-0 z-20" style={{ minWidth: 52, background: 'var(--surface)', borderLeft: '2px solid var(--border)' }}>時間計</th>
                   <th className="px-1 h-12 text-center sticky top-0 z-20" style={{ minWidth: 40, background: 'var(--surface)' }}>休日</th>
                 </tr>
@@ -584,7 +610,7 @@ export default function ShiftPage() {
                     <tr key={kind}>
                       <td className="px-2 whitespace-nowrap sticky left-0 z-30" style={{ top, height: 20, minWidth: 150, background: bg, color: 'var(--text-dim)', fontSize: 11, fontWeight: 600, borderRight: '2px solid var(--border)', borderBottom: bb }}>{label}</td>
                       {days.map((d) => { const r = ctx[d.date]; return (
-                        <td key={d.date} className="px-0.5 sticky z-20 text-center" style={{ top, height: 20, minWidth: 58, background: bg, borderBottom: bb, fontVariantNumeric: 'tabular-nums' }}>
+                        <td key={d.date} className="px-0.5 sticky z-20 text-center" style={{ top, height: 20, minWidth: 58, background: isClosed(d.date) ? CLOSED_BG : bg, borderBottom: bb, fontVariantNumeric: 'tabular-nums' }}>
                           {kind === 'budget' ? (<span style={{ fontSize: 11 }}>{r?.budget_rooms ?? '-'}<span style={{ fontSize: 9, color: 'var(--text-dim)' }}>{r?.budget_guests != null ? ` / ${r.budget_guests}` : ''}</span></span>)
                           : kind === 'memo' ? (<input className="field text-center" style={{ width: 46, fontSize: 10, padding: '1px 2px' }} value={r?.memo ?? ''}
                               onChange={(e) => setCtxField(d.date, { memo: e.target.value })}
@@ -619,7 +645,7 @@ export default function ShiftPage() {
                             }}
                             onMouseEnter={() => { if (paintingRef.current && paintBrush !== null) applyBrush(s.staff_code, d.date) }}
                             onDoubleClick={() => isWork && openSegEditor(s.staff_code, d.date)}
-                            style={{ borderTop: '1px solid var(--border)', background: p?.color ? `${p.color}12` : undefined, boxShadow: selected ? 'inset 0 0 0 2px var(--accent)' : undefined }}>
+                            style={{ borderTop: '1px solid var(--border)', background: isClosed(d.date) ? CLOSED_BG : (p?.color ? `${p.color}12` : undefined), boxShadow: selected ? 'inset 0 0 0 2px var(--accent)' : undefined }}>
                             <select className="w-full text-[12px] rounded font-medium" style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: p?.color || 'var(--text)' }}
                               value={c?.patternId ?? ''} onFocus={() => { anchorRef.current = { r: ri, d: di } }} onChange={(e) => onPattern(s.staff_code, d.date, e.target.value)}>
                               <option value="">－</option>
@@ -644,7 +670,7 @@ export default function ShiftPage() {
                 })}
                 <tr>
                   <td className="px-2 h-9 text-right whitespace-nowrap sticky left-0 z-10 font-semibold" style={{ background: 'var(--surface2)', borderTop: '2px solid var(--border)', borderRight: '2px solid var(--border)', color: 'var(--text-dim)' }}>日別 予定合計</td>
-                  {days.map((d) => <td key={d.date} className="px-1 h-9 text-center" style={{ background: 'var(--surface2)', borderTop: '2px solid var(--border)' }}>{dayTotal(d.date).toFixed(1)}</td>)}
+                  {days.map((d) => <td key={d.date} className="px-1 h-9 text-center" style={{ background: isClosed(d.date) ? CLOSED_BG : 'var(--surface2)', borderTop: '2px solid var(--border)' }}>{dayTotal(d.date).toFixed(1)}</td>)}
                   <td style={{ background: 'var(--surface2)', borderTop: '2px solid var(--border)', borderLeft: '2px solid var(--border)' }} /><td style={{ background: 'var(--surface2)', borderTop: '2px solid var(--border)' }} />
                 </tr>
               </tbody>
