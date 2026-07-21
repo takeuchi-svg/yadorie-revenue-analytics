@@ -3,6 +3,7 @@
 // 各宿設定（各宿モード）。この宿だけの設定。第一弾＝シフトパターン管理。
 // 全社横断の設定（賃金・宿タイプ・ユーザー）は「全社設定」(/company-settings)へ。
 import { useFacility } from '@/lib/facility-context'
+import StaffAdmin from '@/components/staff-admin'
 import ShiftPatternAdmin from '@/components/shift-pattern-admin'
 import LaborStandardAdmin from '@/components/labor-standard-admin'
 
@@ -15,6 +16,7 @@ export default function SettingsPage() {
         <h1 className="text-lg font-semibold">各宿設定{currentFacility?.name ? `（${currentFacility.name}）` : ''}</h1>
         <p className="text-xs mt-0.5" style={{ color: 'var(--text-dim)' }}>この宿だけの設定。全社横断（賃金・宿タイプ・ユーザー）は全社設定へ。</p>
       </div>
+      <StaffAdmin />
       <ShiftPatternAdmin />
       <LaborStandardAdmin />
     </div>

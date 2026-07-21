@@ -140,6 +140,64 @@ export async function loadStaff(facility: string): Promise<StaffLite[]> {
   return staff
 }
 
+/* ===== 人件費モデルv2: 従業員マスタ手動編集 / アルバイト標準時給 / 正社員月額 ===== */
+export type EmpType = '正社員' | 'アルバイト' | 'スポット'
+export interface StaffRow { staff_code: string; name: string | null; employment_type: string | null; is_spot: boolean | null; source: string | null }
+
+export async function loadStaffRoster(facility: string): Promise<StaffRow[]> {
+  const { data } = await supabase.from('dim_staff')
+    .select('staff_code, name, employment_type, is_spot, source')
+    .eq('home_facility', facility).order('employment_type').order('name')
+  return (data as StaffRow[]) ?? []
+}
+// 手動追加（各宿設定）。staff_code は勤怠(KOT)コードが分かれば入力、空なら自動採番。
+export async function addStaff(facility: string, p: { name: string; employment_type: EmpType; staff_code?: string }): Promise<{ error?: string }> {
+  const code = (p.staff_code?.trim()) || `M${Date.now().toString(36)}${Math.floor(Math.random() * 1000)}`
+  const { error } = await supabase.from('dim_staff').insert({
+    staff_code: code, name: p.name.trim(), home_facility: facility,
+    employment_type: p.employment_type, is_spot: p.employment_type === 'スポット',
+    is_monthly_salary: p.employment_type === '正社員', source: 'manual',
+  })
+  return { error: error?.message }
+}
+export async function updateStaff(staff_code: string, patch: { name?: string; employment_type?: EmpType }): Promise<{ error?: string }> {
+  const upd: Record<string, unknown> = { updated_at: new Date().toISOString() }
+  if (patch.name != null) upd.name = patch.name.trim()
+  if (patch.employment_type != null) {
+    upd.employment_type = patch.employment_type
+    upd.is_spot = patch.employment_type === 'スポット'
+    upd.is_monthly_salary = patch.employment_type === '正社員'
+  }
+  const { error } = await supabase.from('dim_staff').update(upd).eq('staff_code', staff_code)
+  return { error: error?.message }
+}
+export async function deleteStaff(staff_code: string): Promise<{ error?: string }> {
+  const { error } = await supabase.from('dim_staff').delete().eq('staff_code', staff_code)
+  return { error: error?.message }  // シフト/勤怠がある従業員はFKで拒否される（エラー文言を表示）
+}
+
+export async function loadLaborRate(facility: string): Promise<number | null> {
+  const { data } = await supabase.from('dim_labor_rate').select('hourly_wage').eq('facility', facility).maybeSingle()
+  return (data?.hourly_wage as number | null) ?? null
+}
+export async function saveLaborRate(facility: string, hourly: number | null): Promise<{ error?: string }> {
+  const { error } = await supabase.from('dim_labor_rate')
+    .upsert({ facility, hourly_wage: hourly, updated_at: new Date().toISOString() }, { onConflict: 'facility' })
+  return { error: error?.message }
+}
+
+export interface RegularLaborRow { facility: string; month: string; amount: number | null }
+export async function loadRegularLabor(facility: string): Promise<RegularLaborRow[]> {
+  const { data } = await supabase.from('raw_regular_labor_monthly')
+    .select('facility, month, amount').eq('facility', facility).order('month')
+  return (data as RegularLaborRow[]) ?? []
+}
+export async function saveRegularLabor(facility: string, month: string, amount: number | null): Promise<{ error?: string }> {
+  const { error } = await supabase.from('raw_regular_labor_monthly')
+    .upsert({ facility, month, amount, updated_at: new Date().toISOString() }, { onConflict: 'facility,month' })
+  return { error: error?.message }
+}
+
 // 施設×月のシフト計画・セグメント・稼働前提を一括ロード
 export async function loadShiftMonth(facility: string, month: string): Promise<{
   plans: ShiftPlan[]; segments: ShiftSegment[]; context: PlanContext[]
