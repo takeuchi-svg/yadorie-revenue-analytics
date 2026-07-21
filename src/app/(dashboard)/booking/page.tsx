@@ -45,14 +45,15 @@ export default function BookingPage() {
   const [curve, setCurve] = useState<CurveRow[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
-  const [view, setView] = useState<'stack' | 'yoy' | 'curve'>('stack')
+  const [view, setView] = useState<'flow' | 'curve'>('flow')
   const [initMonth, setInitMonth] = useState('')
 
-  // 売上状況からのリンク対応: /booking?tab=curve&month=YYYY-MM
+  // 売上状況からのリンク対応: /booking?tab=curve&month=YYYY-MM（stack/yoy は統合タブ flow へ）
   useEffect(() => {
     const sp = new URLSearchParams(window.location.search)
     const t = sp.get('tab'); const m = sp.get('month')
-    if (t === 'stack' || t === 'yoy' || t === 'curve') setView(t)
+    if (t === 'curve') setView('curve')
+    else if (t === 'stack' || t === 'yoy' || t === 'flow') setView('flow')
     if (m && /^\d{4}-\d{2}$/.test(m)) setInitMonth(m)
   }, [])
 
@@ -79,7 +80,7 @@ export default function BookingPage() {
   return (
     <div className="p-6">
       <div className="flex rounded-md overflow-hidden mb-4 w-fit" style={{ border: '1px solid var(--border)' }}>
-        {([['stack', '予約日ベース積み上げ'], ['yoy', '前年同月比較'], ['curve', 'ブッキングカーブ']] as const).map(([v, l]) => (
+        {([['flow', '予約日ベース分析'], ['curve', 'ブッキングカーブ']] as const).map(([v, l]) => (
           <button key={v} onClick={() => setView(v)} className="px-4 py-1.5 text-xs font-medium"
             style={{ background: view === v ? 'var(--accent)' : 'var(--surface)', color: view === v ? '#fff' : 'var(--text-dim)' }}>{l}</button>
         ))}
@@ -87,9 +88,21 @@ export default function BookingPage() {
 
       {loading ? <Loading /> : loadError ? <LoadError message={loadError} /> : flow.length === 0 && (curve?.length ?? 0) === 0 ? (
         <Empty message="予約情報CSV（全ステータス）を /upload から取り込むと、予約日ベースの動きが表示されます。" />
-      ) : view === 'stack' ? <StackView flow={flow} actions={actions} />
-        : view === 'yoy' ? <YoyView flow={flow} actions={actions} />
-        : <CurveView curve={curve} initialMonth={initMonth} />}
+      ) : view === 'flow' ? (
+        <>
+          {/* 上=積み上げグラフ（下の選択はグラフのみに効く） */}
+          <div className="flex items-baseline gap-2 mb-2">
+            <h2 className="text-sm font-semibold">積み上げグラフ（予約日ベース）</h2>
+            <span className="text-[10px]" style={{ color: 'var(--text-dim)' }}>下の「月別/日別・件数/室泊/金額」はこのグラフのみに反映</span>
+          </div>
+          <StackView flow={flow} actions={actions} />
+          {/* 下=前年同月比較の表 */}
+          <div className="mt-8 mb-2">
+            <h2 className="text-sm font-semibold">前年同月比較（予約日ベースの表）</h2>
+          </div>
+          <YoyView flow={flow} actions={actions} />
+        </>
+      ) : <CurveView curve={curve} initialMonth={initMonth} />}
     </div>
   )
 }
@@ -232,6 +245,23 @@ function YoyView({ flow, actions }: { flow: FlowRow[]; actions: Action[] }) {
   const totalOf = (mon: string) => Object.values(byMonthChannel[mon] ?? {}).reduce((s, v) => s + v, 0)
   const months = useMemo(() => Object.keys(byMonthChannel).filter((mon) => totalOf(mon) > 0).sort().reverse(), [byMonthChannel])  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 進行中の当月だけ前年同日比（経過日数を揃える）。過去の完了月は前年同月まるごと。
+  const today = new Date().toISOString().slice(0, 10)
+  const curM = today.slice(0, 7)
+  const todayDay = Number(today.slice(8, 10))
+  const metricVal = (r: FlowRow) => ((metric === 'room_nights' ? r.new_room_nights : r.new_revenue) ?? 0)
+  const priorFor = (mon: string): { val: number; sameDay: boolean } => {
+    const pm = shiftYr(mon)
+    if (mon !== curM) return { val: totalOf(pm), sameDay: false }
+    let s = 0
+    for (const r of flow) {
+      if (r.flow_date.slice(0, 7) !== pm) continue
+      if (Number(r.flow_date.slice(8, 10)) > todayDay) continue
+      s += metricVal(r)
+    }
+    return { val: s, sameDay: true }
+  }
+
   return (
     <>
       <div className="flex items-center gap-2 mb-4 flex-wrap">
@@ -254,15 +284,18 @@ function YoyView({ flow, actions }: { flow: FlowRow[]; actions: Action[] }) {
           </thead>
           <tbody>
             {months.map((mon) => {
-              const cur = totalOf(mon); const prev = totalOf(shiftYr(mon))
+              const cur = totalOf(mon); const p = priorFor(mon); const prev = p.val
               const diff = cur - prev; const ratio = prev > 0 ? cur / prev : null
               const open = openMonth === mon
               return (
                 <Fragment key={mon}>
                   <tr style={{ borderTop: '1px solid var(--border)', cursor: 'pointer' }} onClick={() => setOpenMonth(open ? null : mon)}>
-                    <td className="px-3 py-2 font-medium">{mon} <span className="text-[10px]" style={{ color: 'var(--text-dim)' }}>{open ? '▲' : '▼'}</span></td>
+                    <td className="px-3 py-2 font-medium">
+                      {mon} <span className="text-[10px]" style={{ color: 'var(--text-dim)' }}>{open ? '▲' : '▼'}</span>
+                      {p.sameDay && <span className="ml-1.5 text-[9px] px-1 py-0.5 rounded" style={{ background: 'var(--accent)', color: '#fff' }}>進行中・前年同日比</span>}
+                    </td>
                     <td className="px-3 py-2 text-right font-medium">{fmtMetric(cur, metric)}</td>
-                    <td className="px-3 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{prev ? fmtMetric(prev, metric) : '-'}</td>
+                    <td className="px-3 py-2 text-right" style={{ color: 'var(--text-dim)' }}>{prev ? fmtMetric(prev, metric) : '-'}{p.sameDay && <span className="text-[9px] ml-1">（同日）</span>}</td>
                     <td className="px-3 py-2 text-right" style={{ color: diff < 0 ? 'var(--red)' : 'var(--green)' }}>{prev ? (diff >= 0 ? '+' : '') + fmtMetric(diff, metric) : '-'}</td>
                     <td className="px-3 py-2 text-right" style={{ color: ratio != null && ratio < 1 ? 'var(--red)' : undefined }}>{ratio != null ? pct(ratio) : '-'}</td>
                     <td className="px-3 py-2"></td>
@@ -282,6 +315,7 @@ function YoyView({ flow, actions }: { flow: FlowRow[]; actions: Action[] }) {
       </div>
       <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
         月をクリックでOTA別分解→室数/単価分解→施策照合→プラン/部屋タイプ。前年比が落ちた月は、どのOTAが・室数か単価かを見て、当時の施策と前年同月の施策を照合します。要因の判断は人が行います。
+        <br />※進行中の当月は<b style={{ color: 'var(--accent)' }}>前年同日比</b>（前年を今年の経過日数＝{todayDay}日までに揃えて比較）。過去の完了月は前年同月まるごとの比較です。
       </p>
     </>
   )
@@ -415,8 +449,12 @@ function CurveView({ curve, initialMonth }: { curve: CurveRow[] | null; initialM
   const MAXK = 120
 
   const monthOptions = useMemo(() => curve === null ? [] : [...new Set(curve.map((r) => r.stay_date.slice(0, 7)))].sort().reverse(), [curve])
+  // 既定＝当月（無ければ当月以降の最も近い月→最新月）。?month= 指定があればそれを優先。
+  const curM = new Date().toISOString().slice(0, 7)
   const active = (stayMonth && monthOptions.includes(stayMonth) ? stayMonth : '')
-    || monthOptions.find((m) => m >= new Date().toISOString().slice(0, 7)) || monthOptions[0] || ''
+    || (monthOptions.includes(curM) ? curM : '')
+    || [...monthOptions].sort().find((m) => m >= curM)
+    || monthOptions[0] || ''
 
   // 宿泊月mの、時点D-k（k=0..MAXK）に在庫していた室数/金額を再構築
   const curveFor = (m: string): number[] => {

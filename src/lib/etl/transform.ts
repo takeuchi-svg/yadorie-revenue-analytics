@@ -19,6 +19,14 @@ function findCol(row: Record<string, string>, ...candidates: string[]): string |
   return null
 }
 
+// チャネル名の表記ゆれ正規化（全領域で統一表示。取込時に確定させる）。
+const CHANNEL_ALIAS: Record<string, string> = { 'tripla株式会社': 'tripla' }
+function normChannel(c: string | null): string | null {
+  if (c == null) return null
+  const t = c.trim()
+  return CHANNEL_ALIAS[t] ?? t
+}
+
 // ============================================================
 // Staysee 予約情報 → raw_reservation
 // ============================================================
@@ -43,7 +51,7 @@ export function transformReservation(
         pms_id: pmsId,
         booking_no: findCol(r, '連携番号', '予約番号', 'Lincoln番号') || null,
         status: findCol(r, 'ステータス', '状態', '予約状態') || 'C/O',
-        channel: findCol(r, '扱先', '予約経路', 'OTA', 'チャネル', '経路', '経由') || null,
+        channel: normChannel(findCol(r, '扱先', '予約経路', 'OTA', 'チャネル', '経路', '経由')) || null,
         checkin,
         checkout: parseDate(findCol(r, 'チェックアウト日', 'チェックアウト', 'CO日', 'CO', '終了日付')),
         nights: parseInt10(findCol(r, '泊数', '宿泊数')),
