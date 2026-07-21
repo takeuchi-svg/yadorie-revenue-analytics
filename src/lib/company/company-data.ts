@@ -149,6 +149,61 @@ export async function loadCompanyData(sb: SupabaseClient, targetMonth: string): 
   return { targetMonth, priorMonth, facilities }
 }
 
+/* ===== 年度一覧（全宿×12ヶ月の売上・営業利益。実績/予算/前年） ===== */
+export interface AnnualCell { month: string; sales: Triple; oi: Triple }
+export interface FacilityAnnual {
+  facility: string; name: string; facilityType: string | null; cls: FacilityClass
+  months: AnnualCell[]; totalSales: Triple; totalOi: Triple
+}
+export interface CompanyAnnual { fy: number; months: string[]; facilities: FacilityAnnual[] }
+
+// 会計年度(4月〜翌3月)の12ヶ月を 'YYYY-MM' で返す
+export function fyMonths(fy: number): string[] {
+  const out: string[] = []
+  for (let i = 0; i < 12; i++) { const mo = 4 + i; const y = mo <= 12 ? fy : fy + 1; const mm = mo <= 12 ? mo : mo - 12; out.push(`${y}-${String(mm).padStart(2, '0')}`) }
+  return out
+}
+const sumT = (cells: AnnualCell[], pick: (c: AnnualCell) => Triple): Triple => {
+  const add = (k: keyof Triple) => { let s = 0, any = false; for (const c of cells) { const v = pick(c)[k]; if (v != null) { s += v; any = true } } return any ? s : null }
+  return { act: add('act'), bud: add('bud'), prior: add('prior') }
+}
+
+export async function loadCompanyAnnual(sb: SupabaseClient, fy: number): Promise<CompanyAnnual> {
+  const fyList = [String(fy), String(fy - 1)]
+  const months = fyMonths(fy)
+  const [dimFac, dimProf, budget, actual] = await Promise.all([
+    fetchAll(() => sb.from('dim_facility').select('facility, name, opening_date')),
+    fetchAll(() => sb.from('dim_facility_profile').select('facility, facility_type')),
+    fetchAll(() => sb.from('budget_monthly').select('facility, fiscal_year, month, item_code, amount, sort_order').in('fiscal_year', fyList).eq('version', '当初').order('id')),
+    fetchAll(() => sb.from('actual_monthly').select('facility, fiscal_year, month, item_code, actual').in('fiscal_year', fyList).order('id')),
+  ])
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const profByFac = new Map<string, string | null>()
+  ;((dimProf as any[]) ?? []).forEach((r) => profByFac.set(r.facility, r.facility_type ?? null))
+  const budByFac = new Map<string, BudgetRow[]>()
+  ;((budget as any[]) ?? []).forEach((r) => { const a = budByFac.get(r.facility) ?? []; a.push(r); budByFac.set(r.facility, a) })
+  const actByFac = new Map<string, ActualRow[]>()
+  ;((actual as any[]) ?? []).forEach((r) => { const a = actByFac.get(r.facility) ?? []; a.push(r); actByFac.set(r.facility, a) })
+  const lastMonth = months[months.length - 1]
+
+  const facilities: FacilityAnnual[] = ((dimFac as any[]) ?? []).map((f) => {
+    const facBud = budByFac.get(f.facility) ?? []
+    const facAct = actByFac.get(f.facility) ?? []
+    const R = makePlResolver({ budget: facBud, actual: facAct, fy: String(fy) })
+    const hasBudget = facBud.some((b) => b.fiscal_year === String(fy))
+    const tri = (code: string, m: string): Triple => hasBudget
+      ? { act: R.getActual(code, m), bud: R.getBudget(code, m), prior: R.getActual(code, priorYM(m)) }
+      : { act: null, bud: null, prior: null }
+    const cells: AnnualCell[] = months.map((m) => ({ month: m, sales: tri('sales_total', m), oi: tri('operating_income', m) }))
+    return {
+      facility: f.facility, name: f.name ?? f.facility, facilityType: profByFac.get(f.facility) ?? null,
+      cls: classifyFacility(f.opening_date ?? null, lastMonth), months: cells,
+      totalSales: sumT(cells, (c) => c.sales), totalOi: sumT(cells, (c) => c.oi),
+    }
+  })
+  return { fy, months, facilities }
+}
+
 /* ===== スコープ集計（全店/既存店/新店） ===== */
 export interface ScopeAggregate {
   scope: StoreScope
