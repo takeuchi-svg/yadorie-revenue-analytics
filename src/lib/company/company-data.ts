@@ -40,10 +40,13 @@ export interface FacilityMetrics {
   totalRooms: number | null     // 当月客室数
   occ: number | null            // 全日ベース稼働率（実績・当月）
   occPrior: number | null
-  revenue: number | null        // 売上実績(mart。客単価/生産性の分子)
+  revenue: number | null        // 売上実績(mart。客単価/生産性/室単価の分子)
   guests: number | null         // 人泊（客単価全社再計算用）
   guestUnit: number | null      // 客単価(人泊単価・当月)
   guestUnitPrior: number | null
+  roomsSoldRev: number | null   // 販売室数(KPIマート・室単価の分母。全社ADR再計算用)
+  roomRate: number | null       // 室単価(ADR・当月)
+  roomRatePrior: number | null
   // 生産性
   workHours: number | null      // 総労働時間（当月・勤怠）
   // 満足度・NPS
@@ -77,7 +80,7 @@ export async function loadCompanyData(sb: SupabaseClient, targetMonth: string): 
     fetchAll(() => sb.from('budget_monthly').select('facility, fiscal_year, month, category, item_code, item_name, amount, sort_order').in('fiscal_year', fyList).eq('version', '当初').order('id')),
     fetchAll(() => sb.from('actual_monthly').select('facility, fiscal_year, month, item_code, actual').in('fiscal_year', fyList).order('id')),
     fetchAll(() => sb.from('mart_occupancy_monthly').select('facility, month, rooms_sold, total_rooms, occ, occ_calendar_days').in('month', monthList)),
-    fetchAll(() => sb.from('mart_monthly_kpi').select('facility, month, revenue, guests, guest_unit').in('month', monthList)),
+    fetchAll(() => sb.from('mart_monthly_kpi').select('facility, month, revenue, rooms_sold, guests, guest_unit, adr').in('month', monthList)),
     fetchAll(() => sb.from('mart_labor_monthly').select('facility, month, total_work_hours').eq('month', targetMonth)),
     fetchAll(() => sb.from('mart_guest_feedback_3mo').select('facility, month, channel, axis_code, n, raw_avg, smoothed_avg').eq('month', targetMonth).eq('channel', 'web').eq('axis_code', 'overall')),
     fetchAll(() => sb.from('mart_nps').select('facility, month, n, nps_score').eq('month', targetMonth)),
@@ -140,6 +143,9 @@ export async function loadCompanyData(sb: SupabaseClient, targetMonth: string): 
       guests: num(kpiT?.guests),
       guestUnit: num(kpiT?.guest_unit),
       guestUnitPrior: num(kpiP?.guest_unit),
+      roomsSoldRev: num(kpiT?.rooms_sold),
+      roomRate: num(kpiT?.adr),
+      roomRatePrior: num(kpiP?.adr),
       workHours: num(laborByFac.get(f.facility)?.total_work_hours),
       satisfaction: num(fb?.smoothed_avg) ?? num(fb?.raw_avg),
       satisfactionN: num(fb?.n),
@@ -233,6 +239,7 @@ export interface ScopeAggregate {
   laborRatio: number | null      // Σ人件費 / Σ売上（実績）
   gopRatio: number | null        // ΣGOP / Σ売上（実績）
   occ: number | null             // Σ販売室数 / Σ(客室数×暦日数)
+  roomRate: number | null        // Σ売上 / Σ販売室数（全社ADR）
   guestUnit: number | null       // Σ売上 / Σ人泊
   revenuePerHour: number | null  // Σ売上 / Σ総労働時間（生産性）
   satisfaction: number | null    // n加重平均
@@ -279,6 +286,7 @@ export function aggregateScope(ds: CompanyDataset, scope: StoreScope): ScopeAggr
     laborRatio: ratio(labor.act, sales.act),
     gopRatio: ratio(gop.act, sales.act),
     occ: ratio(occNum, occDen),
+    roomRate: ratio(sumBy(rows, (m) => m.revenue), sumBy(rows, (m) => m.roomsSoldRev)),
     guestUnit: ratio(sumBy(rows, (m) => m.revenue), sumBy(rows, (m) => m.guests)),
     revenuePerHour: ratio(sumBy(rows, (m) => m.revenue), sumBy(rows, (m) => m.workHours)),
     satisfaction: weightedAvg(rows, (m) => m.satisfaction, (m) => m.satisfactionN),

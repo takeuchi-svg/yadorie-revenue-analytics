@@ -411,11 +411,11 @@ export default function CompanyPage() {
   type Col = { key: string; label: string; sortVal: (m: FacilityMetrics) => number | null }
   const cols: Col[] = useMemo(() => [
     { key: 'sales', label: '売上', sortVal: (m) => (cmp === 'budget' ? rate(m.sales.act, m.sales.bud) : rate(m.sales.act, m.sales.prior)) },
-    { key: 'oi', label: '営業利益', sortVal: (m) => (cmp === 'budget' ? rate(m.operatingIncome.act, m.operatingIncome.bud) : rate(m.operatingIncome.act, m.operatingIncome.prior)) },
+    { key: 'occ', label: 'OCC', sortVal: (m) => m.occ },
+    { key: 'roomRate', label: '室単価', sortVal: (m) => m.roomRate },
     { key: 'gop', label: 'GOP', sortVal: (m) => (cmp === 'budget' ? rate(m.gop.act, m.gop.bud) : rate(m.gop.act, m.gop.prior)) },
-    { key: 'laborRatio', label: '人件費率', sortVal: (m) => rate(m.labor.act, m.sales.act) },
-    { key: 'prod', label: '生産性', sortVal: (m) => rate(m.revenue, m.workHours) },
-    { key: 'sat', label: '満足度', sortVal: (m) => m.satisfaction },
+    { key: 'oi', label: '営業利益', sortVal: (m) => (cmp === 'budget' ? rate(m.operatingIncome.act, m.operatingIncome.bud) : rate(m.operatingIncome.act, m.operatingIncome.prior)) },
+    { key: 'sat', label: '顧客満足度', sortVal: (m) => m.satisfaction },
   ], [cmp])
 
   const sortedRows = useMemo(() => {
@@ -436,11 +436,11 @@ export default function CompanyPage() {
 
   const clickSort = (key: string) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-    else { setSortKey(key); setSortDir(key === 'laborRatio' || key === 'order' ? 'asc' : 'desc') }
+    else { setSortKey(key); setSortDir(key === 'order' ? 'asc' : 'desc') }
   }
 
-  const avgLaborRatio = agg?.laborRatio ?? null
-  const avgProd = agg?.revenuePerHour ?? null
+  const avgOcc = agg?.occ ?? null
+  const avgRoomRate = agg?.roomRate ?? null
   const avgSat = agg?.satisfaction ?? null
 
   if (roleLoading) return <div className="p-6"><Loading /></div>
@@ -524,12 +524,13 @@ export default function CompanyPage() {
 
           {/* サマリKPI（NPS除く） */}
           {agg && (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
               <SummaryCard label="売上" act={agg.sales.act} bud={agg.sales.bud} prior={agg.sales.prior} fmt={fmtMan} showYoY={showYoY} />
-              <SummaryCard label="営業利益" act={agg.operatingIncome.act} bud={agg.operatingIncome.bud} prior={agg.operatingIncome.prior} fmt={fmtMan} showYoY={showYoY} />
-              <SummaryCard label="GOP" act={agg.gop.act} bud={agg.gop.bud} prior={agg.gop.prior} fmt={fmtMan} showYoY={showYoY} />
               <SummaryCard label="OCC（稼働率）" act={agg.occ} bud={null} prior={null} fmt={pct} showYoY={showYoY} />
-              <SummaryCard label="満足度" act={agg.satisfaction} bud={null} prior={null} fmt={(x) => x.toFixed(2)} showYoY={showYoY} />
+              <SummaryCard label="室単価" act={agg.roomRate} bud={null} prior={null} fmt={(x) => `¥${fmtNum(x)}`} showYoY={showYoY} />
+              <SummaryCard label="GOP" act={agg.gop.act} bud={agg.gop.bud} prior={agg.gop.prior} fmt={fmtMan} showYoY={showYoY} />
+              <SummaryCard label="営業利益" act={agg.operatingIncome.act} bud={agg.operatingIncome.bud} prior={agg.operatingIncome.prior} fmt={fmtMan} showYoY={showYoY} />
+              <SummaryCard label="顧客満足度" act={agg.satisfaction} bud={null} prior={null} fmt={(x) => x.toFixed(2)} showYoY={showYoY} />
             </div>
           )}
 
@@ -567,10 +568,10 @@ export default function CompanyPage() {
                       {m.facilityType && <div className="text-[10px]" style={{ color: 'var(--text-dim)' }}>{m.facilityType}</div>}
                     </td>
                     <MoneyCell t={m.sales} cmp={cmp} />
-                    <MoneyCell t={m.operatingIncome} cmp={cmp} />
+                    <StatCell v={m.occ} avg={avgOcc} higherBetter fmt={pct} />
+                    <StatCell v={m.roomRate} avg={avgRoomRate} higherBetter fmt={(x) => `¥${fmtNum(x)}`} />
                     <MoneyCell t={m.gop} cmp={cmp} />
-                    <StatCell v={rate(m.labor.act, m.sales.act)} avg={avgLaborRatio} higherBetter={false} fmt={pct} />
-                    <StatCell v={rate(m.revenue, m.workHours)} avg={avgProd} higherBetter fmt={(x) => `¥${fmtNum(x)}`} />
+                    <MoneyCell t={m.operatingIncome} cmp={cmp} />
                     <StatCell v={m.satisfaction} avg={avgSat} higherBetter fmt={(x) => x.toFixed(2)} />
                   </tr>
                 ))}
@@ -581,8 +582,8 @@ export default function CompanyPage() {
           <CrossAnalysis rows={rows} />
 
           <p className="text-xs mt-2" style={{ color: 'var(--text-dim)' }}>
-            金額=万円。売上/営業利益/GOPは宿ごとにPL明細から再計算（予実ページと同一）。人件費率=人件費(PL)÷売上、生産性=売上÷総労働時間、OCC=全日ベース。
-            満足度=クチコミ総合(3ヶ月平滑)。人件費率・生産性・満足度の色はスコープ平均比。
+            金額=万円。売上/GOP/営業利益は宿ごとにPL明細から再計算（予実ページと同一）で、色は{cmp === 'budget' ? '予算' : '前年'}比。
+            OCC=全日ベース稼働率、室単価=売上÷販売室数(ADR)、顧客満足度=クチコミ総合(3ヶ月平滑)。OCC・室単価・顧客満足度の色はスコープ平均比。
           </p>
 
           <CompanyShiftVariance />
