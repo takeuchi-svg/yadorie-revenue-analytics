@@ -122,13 +122,14 @@ begin
 end $$;
 
 -- ---- mart_ ビューを security_invoker 化（閲覧者の権限でRLS評価） ----
---   mart_labor_cost_monthly は除外（wage_permission.sql でビュー内に自前ゲートを持つため invoker=off が正）
+--   自前ゲート(invoker=off)のビューは除外: mart_labor_cost_monthly / mart_shift_variance_monthly
+--   （security_invoker_fix.sql でゲート付与）、mart_meal_monthly（materialize_marts.sql 適用時はoff＋ゲート）
 do $$
 declare v record;
 begin
   for v in select viewname from pg_views where schemaname = 'public'
              and viewname like 'mart_%'
-             and viewname not in ('mart_labor_cost_monthly', 'mart_shift_variance_monthly') loop
+             and viewname not in ('mart_labor_cost_monthly', 'mart_shift_variance_monthly', 'mart_meal_monthly') loop
     execute format('alter view %I set (security_invoker = on)', v.viewname);
   end loop;
 end $$;
