@@ -180,18 +180,13 @@ export default function DailyPage() {
       }
       setSoldMap(sMap); setRevMap(rMap); setGuestMap(gMap); setOhMap(oh); setPoMap(po); setBudgetMap(bMap)
 
-      // 既定範囲: ?month= があればその月、無ければ 実績＋オンハンドの最新月
+      // 既定範囲: ?month= があればその月、無ければ当月（1ヶ月分）
       const urlMonth = new URLSearchParams(window.location.search).get('month')
-      const allDates = [...new Set([...Object.keys(sMap), ...Object.keys(oh)])].sort()
-      if (urlMonth && /^\d{4}-\d{2}$/.test(urlMonth)) {
-        setFrom(`${urlMonth}-01`); setTo(lastDayOfMonth(urlMonth))
-      } else if (allDates.length > 0) {
-        const latest = allDates[allDates.length - 1].slice(0, 7)
-        setFrom(`${latest}-01`); setTo(lastDayOfMonth(latest))
-      }
+      const ym = (urlMonth && /^\d{4}-\d{2}$/.test(urlMonth)) ? urlMonth : today.slice(0, 7)
+      setFrom(`${ym}-01`); setTo(lastDayOfMonth(ym))
     }).catch((e) => setLoadError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoadingBase(false))
-  }, [current, totalRooms, tPrev])
+  }, [current, totalRooms, tPrev, today])
 
   // 範囲のレートランク
   useEffect(() => {
