@@ -48,15 +48,21 @@ end $$;
 alter table dim_staff
   add column if not exists source text not null default 'KOT';
 
--- ---- RLS（新規テーブル。既存シフト系と同方式＝authenticated 許可。個人給与ではない） ----
+-- ---- RLS（施設スコープ。担当宿のみ読み書き。棚卸2026-07-22で using(true) から是正） ----
+--   これらは宿の人件費（アルバイト標準時給・正社員 宿×月）＝機微寄り。旧 using(true) では
+--   ログインしていれば全宿を読めてしまっていた。他の施設スコープ表と同じ can_access_facility に統一。
+--   （admin/owner は is_admin() で全宿。集計ビュー mart_labor_cost_monthly は invoker=off で
+--    定義者権限のため、このRLSに関係なく施設ゲート付きで施設メンバーへ集計値を出せる。）
 do $$
-declare t text;
+declare t text; pol record;
 begin
   foreach t in array array['dim_labor_rate','raw_regular_labor_monthly']
   loop
     execute format('alter table %I enable row level security', t);
-    execute format('drop policy if exists %I on %I', t||'_all_authenticated', t);
-    execute format('create policy %I on %I for all to authenticated using (true) with check (true)', t||'_all_authenticated', t);
+    for pol in select policyname from pg_policies where schemaname='public' and tablename=t loop
+      execute format('drop policy %I on %I', pol.policyname, t);
+    end loop;
+    execute format('create policy %I on %I for all to authenticated using (public.can_access_facility(facility)) with check (public.can_access_facility(facility))', t||'_facility_scope', t);
   end loop;
 end $$;
 
