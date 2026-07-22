@@ -35,9 +35,10 @@ declare
     ['raw_booking_event','facility'], ['raw_rate_snapshot','facility'],
     ['raw_room_sales','facility'], ['dim_budget','facility'],
     ['dim_ota_marketing','facility'], ['dim_operating_days','facility'],
-    ['dim_productivity_manual','facility'], ['budget_daily','facility'],
-    ['budget_monthly','facility'], ['actual_monthly','facility'],
+    ['dim_productivity_manual','facility'], ['actual_monthly','facility'],
     ['raw_daily_plan_context','facility'],
+    -- budget_daily / budget_monthly は budget_lock.sql が単独所有（施設スコープ＋ロック検査を1本に統合）。
+    --   ここで再定義すると後勝ちでロック検査が消えるため、あえて外す（棚卸2026-07-22）。
     ['raw_attendance_daily','work_facility'], ['raw_shift_plan','work_facility'],
     ['dim_staff','home_facility']
   ];

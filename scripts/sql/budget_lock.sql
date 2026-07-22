@@ -17,25 +17,30 @@ create table if not exists budget_lock (
   primary key (facility, fiscal_year)
 );
 alter table budget_lock enable row level security;
+-- 施設スコープ（担当宿のみ）＋書込はowner。棚卸2026-07-22で read を using(true)→施設スコープに是正。
 drop policy if exists budget_lock_read on budget_lock;
-create policy budget_lock_read on budget_lock for select to authenticated using (true);
+create policy budget_lock_read on budget_lock for select to authenticated
+  using (public.can_access_facility(facility));
 drop policy if exists budget_lock_write on budget_lock;
 create policy budget_lock_write on budget_lock for all to authenticated
   using (public.my_role() = 'owner') with check (public.my_role() = 'owner');
 
--- 予算テーブル: ロック中の(facility,fiscal_year)への書込みを禁止（WITH CHECK）。読み取り・削除はUSINGで従来通り。
--- ただし version='見込' は当年度に更新する着地見込なので、ロック中でも書込可（確定予算=当初/修正のみ保護）。
+-- 予算テーブル: budget_lock.sql が単独所有（rls_facility.sql の spec からは除外済）。
+--   USING = 施設スコープ（担当宿のみ読み書き。旧 using(true) は全宿丸見えだった＝棚卸2026-07-22是正）。
+--   WITH CHECK = 施設スコープ AND ロック検査（ロック中の確定予算=当初/修正は書込不可。version='見込'は着地見込なので可）。
 drop policy if exists "allow_all_authenticated" on budget_daily;
 drop policy if exists budget_daily_rw on budget_daily;
 create policy budget_daily_rw on budget_daily for all to authenticated
-  using (true)
-  with check (budget_daily.version = '見込' or not exists (select 1 from budget_lock l where l.facility = budget_daily.facility and l.fiscal_year = budget_daily.fiscal_year));
+  using (public.can_access_facility(facility))
+  with check (public.can_access_facility(facility)
+    and (budget_daily.version = '見込' or not exists (select 1 from budget_lock l where l.facility = budget_daily.facility and l.fiscal_year = budget_daily.fiscal_year)));
 
 drop policy if exists "allow_all_authenticated" on budget_monthly;
 drop policy if exists budget_monthly_rw on budget_monthly;
 create policy budget_monthly_rw on budget_monthly for all to authenticated
-  using (true)
-  with check (budget_monthly.version = '見込' or not exists (select 1 from budget_lock l where l.facility = budget_monthly.facility and l.fiscal_year = budget_monthly.fiscal_year));
+  using (public.can_access_facility(facility))
+  with check (public.can_access_facility(facility)
+    and (budget_monthly.version = '見込' or not exists (select 1 from budget_lock l where l.facility = budget_monthly.facility and l.fiscal_year = budget_monthly.fiscal_year)));
 
 -- 初期ロック: 2020〜2026年度を全宿ロック（過年度・当年度の確定予算を保護）
 insert into budget_lock (facility, fiscal_year, locked_by)

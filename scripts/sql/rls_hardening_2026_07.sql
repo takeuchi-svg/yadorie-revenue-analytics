@@ -57,7 +57,28 @@ begin
   end loop;
 end $$;
 
+-- ---- ②-b budget_daily / budget_monthly / budget_lock を施設スコープへ是正 ----
+--   rls_audit で判明: budget_lock.sql の using(true) が live で勝っており、
+--   認証者が全宿の予算を読み書きできた（ロック検査はあるが施設スコープが無かった）。
+--   施設スコープ＋ロック検査を1本に統合（budget_lock.sql 本体も同内容に修正済）。
+drop policy if exists budget_lock_read on budget_lock;
+create policy budget_lock_read on budget_lock for select to authenticated
+  using (public.can_access_facility(facility));
+
+drop policy if exists budget_daily_rw on budget_daily;
+create policy budget_daily_rw on budget_daily for all to authenticated
+  using (public.can_access_facility(facility))
+  with check (public.can_access_facility(facility)
+    and (budget_daily.version = '見込' or not exists (select 1 from budget_lock l where l.facility = budget_daily.facility and l.fiscal_year = budget_daily.fiscal_year)));
+
+drop policy if exists budget_monthly_rw on budget_monthly;
+create policy budget_monthly_rw on budget_monthly for all to authenticated
+  using (public.can_access_facility(facility))
+  with check (public.can_access_facility(facility)
+    and (budget_monthly.version = '見込' or not exists (select 1 from budget_lock l where l.facility = budget_monthly.facility and l.fiscal_year = budget_monthly.fiscal_year)));
+
 -- 確認:
 --   select tablename, policyname, cmd, qual from pg_policies
---     where tablename in ('dim_labor_rate','raw_regular_labor_monthly');
+--     where tablename in ('dim_labor_rate','raw_regular_labor_monthly','budget_daily','budget_monthly','budget_lock');
 --   select conname, conrelid::regclass from pg_constraint where conname like '%_facility_fk';
+--   -- 仕上げに rls_audit.sql を Run して 0行（B/C とも）を確認。
