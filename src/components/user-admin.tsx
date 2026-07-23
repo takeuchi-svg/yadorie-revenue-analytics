@@ -18,6 +18,7 @@ export default function UserAdmin() {
   const [password, setPassword] = useState('')
   const [role, setRole] = useState('member')
   const [newFacs, setNewFacs] = useState<Set<string>>(new Set())
+  const [issued, setIssued] = useState<{ email: string; password: string } | null>(null)  // 発行直後の資格情報（コピー用）
   // 編集中の宿割当
   const [editFacs, setEditFacs] = useState<Record<string, Set<string>>>({})
 
@@ -42,16 +43,35 @@ export default function UserAdmin() {
 
   useEffect(() => { reload() }, [reload])
 
-  const create = async () => {
+  // 強いランダム初期パスワードを生成（本人が初回ログイン後に変更する前提）
+  const genPassword = () => {
+    const chars = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    const rnd = new Uint32Array(14); crypto.getRandomValues(rnd)
+    setPassword(Array.from(rnd, (n) => chars[n % chars.length]).join(''))
+  }
+
+  // 推奨: 初期パスワードで即時発行（メールリンク不要＝法人メールでも確実）
+  const issueWithPassword = async () => {
     if (!email) { toast('メールアドレスを入力してください', 'error'); return }
+    if (!password || password.length < 8) { toast('初期パスワードは8文字以上で入力（「自動生成」も使えます）', 'error'); return }
     setBusy(true)
-    // パスワード空欄＝招待メール送信（本人がリンクからパスワード設定）。入力時＝即時発行
-    const r = password
-      ? await call('create', { email, password, role, facilities: [...newFacs] })
-      : await call('invite', { email, role, facilities: [...newFacs], redirectTo: `${window.location.origin}/reset-password` })
+    const r = await call('create', { email, password, role, facilities: [...newFacs] })
     setBusy(false)
     if (r.error) { toast('エラー: ' + r.error, 'error'); return }
-    toast(password ? 'アカウントを発行しました' : `${email} に招待メールを送信しました`); setEmail(''); setPassword(''); setRole('member'); setNewFacs(new Set())
+    setIssued({ email, password })  // コピー用に表示（トーストではなく残す）
+    toast('アカウントを発行しました'); setEmail(''); setPassword(''); setRole('member'); setNewFacs(new Set())
+    reload()
+  }
+
+  // 補助: 招待メール（本人がリンクからパスワード設定）。法人メールはリンク先読み消費で失敗しやすい
+  const sendInvite = async () => {
+    if (!email) { toast('メールアドレスを入力してください', 'error'); return }
+    if (!confirm('招待メールを送信します。\n\n会社のメールセキュリティ（SafeLinks等）がリンクを先に開くと「リンク無効/期限切れ」になり失敗することがあります。\n法人メール宛では「初期パスワードで発行」が確実です。\n\nこのまま招待メールを送りますか？')) return
+    setBusy(true)
+    const r = await call('invite', { email, role, facilities: [...newFacs], redirectTo: `${window.location.origin}/reset-password` })
+    setBusy(false)
+    if (r.error) { toast('エラー: ' + r.error, 'error'); return }
+    toast(`${email} に招待メールを送信しました`); setEmail(''); setPassword(''); setRole('member'); setNewFacs(new Set())
     reload()
   }
 
@@ -70,21 +90,37 @@ export default function UserAdmin() {
 
       {/* 新規発行 */}
       <div className="mb-6 rounded-md p-4" style={{ background: 'var(--surface2)' }}>
-        <h3 className="text-sm font-semibold mb-3">アカウント発行</h3>
-        <div className="flex flex-wrap gap-2 mb-1">
+        <h3 className="text-sm font-semibold mb-1">アカウント発行</h3>
+        <p className="text-[11px] mb-3" style={{ color: 'var(--text-dim)' }}>
+          <b>推奨は「初期パスワードで発行」</b>（メールリンク不要で確実）。発行後に表示される<b>メール＋初期パスワード</b>を本人へ伝え、ログイン画面から直接ログインしてもらいます（初回ログイン後に本人がパスワード変更）。
+        </p>
+        <div className="flex flex-wrap gap-2 mb-1 items-center">
           <input className="field px-3 py-1.5 text-sm" placeholder="メールアドレス" value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className="field px-3 py-1.5 text-sm" placeholder="初期パスワード（空欄で招待メール）" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <input className="field px-3 py-1.5 text-sm" placeholder="初期パスワード（8文字以上）" value={password} onChange={(e) => setPassword(e.target.value)} />
+          <button onClick={genPassword} type="button" disabled={busy} className="px-3 py-1.5 rounded-md text-xs disabled:opacity-50" style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }} title="強いパスワードを自動生成">🔑 自動生成</button>
           <select className="field px-3 py-1.5 text-sm" value={role} onChange={(e) => setRole(e.target.value)}>
             <option value="member">一般（指定宿のみ）</option>
             <option value="admin">管理者（全宿＋ユーザー管理）</option>
           </select>
-          <button onClick={create} disabled={busy} className="px-4 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>
-            {password ? '発行' : '招待メール送信'}
+          <button onClick={issueWithPassword} disabled={busy} className="px-4 py-1.5 rounded-md text-sm text-white disabled:opacity-50" style={{ background: 'var(--accent)' }}>
+            発行（パスワード設定）
           </button>
+          <button onClick={sendInvite} type="button" disabled={busy} className="px-3 py-1.5 rounded-md text-xs disabled:opacity-50" style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }} title="本人がリンクからパスワード設定。法人メールでは失敗しやすい">招待メールで送る</button>
         </div>
         <p className="text-[11px] mb-3" style={{ color: 'var(--text-dim)' }}>
-          パスワードを空欄にすると、本人宛に招待メールが届き、リンクから自分でパスワードを設定できます。入力した場合は即時発行（メールなし）。
+          「招待メールで送る」は本人がリンクからパスワードを設定する方式ですが、<b>会社のメールセキュリティ（SafeLinks等）がリンクを先に開くと「リンク無効/期限切れ」で失敗</b>することがあります。法人メール宛では上の初期パスワード発行が確実です。
         </p>
+        {issued && (
+          <div className="rounded-md p-3 mb-3 text-sm" style={{ background: 'var(--surface)', border: '1px solid var(--accent)' }}>
+            <div className="font-semibold mb-1" style={{ color: 'var(--accent)' }}>発行しました（本人へ共有してください）</div>
+            <div className="font-mono text-xs" style={{ color: 'var(--text)' }}>メール: {issued.email}<br />初期パスワード: {issued.password}</div>
+            <div className="flex gap-2 mt-2">
+              <button type="button" onClick={() => { navigator.clipboard?.writeText(`ログイン: ${window.location.origin}/login\nメール: ${issued.email}\n初期パスワード: ${issued.password}`); toast('ログイン情報をコピーしました') }}
+                className="px-2 py-1 rounded text-xs text-white" style={{ background: 'var(--accent)' }}>ログイン情報をコピー</button>
+              <button type="button" onClick={() => setIssued(null)} className="px-2 py-1 rounded text-xs" style={{ border: '1px solid var(--border)', color: 'var(--text-dim)' }}>閉じる</button>
+            </div>
+          </div>
+        )}
         {role === 'member' && (
           <div>
             <p className="text-xs mb-1" style={{ color: 'var(--text-dim)' }}>閲覧できる宿を選択:</p>
