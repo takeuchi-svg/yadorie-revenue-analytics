@@ -27,7 +27,7 @@ const BAND_ORDER = ['〜¥30,000', '¥30,000–50,000', '¥50,000–70,000', '¥
 /* eslint-disable @typescript-eslint/no-explicit-any */
 interface Ev { checkin: string | null; plan: string | null; rooms: number | null; guests_total: number | null; amount_gross: number | null; nights: number | null }
 interface Resv {
-  checkin: string | null; prefecture: string | null; revenue_settled: number | null; nights: number | null
+  checkin: string | null; prefecture: string | null; revenue_settled: number | null; revenue_net?: number | null; nights: number | null
   guests_total: number | null; plan: string | null; booking_date: string | null; cancel_date: string | null
   status: string | null; channel: string | null; room_parsed: string | null; room_type: string | null
 }
@@ -60,7 +60,7 @@ export default function RevenuePage() {
       supabase.from('mart_room_type_monthly').select('*').eq('facility', current),
       supabase.from('mart_meal_monthly').select('*').eq('facility', current),
       fetchAll(() => supabase.from('raw_reservation')
-        .select('checkin, prefecture, revenue_settled, nights, guests_total, plan, booking_date, cancel_date, status, channel, room_parsed, room_type')
+        .select('checkin, prefecture, revenue_settled, revenue_net, nights, guests_total, plan, booking_date, cancel_date, status, channel, room_parsed, room_type')
         .eq('facility', current).order('id')),
       fetchAll(() => supabase.from('raw_room_sales').select('room_type, sold, stay_date').eq('facility', current).eq('scope', 'type').order('id')),
     ]).then(([rtype, meal, rv, rsType]) => {
@@ -87,7 +87,7 @@ export default function RevenuePage() {
   // プラン/曜日/GS/ADR帯 用イベント（宿泊日ベース・生存予約のみ。室数=nights: room_countは全件1のため使用しない）
   const stayseeEv = useMemo<Ev[]>(() => resv.filter(aliveNow).map((r) => ({
     checkin: r.checkin, plan: r.plan ?? null,
-    rooms: 1, guests_total: r.guests_total, amount_gross: r.revenue_settled, nights: r.nights,
+    rooms: 1, guests_total: r.guests_total, amount_gross: (r.revenue_net ?? r.revenue_settled), nights: r.nights,
   })), [resv])  // eslint-disable-line react-hooks/exhaustive-deps
 
   const months = useMemo(() => {
@@ -120,7 +120,7 @@ export default function RevenuePage() {
       if (asPrev && isOnhand ? !aliveAtT(r, prevPoint) : !aliveNow(r)) continue
       const k = keyFn(r); const n = Math.max(r.nights ?? 1, 1)
       const g = map.get(k) ?? { name: k, revenue: 0, rooms: 0, guests: 0, count: 0 }
-      g.revenue += r.revenue_settled || 0; g.rooms += n; g.guests += (r.guests_total || 0) * n; g.count! += 1
+      g.revenue += (r.revenue_net ?? r.revenue_settled) || 0; g.rooms += n; g.guests += (r.guests_total || 0) * n; g.count! += 1
       map.set(k, g)
     }
     return [...map.values()]
@@ -205,7 +205,7 @@ function CurveMini({ resv, month, isOnhand, prevPoint, aliveNow, aliveAtT }: {
 
   const chart = useMemo(() => {
     if (!month) return []
-    const val = (r: Resv) => (unit === 'revenue' ? (r.revenue_settled ?? 0) : Math.max(r.nights ?? 1, 1))
+    const val = (r: Resv) => (unit === 'revenue' ? ((r.revenue_net ?? r.revenue_settled) ?? 0) : Math.max(r.nights ?? 1, 1))
     // 宿泊日（=チェックイン日）ごとに当年/前年を積む
     const curByDay: Record<number, number> = {}, prevByDay: Record<number, number> = {}
     let prevCount = 0

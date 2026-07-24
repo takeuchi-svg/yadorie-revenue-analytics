@@ -16,7 +16,7 @@ import { Loading, Empty, LoadError } from '@/components/page-bits'
 import BookingInsightCard from '@/components/booking-insight-card'
 
 interface Resv {
-  checkin: string; nights: number | null; revenue_settled: number | null; channel: string | null
+  checkin: string; nights: number | null; revenue_settled: number | null; revenue_net?: number | null; channel: string | null
   status: string | null; booking_date: string | null; cancel_date: string | null
   room_type: string | null; plan: string | null; guests_total: number | null
 }
@@ -51,7 +51,7 @@ export default function SalesStatusPage() {
     const from = `${fy - 1}-04-01`, to = `${fy + 1}-03-31`  // 前年度も同時取得（前年比・前年同日用）
     Promise.all([
       fetchAll<Resv>(() => supabase.from('raw_reservation')
-        .select('checkin, nights, revenue_settled, channel, status, booking_date, cancel_date, room_type, plan, guests_total')
+        .select('checkin, nights, revenue_settled, revenue_net, channel, status, booking_date, cancel_date, room_type, plan, guests_total')
         .eq('facility', current).gte('checkin', from).lte('checkin', to)),
       fetchAll<BudgetRow>(() => supabase.from('mart_budget_daily_monthly').select('month, revenue_budget').eq('facility', current)),
     ]).then(([rs, bs]) => {
@@ -75,7 +75,7 @@ export default function SalesStatusPage() {
     const cur: Record<string, { total: number; byCh: Record<string, number> }> = {}
     const prevSame: Record<string, number> = {}
     for (const r of resv) {
-      const m = r.checkin.slice(0, 7); const rev = r.revenue_settled ?? 0
+      const m = r.checkin.slice(0, 7); const rev = (r.revenue_net ?? r.revenue_settled) ?? 0
       if (aliveNow(r)) {
         ;(cur[m] ??= { total: 0, byCh: {} }); cur[m].total += rev
         const ch = r.channel || '不明'; cur[m].byCh[ch] = (cur[m].byCh[ch] ?? 0) + rev
@@ -266,7 +266,7 @@ function SalesDrill({ mon, resv, prevPoint }: { mon: string; resv: Resv[]; prevP
   }, [current, mon, pm])
   const kpiSum = (pred: (r: Resv) => boolean) => {
     let rev = 0, rn = 0, gn = 0
-    for (const r of resv) { if (!pred(r)) continue; const n = Math.max(r.nights ?? 1, 1); rev += r.revenue_settled ?? 0; rn += n; gn += (r.guests_total ?? 0) * n }
+    for (const r of resv) { if (!pred(r)) continue; const n = Math.max(r.nights ?? 1, 1); rev += (r.revenue_net ?? r.revenue_settled) ?? 0; rn += n; gn += (r.guests_total ?? 0) * n }
     return { rev, rn, gn }
   }
   const kCur = kpiSum((r) => r.checkin.slice(0, 7) === mon && aliveNow(r))
@@ -282,7 +282,7 @@ function SalesDrill({ mon, resv, prevPoint }: { mon: string; resv: Resv[]; prevP
     for (const r of resv) {
       if (!aliveNow(r)) continue
       const n = Math.max(r.nights ?? 1, 1)
-      const perNight = (r.revenue_settled ?? 0) / n
+      const perNight = ((r.revenue_net ?? r.revenue_settled) ?? 0) / n
       const base = new Date(r.checkin + 'T00:00:00Z')
       for (let i = 0; i < n; i++) {
         const d = new Date(base); d.setUTCDate(d.getUTCDate() + i)
@@ -323,8 +323,8 @@ function SalesDrill({ mon, resv, prevPoint }: { mon: string; resv: Resv[]; prevP
       const cm2 = r.checkin.slice(0, 7)
       const ch = r.channel || '不明'
       const n = Math.max(r.nights ?? 1, 1)
-      if (cm2 === mon && aliveNow(r)) { (acc[ch] ??= { rev: 0, rn: 0, pRev: 0, pRn: 0 }); acc[ch].rev += r.revenue_settled ?? 0; acc[ch].rn += n }
-      if (cm2 === pm && aliveAt(r, prevPoint)) { (acc[ch] ??= { rev: 0, rn: 0, pRev: 0, pRn: 0 }); acc[ch].pRev += r.revenue_settled ?? 0; acc[ch].pRn += n }
+      if (cm2 === mon && aliveNow(r)) { (acc[ch] ??= { rev: 0, rn: 0, pRev: 0, pRn: 0 }); acc[ch].rev += (r.revenue_net ?? r.revenue_settled) ?? 0; acc[ch].rn += n }
+      if (cm2 === pm && aliveAt(r, prevPoint)) { (acc[ch] ??= { rev: 0, rn: 0, pRev: 0, pRn: 0 }); acc[ch].pRev += (r.revenue_net ?? r.revenue_settled) ?? 0; acc[ch].pRn += n }
     }
     return Object.entries(acc).sort((a, b) => b[1].rev - a[1].rev)
   }, [resv, mon, pm, prevPoint])  // eslint-disable-line react-hooks/exhaustive-deps

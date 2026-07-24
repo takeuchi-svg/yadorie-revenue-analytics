@@ -63,7 +63,7 @@ export default function CancelPage() {
     const cut = new Date(); cut.setMonth(cut.getMonth() - 24)
     const cutoff = cut.toISOString().slice(0, 10)
     fetchAll<Resv>(() => supabase.from('raw_reservation')
-      .select('status, checkin, booking_date, cancel_date, channel, plan, revenue_settled, guests_total, nights, room_count')
+      .select('status, checkin, booking_date, cancel_date, channel, plan, revenue_settled, revenue_net, guests_total, nights, room_count')
       .eq('facility', current).gte('checkin', cutoff).order('id'))
       .then((rows) => setData(rows ?? []))
       .catch((e: unknown) => setLoadError(e instanceof Error ? e.message : String(e)))
@@ -79,7 +79,7 @@ export default function CancelPage() {
         isBooking: true, isCancel: r.status === 'キャンセル', checkin: r.checkin,
         lt: daysBetween(r.checkin, r.booking_date ?? null),
         channel: r.channel || '不明', plan: r.plan || '不明',
-        revenue: r.revenue_settled || 0, rooms: n, guests: (r.guests_total || 0) * n,
+        revenue: (r.revenue_net ?? r.revenue_settled) || 0, rooms: n, guests: (r.guests_total || 0) * n,
         bookingDate: r.booking_date ?? null, cancelDate: (r as { cancel_date?: string | null }).cancel_date ?? null,
       }
     }), [resv])

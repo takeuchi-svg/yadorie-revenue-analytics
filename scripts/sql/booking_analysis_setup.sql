@@ -97,7 +97,7 @@ WITH ev AS (
          COALESCE(channel,'不明')  AS channel,
          1                                       AS new_res,
          GREATEST(nights,1)                      AS new_rn,
-         COALESCE(revenue_settled,0)             AS new_rev,
+         COALESCE(revenue_net, revenue_settled, 0)             AS new_rev,
          0 AS cxl_res, 0 AS cxl_rn, 0 AS cxl_rev
   FROM raw_reservation
   WHERE booking_date IS NOT NULL
@@ -110,7 +110,7 @@ WITH ev AS (
          0, 0, 0,
          1,
          GREATEST(nights,1),
-         COALESCE(revenue_settled,0)
+         COALESCE(revenue_net, revenue_settled, 0)
   FROM raw_reservation
   WHERE status = 'キャンセル' AND cancel_date IS NOT NULL
 )
@@ -141,7 +141,7 @@ SELECT
   COALESCE(r.channel,'不明')       AS channel,
   COUNT(*)                         AS rooms,                                   -- 1予約=1室/泊
   SUM(COALESCE(r.guests_total,0))  AS guests,
-  SUM(ROUND(COALESCE(r.revenue_settled,0)::numeric / GREATEST(r.nights,1)))::int AS revenue
+  SUM(ROUND(COALESCE(r.revenue_net, r.revenue_settled, 0)::numeric / GREATEST(r.nights,1)))::int AS revenue
 FROM raw_reservation r
 CROSS JOIN LATERAL generate_series(0, GREATEST(r.nights,1) - 1) AS gs(n)
 WHERE r.status IN ('未確認','予約確定','重要予約','C/O')
@@ -166,7 +166,7 @@ SELECT
   r.cancel_date,
   ((r.checkin + gs.n)::date - r.booking_date)  AS lead_days,   -- 宿泊日−予約日
   1                                            AS rooms,
-  ROUND(COALESCE(r.revenue_settled,0)::numeric / GREATEST(r.nights,1))::int AS revenue
+  ROUND(COALESCE(r.revenue_net, r.revenue_settled, 0)::numeric / GREATEST(r.nights,1))::int AS revenue
 FROM raw_reservation r
 CROSS JOIN LATERAL generate_series(0, GREATEST(r.nights,1) - 1) AS gs(n)
 WHERE r.status NOT IN ('販売不可','空部屋')

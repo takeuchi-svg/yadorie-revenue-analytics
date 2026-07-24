@@ -25,6 +25,10 @@ export interface RawReservation {
   adults: number
   children: number
   revenue_settled: number
+  revenue_net: number
+  consumption_tax: number
+  bathing_tax: number
+  lodging_tax: number
   room_raw: string | null
   room_parsed: string | null
   room_type: string | null

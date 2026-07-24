@@ -11,7 +11,7 @@ import { Loading, Empty, LoadError } from '@/components/page-bits'
 import { useFacilityData } from '@/lib/use-facility-data'
 
 interface Resv {
-  checkin: string; nights: number | null; revenue_settled: number | null; channel: string | null
+  checkin: string; nights: number | null; revenue_settled: number | null; revenue_net?: number | null; channel: string | null
   status: string | null; booking_date: string | null; cancel_date: string | null; guests_total: number | null
 }
 
@@ -39,7 +39,7 @@ export default function SameDayPage() {
   const { data, loading, error } = useFacilityData<Resv[]>((facility) => {
     const from = `${Number(asOf.slice(0, 4)) - 1}-01-01`
     return fetchAll<Resv>(() => supabase.from('raw_reservation')
-      .select('checkin, nights, revenue_settled, channel, status, booking_date, cancel_date, guests_total')
+      .select('checkin, nights, revenue_settled, revenue_net, channel, status, booking_date, cancel_date, guests_total')
       .eq('facility', facility).gte('checkin', from))
   }, [asOf])
   const resv = useMemo(() => (data ?? []).filter((r) => !EXCLUDE_STATUS.has(r.status ?? '')), [data])
@@ -66,13 +66,13 @@ export default function SameDayPage() {
       const ch = r.channel || '不明'
       if (out[m] && aliveAt(r, asOf)) {
         const g = (out[m].cur[ch] ??= emptyAgg())
-        g.rev += r.revenue_settled ?? 0; g.rn += Math.max(r.nights ?? 1, 1); g.guests += r.guests_total ?? 0
+        g.rev += (r.revenue_net ?? r.revenue_settled) ?? 0; g.rn += Math.max(r.nights ?? 1, 1); g.guests += r.guests_total ?? 0
       }
       // この予約(前年の宿泊月)を、1年後の表示月の「前」列へ入れる（2025-07予約→宿泊月2026-07の前年）
       const dispM = nextYr(m)
       if (out[dispM] && aliveAt(r, prevAsOf)) {
         const g = (out[dispM].prev[ch] ??= emptyAgg())
-        g.rev += r.revenue_settled ?? 0; g.rn += Math.max(r.nights ?? 1, 1); g.guests += r.guests_total ?? 0
+        g.rev += (r.revenue_net ?? r.revenue_settled) ?? 0; g.rn += Math.max(r.nights ?? 1, 1); g.guests += r.guests_total ?? 0
       }
     }
     return out

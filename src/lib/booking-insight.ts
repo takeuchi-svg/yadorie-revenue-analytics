@@ -17,7 +17,7 @@ export async function buildBookingInsightMaterial(sb: SupabaseClient, facility: 
   const tPrev = shiftYr(today)             // 前年の同じ日付（前年同日の基準時点）
   const from = `${Number(asOf.slice(0, 4)) - 2}-01-01`
   const [resv, flow, onhand, actions, budget, occ, kpi] = await Promise.all([
-    fetchAll<any>(() => sb.from('raw_reservation').select('checkin, nights, revenue_settled, channel, status, booking_date, cancel_date').eq('facility', facility).gte('checkin', from)).catch(() => []),
+    fetchAll<any>(() => sb.from('raw_reservation').select('checkin, nights, revenue_settled, revenue_net, channel, status, booking_date, cancel_date').eq('facility', facility).gte('checkin', from)).catch(() => []),
     fetchAll<any>(() => sb.from('mart_booking_flow').select('flow_date, channel, new_room_nights, new_revenue').eq('facility', facility)).catch(() => []),
     fetchAll<any>(() => sb.from('mart_onhand').select('stay_date, channel, rooms, revenue').eq('facility', facility)).catch(() => []),
     fetchAll<any>(() => sb.from('raw_marketing_action').select('channel, action_type, title, start_date, end_date').eq('facility', facility)).catch(() => []),
@@ -38,11 +38,11 @@ export async function buildBookingInsightMaterial(sb: SupabaseClient, facility: 
   for (const r of resv as any[]) {
     const m = (r.checkin ?? '').slice(0, 7); if (!m) continue
     if (aliveNow(r)) {
-      salesNow[m] = (salesNow[m] ?? 0) + (r.revenue_settled ?? 0)
+      salesNow[m] = (salesNow[m] ?? 0) + ((r.revenue_net ?? r.revenue_settled) ?? 0)
       rnNow[m] = (rnNow[m] ?? 0) + (r.nights ?? 0)
       ;(chNow[m] ??= {}); chNow[m][r.channel] = (chNow[m][r.channel] ?? 0) + (r.nights ?? 0)
     }
-    if (aliveAt(r, tPrev)) salesPrevSame[m] = (salesPrevSame[m] ?? 0) + (r.revenue_settled ?? 0)
+    if (aliveAt(r, tPrev)) salesPrevSame[m] = (salesPrevSame[m] ?? 0) + ((r.revenue_net ?? r.revenue_settled) ?? 0)
   }
   const curM = today.slice(0, 7)
   const pastMonths = [...new Set(Object.keys(salesNow))].filter((m) => m < curM).sort().slice(-3).reverse()  // 先月を先頭に

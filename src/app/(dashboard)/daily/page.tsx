@@ -78,7 +78,7 @@ const M4: { key: keyof Metrics; label: string; fmt: (v: any) => string; sub?: { 
 ]
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-interface Res { checkin: string; nights: number | null; revenue_settled: number | null; guests_total: number | null; status: string | null; booking_date: string | null; cancel_date: string | null }
+interface Res { checkin: string; nights: number | null; revenue_settled: number | null; revenue_net?: number | null; guests_total: number | null; status: string | null; booking_date: string | null; cancel_date: string | null }
 interface RateRow { snapshot_date: string; stay_date: string; rate_rank: number | null }
 type CmpMode = 'budget' | 'py'
 type Agg = { r: number; g: number; v: number }  // rooms / guests / revenue
@@ -118,7 +118,7 @@ export default function DailyPage() {
     setLoadingBase(true)
     Promise.all([
       fetchAll(() => supabase.from('mart_occupancy_daily').select('date, rooms_sold').eq('facility', current).order('date')),
-      fetchAll(() => supabase.from('raw_reservation').select('checkin, nights, revenue_settled, guests_total, status, booking_date, cancel_date').eq('facility', current).order('id')),
+      fetchAll(() => supabase.from('raw_reservation').select('checkin, nights, revenue_settled, revenue_net, guests_total, status, booking_date, cancel_date').eq('facility', current).order('id')),
       fetchAll(() => supabase.from('budget_daily').select('date, rooms_sold, occ, companion, guests, guest_unit, room_unit, total_revenue').eq('facility', current).eq('version', '当初').order('date')),
       supabase.from('dim_operating_days').select('month, rooms').eq('facility', current).then((r) => r),
       fetchAll(() => supabase.from('mart_onhand').select('stay_date, rooms, guests, revenue').eq('facility', current)),
@@ -138,7 +138,7 @@ export default function DailyPage() {
       const po: Record<string, Agg> = {}
       for (const r of res as Res[]) {
         const nights = Math.max(r.nights ?? 1, 1)
-        const per = (r.revenue_settled ?? 0) / nights
+        const per = ((r.revenue_net ?? r.revenue_settled) ?? 0) / nights
         const isCO = r.status === 'C/O'
         const alivePrev = aliveAt(r, tPrev)   // 前年同日時点で生存していた予約
         if (!isCO && !alivePrev) continue

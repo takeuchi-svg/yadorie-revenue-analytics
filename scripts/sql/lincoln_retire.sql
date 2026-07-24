@@ -21,7 +21,7 @@ SELECT
   COALESCE(channel, '不明') AS channel,
   COUNT(*) AS bookings,
   COUNT(*) FILTER (WHERE status = 'キャンセル') AS cancels,
-  SUM(revenue_settled) FILTER (WHERE status = 'キャンセル') AS cancel_revenue,
+  SUM(COALESCE(revenue_net, revenue_settled)) FILTER (WHERE status = 'キャンセル') AS cancel_revenue,
   CASE WHEN COUNT(*) > 0
     THEN ROUND(COUNT(*) FILTER (WHERE status = 'キャンセル')::NUMERIC / COUNT(*), 4) END AS cxl_rate
 FROM raw_reservation
@@ -58,10 +58,10 @@ DROP VIEW IF EXISTS mart_plan_monthly;
 CREATE VIEW mart_plan_monthly AS
 SELECT facility, TO_CHAR(checkin, 'YYYY-MM') AS month, plan,
   COUNT(*) AS bookings,
-  SUM(revenue_settled) AS revenue,
+  SUM(COALESCE(revenue_net, revenue_settled)) AS revenue,
   SUM(nights) AS rooms_total,
   SUM(guests_total * GREATEST(nights, 1)) AS guests,
-  CASE WHEN SUM(nights) > 0 THEN ROUND(SUM(revenue_settled)::NUMERIC / SUM(nights)) END AS adr
+  CASE WHEN SUM(nights) > 0 THEN ROUND(SUM(COALESCE(revenue_net, revenue_settled))::NUMERIC / SUM(nights)) END AS adr
 FROM raw_reservation
 WHERE status = 'C/O' AND nights > 0 AND plan IS NOT NULL AND plan <> ''
 GROUP BY facility, TO_CHAR(checkin, 'YYYY-MM'), plan;
@@ -79,9 +79,9 @@ SELECT facility, TO_CHAR(checkin, 'YYYY-MM') AS month,
     ELSE '5名以上'
   END AS group_size,
   COUNT(*) AS bookings,
-  SUM(revenue_settled) AS revenue,
+  SUM(COALESCE(revenue_net, revenue_settled)) AS revenue,
   SUM(nights) AS rooms_total,
-  CASE WHEN SUM(nights) > 0 THEN ROUND(SUM(revenue_settled)::NUMERIC / SUM(nights)) END AS adr
+  CASE WHEN SUM(nights) > 0 THEN ROUND(SUM(COALESCE(revenue_net, revenue_settled))::NUMERIC / SUM(nights)) END AS adr
 FROM raw_reservation
 WHERE status = 'C/O' AND nights > 0
 GROUP BY facility, TO_CHAR(checkin, 'YYYY-MM'), group_size;
@@ -92,16 +92,16 @@ DROP VIEW IF EXISTS mart_adr_band_monthly;
 CREATE VIEW mart_adr_band_monthly AS
 SELECT facility, TO_CHAR(checkin, 'YYYY-MM') AS month,
   CASE
-    WHEN revenue_settled::NUMERIC / GREATEST(nights, 1) < 30000 THEN '〜¥30K'
-    WHEN revenue_settled::NUMERIC / GREATEST(nights, 1) < 50000 THEN '¥30-50K'
-    WHEN revenue_settled::NUMERIC / GREATEST(nights, 1) < 70000 THEN '¥50-70K'
-    WHEN revenue_settled::NUMERIC / GREATEST(nights, 1) < 100000 THEN '¥70-100K'
+    WHEN COALESCE(revenue_net, revenue_settled)::NUMERIC / GREATEST(nights, 1) < 30000 THEN '〜¥30K'
+    WHEN COALESCE(revenue_net, revenue_settled)::NUMERIC / GREATEST(nights, 1) < 50000 THEN '¥30-50K'
+    WHEN COALESCE(revenue_net, revenue_settled)::NUMERIC / GREATEST(nights, 1) < 70000 THEN '¥50-70K'
+    WHEN COALESCE(revenue_net, revenue_settled)::NUMERIC / GREATEST(nights, 1) < 100000 THEN '¥70-100K'
     ELSE '¥100K〜'
   END AS band,
   COUNT(*) AS bookings,
-  SUM(revenue_settled) AS revenue,
+  SUM(COALESCE(revenue_net, revenue_settled)) AS revenue,
   SUM(nights) AS rooms_total,
-  CASE WHEN SUM(nights) > 0 THEN ROUND(SUM(revenue_settled)::NUMERIC / SUM(nights)) END AS adr
+  CASE WHEN SUM(nights) > 0 THEN ROUND(SUM(COALESCE(revenue_net, revenue_settled))::NUMERIC / SUM(nights)) END AS adr
 FROM raw_reservation
 WHERE status = 'C/O' AND nights > 0
 GROUP BY facility, TO_CHAR(checkin, 'YYYY-MM'), band;
@@ -121,10 +121,10 @@ SELECT facility, TO_CHAR(checkin, 'YYYY-MM') AS month,
     WHEN GREATEST(checkin - booking_date, 0) <= 111 THEN '84-111日前'
     ELSE '112日以上前'
   END AS bucket,
-  SUM(revenue_settled) AS revenue,
+  SUM(COALESCE(revenue_net, revenue_settled)) AS revenue,
   SUM(nights) AS rooms_total,
   SUM(guests_total * GREATEST(nights, 1)) AS guests,
-  CASE WHEN SUM(nights) > 0 THEN ROUND(SUM(revenue_settled)::NUMERIC / SUM(nights)) END AS adr,
+  CASE WHEN SUM(nights) > 0 THEN ROUND(SUM(COALESCE(revenue_net, revenue_settled))::NUMERIC / SUM(nights)) END AS adr,
   COUNT(*) AS count
 FROM raw_reservation
 WHERE status = 'C/O' AND nights > 0 AND booking_date IS NOT NULL

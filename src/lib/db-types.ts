@@ -9,6 +9,10 @@ export interface ReservationRow {
   checkin: string | null
   nights: number | null
   revenue_settled: number | null
+  revenue_net?: number | null      // 税抜き金額（=請求−消費税−入湯税−宿泊税）。売上分析の正
+  consumption_tax?: number | null
+  bathing_tax?: number | null
+  lodging_tax?: number | null
   guests_total: number | null
   prefecture: string | null
   status?: string | null

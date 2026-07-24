@@ -59,6 +59,11 @@ export function transformReservation(
         adults: parseInt10(findCol(r, '大人', '大人人数')),
         children: parseInt10(findCol(r, '子供', '子供人数', '小人')),
         revenue_settled: parseInt10(findCol(r, '精算額', '売上', '合計金額', '請求額', '請求金額')),
+        // 税抜き金額（＝請求金額−消費税−入湯税−宿泊税）＝売上分析の正（PL会計と同基準）。税額列も保持
+        revenue_net: parseInt10(findCol(r, '税抜き金額', '税抜金額', '税抜')),
+        consumption_tax: parseInt10(findCol(r, '消費税')),
+        bathing_tax: parseInt10(findCol(r, '入湯税')),
+        lodging_tax: parseInt10(findCol(r, '宿泊税')),
         room_raw: findCol(r, '部屋名', '客室', '部屋', '客室名') || null,
         room_parsed: firstSegment(findCol(r, '部屋名', '客室', '部屋', '客室名')),
         room_type: firstSegment(findCol(r, '部屋タイプ名', '部屋タイプ', '客室タイプ')),

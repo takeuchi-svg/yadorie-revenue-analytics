@@ -29,9 +29,9 @@ SELECT
   SUM(nights) FILTER (WHERE status IN ('予約確定','重要予約'))         AS room_nights_confirmed,  -- 確定（未宿泊）
   SUM(nights) FILTER (WHERE status = '未確認')                         AS room_nights_tentative,  -- 未確認
   SUM(guests_total * GREATEST(nights, 1))                              AS guest_nights,
-  SUM(revenue_settled)                                                 AS revenue,
+  SUM(COALESCE(revenue_net, revenue_settled))                                                 AS revenue,
   CASE WHEN SUM(nights) > 0
-    THEN ROUND(SUM(revenue_settled)::NUMERIC / SUM(nights)) END        AS adr
+    THEN ROUND(SUM(COALESCE(revenue_net, revenue_settled))::NUMERIC / SUM(nights)) END        AS adr
 FROM raw_reservation
 WHERE status IN ('未確認','予約確定','重要予約','C/O')
 GROUP BY facility, TO_CHAR(checkin, 'YYYY-MM');
